@@ -65,6 +65,12 @@
         </button>
       </div>
       <nav id="chatList" class="chat-list"></nav>
+      <div class="side-foot">
+        <button type="button" class="side-code" id="codeBtn">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="side-code-text"><span>yAI Code</span><small>Use yAI in your terminal</small></span>
+        </button>
+      </div>
     </aside>
     <div class="side-backdrop" id="sideBackdrop" hidden></div>
 
@@ -158,6 +164,41 @@
       <div class="drop-overlay" aria-hidden="true"><div>Drop images or PDFs to attach</div></div>
     </div>
   </div>
+
+  <!-- yAI Code setup (opened from the sidebar) -->
+  <dialog id="codeDialog" class="code-dialog" aria-labelledby="codeTitle">
+    <div class="code-head">
+      <h2 id="codeTitle">yAI Code</h2>
+      <button type="button" class="icon-btn" id="codeClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <p class="muted">A coding agent for your terminal that uses the same models as this site. It works on the files in the folder you start it from, and asks before it edits a file or runs a command.</p>
+    <ol class="code-steps">
+      <li>
+        <strong>Install Node.js 18 or newer</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a>. Check it with:
+        <div class="code-line"><code>node --version</code><button type="button" class="code-copy">Copy</button></div>
+      </li>
+      <li>
+        <strong>Download yAI</strong> and install the <code>yai</code> command (once):
+        <div class="code-line"><code>git clone https://github.com/yousefk07/yAI.git</code><button type="button" class="code-copy">Copy</button></div>
+        <div class="code-line"><code>cd yAI &amp;&amp; npm link</code><button type="button" class="code-copy">Copy</button></div>
+      </li>
+      <li>
+        <strong>Open your project and start it:</strong>
+        <div class="code-line"><code>cd path/to/your/project</code><button type="button" class="code-copy">Copy</button></div>
+        <div class="code-line"><code>yai</code><button type="button" class="code-copy">Copy</button></div>
+      </li>
+      <li><strong>Sign in</strong> with the same username and password you use here.</li>
+    </ol>
+    <h3>Good to know</h3>
+    <ul class="code-tips">
+      <li><kbd>Shift</kbd>+<kbd>Tab</kbd> switches between asking first, accepting edits, and plan (read-only).</li>
+      <li><code>/model</code> picks a model, <code>/help</code> lists every command, <kbd>Esc</kbd> stops yAI.</li>
+      <li><code>@file</code> attaches a file. <code>yai -c</code> continues the last conversation in a folder.</li>
+      <li><code>yai -p "question"</code> answers once without changing anything.</li>
+    </ul>
+  </dialog>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
   <script src="/md.js"></script>
@@ -422,6 +463,18 @@
     });
     $("sideClose").addEventListener("click", () => (isPhone() ? closeSidebar() : setCollapsed(true)));
     $("sideBackdrop").addEventListener("click", closeSidebar);
+
+    // yAI Code setup instructions.
+    $("codeBtn").addEventListener("click", () => { closeSidebar(); $("codeDialog").showModal(); });
+    $("codeClose").addEventListener("click", () => $("codeDialog").close());
+    $("codeDialog").addEventListener("click", (e) => { if (e.target === $("codeDialog")) $("codeDialog").close(); });
+    $("codeDialog").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".code-copy");
+      if (!btn) return;
+      try { await navigator.clipboard.writeText(btn.previousElementSibling.textContent); } catch { return; }
+      btn.textContent = "Copied";
+      setTimeout(() => (btn.textContent = "Copy"), 1500);
+    });
 
     $("loginBtn").addEventListener("click", () => showGate("", { mode: "login", dialog: true }));
     $("welcomeSignup").addEventListener("click", () => showGate("", { mode: "signup", dialog: true }));
@@ -1199,6 +1252,15 @@
       updateSendState();
     }
     input.addEventListener("input", autosize);
+    // The cloud GPU sleeps when idle and takes a while to wake. Start waking it as soon as someone types to it,
+    // so the wake-up happens while they write instead of after they press send.
+    let cloudCheckedAt = 0;
+    input.addEventListener("input", () => {
+      if (!input.value.trim() || !modelSel.selectedOptions[0]?.dataset.cloud || controller) return;
+      if (warm.model === modelSel.value || Date.now() - cloudCheckedAt < 60e3) return;
+      cloudCheckedAt = Date.now();
+      warmup(modelSel.value);
+    });
 
     document.querySelectorAll(".suggestion").forEach((b) =>
       b.addEventListener("click", () => {
