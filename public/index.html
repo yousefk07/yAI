@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="yAI" />
+  <title>yAI</title>
+  <meta name="description" content="Chat with yAI" />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/logo.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- The mark, drawn once and reused everywhere with <use href="#yai-mark"> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="yai-mark" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="16" fill="var(--ink)" />
+      <path d="M19 17 L32.5 35.5 M45 17 L28 48" fill="none" stroke="var(--on-ink)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" />
+      <circle cx="45.5" cy="45.5" r="4.2" fill="var(--on-ink)" />
+    </symbol>
+  </svg>
+
+  <!-- Sign in / sign up / guest access -->
+  <section id="gate" class="gate" hidden>
+    <form id="gateForm" class="gate-card" novalidate>
+      <button type="button" class="icon-btn gate-close" id="gateClose" aria-label="Close" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <div class="wordmark"><svg class="mark" aria-hidden="true"><use href="#yai-mark"/></svg>yAI</div>
+      <h1 id="gateTitle">Welcome back</h1>
+      <p class="muted" id="gateSub">Log in to see your saved chats.</p>
+      <div class="segmented" role="tablist" id="gateTabs">
+        <button type="button" role="tab" data-mode="login">Log in</button>
+        <button type="button" role="tab" data-mode="signup">Sign up</button>
+        <button type="button" role="tab" data-mode="guest">Guest</button>
+      </div>
+      <label class="field" data-for="login signup"><span>Username</span>
+        <input id="gateUser" autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
+      <label class="field" data-for="login signup"><span>Password</span>
+        <input id="gatePass" type="password" /></label>
+      <label class="field" data-for="signup guest"><span>Access code</span>
+        <input id="gateInput" type="password" autocomplete="off" /></label>
+      <p id="gateError" class="gate-error" role="alert"></p>
+      <button class="btn-primary" type="submit" id="gateSubmit">Log in</button>
+    </form>
+  </section>
+
+  <div id="shell" class="shell" hidden>
+    <!-- Saved chats (signed-in users) -->
+    <aside id="sidebar" class="sidebar" aria-label="Your chats" hidden>
+      <div class="sidebar-head">
+        <button type="button" class="icon-btn side-close" id="sideClose" aria-label="Hide chats" title="Hide chats">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+        <button type="button" class="side-new" id="sideNew">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          New chat
+        </button>
+      </div>
+      <nav id="chatList" class="chat-list"></nav>
+    </aside>
+    <div class="side-backdrop" id="sideBackdrop" hidden></div>
+
+    <div id="app" class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" title="Show chats" hidden>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.6"/></svg>
+          </button>
+          <a href="/" class="brand" id="home" title="New chat">
+            <svg class="mark" aria-hidden="true"><use href="#yai-mark"/></svg>
+            <span class="brand-name">yAI</span>
+          </a>
+          <span class="status" id="status" title=""><span class="dot"></span><span id="statusText">Connecting</span></span>
+        </div>
+        <div class="topbar-right">
+          <select id="model" aria-hidden="true" tabindex="-1" hidden></select>
+          <div class="model-picker" id="modelPicker" hidden>
+            <button type="button" class="model-btn" id="modelBtn" aria-haspopup="listbox" aria-expanded="false">
+              <span id="modelBtnLabel">Model</span>
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="model-menu" id="modelMenu" role="listbox" aria-label="Model" hidden></div>
+          </div>
+          <button class="icon-btn" id="newChat" type="button" title="New chat" aria-label="New chat">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="account" id="account">
+            <button type="button" class="btn-ghost" id="loginBtn">Log in</button>
+            <button type="button" class="avatar" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" hidden></button>
+            <div class="account-menu" id="accountMenu" role="menu" hidden>
+              <div class="account-who">Signed in as <strong id="accountName"></strong></div>
+              <a href="/admin" role="menuitem" class="menu-item" id="adminLink" hidden>Admin</a>
+              <button type="button" role="menuitem" class="menu-item" id="logoutBtn">Log out</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main id="scroller" class="scroller">
+        <div id="welcome" class="welcome">
+          <h2>What can I help with?</h2>
+          <p class="muted">Ask a question, or attach an image or PDF to talk about it.</p>
+          <ul class="suggestions">
+            <li><button type="button" class="suggestion" data-prompt="Explain how the stock market works, simply">Explain how the stock market works, simply</button></li>
+            <li><button type="button" class="suggestion" data-prompt="Write a short, catchy Instagram caption for a gym">Write a short Instagram caption for a gym</button></li>
+            <li><button type="button" class="suggestion" data-prompt="Plan a 3-day trip to Toronto on a budget">Plan a 3-day trip to Toronto on a budget</button></li>
+            <li><button type="button" class="suggestion" data-prompt="Write a Python function that reverses a string">Write a Python function that reverses a string</button></li>
+          </ul>
+          <p class="welcome-note" id="welcomeNote">Chatting as a guest. <button type="button" class="link-btn" id="welcomeSignup">Create an account</button> to keep your chat history.</p>
+        </div>
+        <div id="messages" class="messages"></div>
+      </main>
+
+      <footer class="composer-wrap">
+        <form id="form" class="composer">
+          <div id="loadbar" class="loadbar" role="status" aria-live="polite" hidden>
+            <span id="loadText">Loading model</span><span id="loadPct"></span>
+            <div class="loadbar-track"><div class="loadbar-fill" id="loadFill"></div></div>
+          </div>
+          <div id="tray" class="tray" hidden></div>
+          <textarea id="input" rows="1" placeholder="Ask anything" aria-label="Message"></textarea>
+          <div class="composer-bar">
+            <button id="attach" class="icon-btn" type="button" aria-label="Attach image or PDF" title="Attach image or PDF">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button id="imageMode" class="mode-btn" type="button" aria-pressed="false" title="Generate an image" hidden>
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 17.5l5-5 4 4 2.5-2.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span>Image</span>
+            </button>
+            <input id="fileInput" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
+            <span class="composer-hint hide-sm">Enter to send · Shift + Enter for a new line</span>
+            <button id="send" class="send" type="submit" aria-label="Send" disabled>
+              <svg class="icon-send" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg class="icon-stop" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </form>
+        <p class="fineprint">Answers can be wrong. Conversations are visible to the site admin.</p>
+      </footer>
+
+      <div class="drop-overlay" aria-hidden="true"><div>Drop images or PDFs to attach</div></div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
+  <script src="/md.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const messagesEl = $("messages"), input = $("input"), sendBtn = $("send");
+    const modelSel = $("model"), scroller = $("scroller"), tray = $("tray");
+
+    const store = {
+      get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+      set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    };
+    const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+
+    let accessCode = store.get("accessCode", "");
+    const visitorId = store.get("visitorId", null) || uuid();
+    store.set("visitorId", visitorId);
+    let user = null;        // signed-in username, or null for guests
+    let isAdmin = false;    // signed in with an admin account
+    let chatList = [];      // signed-in users' saved chats: [{ id, title, updatedAt }]
+    const newChatObj = () => ({ id: uuid(), history: [] });
+    const chatKey = () => (user ? `chat:${user.toLowerCase()}` : "chat");
+    let chat = newChatObj(); // opening the site always starts on the home screen; past chats are in the sidebar
+    let controller = null;
+
+    // Full-size images are too big to keep, so saved chats hold only thumbnails.
+    // Generated images are kept by id (saved on the server); an unsaved guest image isn't kept at all.
+    const stripImages = (history) =>
+      history.map((m) => {
+        if (m.attachments) return { ...m, attachments: m.attachments.map(({ images, ...rest }) => rest) };
+        if (m.image?.data) return { ...m, image: { prompt: m.image.prompt, id: m.image.id } };
+        return m;
+      });
+
+    const chatTitle = (history) => {
+      const first = history.find((m) => m.role === "user");
+      const text = (first?.content || first?.attachments?.map((a) => a.name).join(", ") || "New chat").replace(/\s+/g, " ").trim();
+      return text.length > 60 ? text.slice(0, 57) + "…" : text;
+    };
+
+    let remoteTimer = null;
+    function saveChat() {
+      store.set(chatKey(), { ...chat, history: stripImages(chat.history) });
+      if (!user || !chat.history.length) return;
+      // Signed in: also save to the account (debounced), and keep the sidebar list current.
+      const entry = { id: chat.id, title: chatTitle(chat.history), updatedAt: new Date().toISOString() };
+      chatList = [entry, ...chatList.filter((c) => c.id !== chat.id)];
+      renderChatList();
+      clearTimeout(remoteTimer);
+      const snapshot = { id: chat.id, title: entry.title, messages: stripImages(chat.history) };
+      remoteTimer = setTimeout(() => {
+        fetch("/api/chats", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot) }).catch(() => {});
+      }, 400);
+    }
+
+    async function api(path, opts = {}) {
+      const r = await fetch(path, {
+        ...opts,
+        headers: { ...opts.headers, "x-access-code": accessCode, "x-visitor-id": visitorId },
+      });
+      if (r.status === 401) {
+        if (user) { user = null; updateAccountUI(); } // session expired
+        showGate(accessCode ? "That code isn't right." : "", { mode: accessCode ? "guest" : "login" });
+        throw Object.assign(new Error("locked"), { locked: true });
+      }
+      return r;
+    }
+
+    // ---------- Sign in / sign up / guest access ----------
+    let gateMode = "login";
+    const GATE_COPY = {
+      login: ["Welcome back", "Log in to see your saved chats.", "Log in"],
+      signup: ["Create an account", "Your chats are saved so you can pick up on any device.", "Create account"],
+      guest: ["Continue as a guest", "Enter the access code. Guest chats aren't saved to an account.", "Continue"],
+    };
+    function setGateMode(mode) {
+      gateMode = mode;
+      const [title, sub, cta] = GATE_COPY[mode];
+      $("gateTitle").textContent = title;
+      $("gateSub").textContent = sub;
+      $("gateSubmit").textContent = cta;
+      $("gateError").textContent = "";
+      document.querySelectorAll("#gateTabs [data-mode]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
+      document.querySelectorAll("#gateForm .field").forEach((f) => (f.hidden = !f.dataset.for.split(" ").includes(mode)));
+      $("gatePass").autocomplete = mode === "signup" ? "new-password" : "current-password";
+      const first = mode === "guest" ? $("gateInput") : $("gateUser").value ? $("gatePass") : $("gateUser");
+      setTimeout(() => first.focus(), 0);
+    }
+    document.querySelectorAll("#gateTabs [data-mode]").forEach((b) => b.addEventListener("click", () => setGateMode(b.dataset.mode)));
+
+    // As a page (nothing usable without access) or as a dialog over the app (from "Log in").
+    function showGate(error = "", { mode = "guest", dialog = false } = {}) {
+      $("gate").hidden = false;
+      $("gate").classList.toggle("dialog", dialog);
+      $("shell").hidden = dialog ? false : true;
+      $("gateClose").hidden = !dialog;
+      $("gateTabs").querySelector('[data-mode="guest"]').hidden = dialog;
+      setGateMode(mode);
+      $("gateError").textContent = error;
+      if (error) { $("gateForm").classList.remove("shake"); void $("gateForm").offsetWidth; $("gateForm").classList.add("shake"); }
+    }
+    function closeGate() { $("gate").hidden = true; input.focus(); }
+    $("gateClose").addEventListener("click", closeGate);
+    $("gate").addEventListener("click", (e) => { if (e.target === $("gate") && $("gate").classList.contains("dialog")) closeGate(); });
+
+    $("gateForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fail = (msg) => {
+        $("gateError").textContent = msg;
+        $("gateForm").classList.remove("shake"); void $("gateForm").offsetWidth; $("gateForm").classList.add("shake");
+      };
+      const code = $("gateInput").value.trim();
+      if (gateMode === "guest") {
+        if (!code) return fail("Enter the access code.");
+        accessCode = code;
+        if (await loadModels(true)) { store.set("accessCode", accessCode); showApp(); }
+        return;
+      }
+      const username = $("gateUser").value.trim(), password = $("gatePass").value;
+      if (!username || !password) return fail("Enter your username and password.");
+      if (gateMode === "signup" && !code) return fail("Enter the access code to create an account.");
+      $("gateSubmit").disabled = true;
+      try {
+        const r = await fetch(`/api/auth?action=${gateMode === "signup" ? "register" : "login"}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-visitor-id": visitorId },
+          body: JSON.stringify({ username, password, code }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return fail(data.error || "Something went wrong. Try again.");
+        $("gatePass").value = "";
+        await onSignedIn(data.user, data.admin);
+      } catch {
+        fail("Couldn't reach the server. Try again.");
+      } finally {
+        $("gateSubmit").disabled = false;
+      }
+    });
+
+    function showApp() {
+      $("gate").hidden = true;
+      $("shell").hidden = false;
+      input.focus();
+    }
+
+    // ---------- Accounts and saved chats ----------
+    async function onSignedIn(username, admin = false) {
+      const guestChat = chat; // keep whatever the guest was in the middle of
+      user = username;
+      isAdmin = admin;
+      updateAccountUI();
+      await loadChatList();
+      if (guestChat.history.length) { chat = guestChat; saveChat(); }
+      else chat = newChatObj();
+      renderHistory();
+      if (await loadModels(true)) showApp();
+    }
+
+    async function signOut() {
+      await fetch("/api/auth?action=logout", { method: "POST" }).catch(() => {});
+      try { localStorage.removeItem(chatKey()); } catch {}
+      user = null;
+      isAdmin = false;
+      chatList = [];
+      chat = newChatObj();
+      saveChat();
+      updateAccountUI();
+      renderHistory();
+      if (!(await loadModels(true))) return; // no access code saved: back to the sign-in screen
+      input.focus();
+    }
+
+    function updateAccountUI() {
+      $("loginBtn").hidden = !!user;
+      $("avatarBtn").hidden = !user;
+      $("avatarBtn").textContent = user ? user[0].toUpperCase() : "";
+      $("avatarBtn").title = user || "";
+      $("accountName").textContent = user || "";
+      $("sidebar").hidden = !user;
+      $("sideToggle").hidden = !user;
+      $("shell").classList.toggle("with-sidebar", !!user);
+      $("welcomeNote").hidden = !!user;
+      $("adminLink").hidden = !isAdmin;
+    }
+
+    async function loadChatList() {
+      try {
+        const r = await fetch("/api/chats", { cache: "no-store" });
+        chatList = r.ok ? (await r.json()).chats : [];
+      } catch {
+        chatList = [];
+      }
+      renderChatList();
+    }
+
+    function renderChatList() {
+      const groups = { Today: [], "Previous 7 days": [], Older: [] };
+      const now = Date.now(), dayStart = new Date().setHours(0, 0, 0, 0);
+      for (const c of chatList) {
+        const t = new Date(c.updatedAt).getTime();
+        (t >= dayStart ? groups.Today : now - t < 7 * 864e5 ? groups["Previous 7 days"] : groups.Older).push(c);
+      }
+      $("chatList").innerHTML = chatList.length
+        ? Object.entries(groups).filter(([, list]) => list.length).map(([name, list]) => `
+            <div class="chat-group">${name}</div>
+            ${list.map((c) => `
+              <div class="chat-item${c.id === chat.id ? " active" : ""}">
+                <button type="button" class="chat-open" data-id="${escapeHtml(c.id)}" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>
+                <button type="button" class="chat-del" data-id="${escapeHtml(c.id)}" aria-label="Delete chat">
+                  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>`).join("")}`).join("")
+        : '<p class="chat-empty">Your chats will show up here.</p>';
+    }
+
+    async function openChat(id) {
+      if (controller) controller.abort();
+      closeSidebar();
+      try {
+        const r = await fetch(`/api/chats?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+        if (!r.ok) throw new Error();
+        const { chat: saved } = await r.json();
+        chat = { id: saved.id, history: saved.messages || [] };
+        store.set(chatKey(), chat);
+        renderHistory();
+        renderChatList();
+        input.focus();
+      } catch {
+        alert("Couldn't open that chat. The host PC may be offline.");
+      }
+    }
+
+    async function deleteChat(id) {
+      if (!confirm("Delete this chat? This can't be undone.")) return;
+      chatList = chatList.filter((c) => c.id !== id);
+      renderChatList();
+      fetch(`/api/chats?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+      if (chat.id === id) startNewChat();
+    }
+
+    $("chatList").addEventListener("click", (e) => {
+      const del = e.target.closest(".chat-del");
+      if (del) return deleteChat(del.dataset.id);
+      const open = e.target.closest(".chat-open");
+      if (open && open.dataset.id !== chat.id) openChat(open.dataset.id);
+      else if (open) closeSidebar();
+    });
+
+    // Wide screens: the sidebar can be shown or hidden (remembered). Phones: it slides in as a drawer.
+    const isPhone = () => matchMedia("(max-width: 900px)").matches;
+    function setCollapsed(collapsed) {
+      $("shell").classList.toggle("side-collapsed", collapsed);
+      $("sideToggle").title = $("sideToggle").ariaLabel = collapsed ? "Show chats" : "Hide chats";
+      store.set("sidebarCollapsed", collapsed);
+    }
+    setCollapsed(store.get("sidebarCollapsed", false));
+    function openSidebar() { $("shell").classList.add("side-open"); $("sideBackdrop").hidden = false; }
+    function closeSidebar() { $("shell").classList.remove("side-open"); $("sideBackdrop").hidden = true; }
+    $("sideToggle").addEventListener("click", () => {
+      if (isPhone()) openSidebar();
+      else setCollapsed(!$("shell").classList.contains("side-collapsed"));
+    });
+    $("sideClose").addEventListener("click", () => (isPhone() ? closeSidebar() : setCollapsed(true)));
+    $("sideBackdrop").addEventListener("click", closeSidebar);
+
+    $("loginBtn").addEventListener("click", () => showGate("", { mode: "login", dialog: true }));
+    $("welcomeSignup").addEventListener("click", () => showGate("", { mode: "signup", dialog: true }));
+    $("avatarBtn").addEventListener("click", () => {
+      const open = $("accountMenu").hidden;
+      $("accountMenu").hidden = !open;
+      $("avatarBtn").setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", (e) => { if (!e.target.closest("#account")) $("accountMenu").hidden = true; });
+    $("logoutBtn").addEventListener("click", () => { $("accountMenu").hidden = true; signOut(); });
+
+    // ---------- Status / models ----------
+    function setStatus(ok, text, title = "") {
+      $("status").className = `status ${ok ? "ok" : "bad"}`;
+      $("statusText").textContent = text;
+      $("status").title = title;
+    }
+    async function loadModels(visit = false) {
+      try {
+        const r = await api(`/api/models${visit ? "?visit=1" : ""}`);
+        const data = await r.json();
+        if (!r.ok) { setStatus(false, "Offline", data.error); return true; }
+        if (!data.models.length) { setStatus(false, "No model loaded"); return true; }
+        const current = modelSel.value;
+        modelSel.innerHTML = "";
+        // Every visit starts on the default model (Qwen 3.5 4B); a switch lasts until the page is closed.
+        const preferred = current || data.default;
+        for (const m of data.models) {
+          const o = new Option(m.label, m.id, false, m.id === preferred);
+          o.dataset.desc = m.desc || "";
+          if (/-cloud$/.test(m.id)) o.dataset.cloud = "1";
+          modelSel.add(o);
+        }
+        buildModelMenu();
+        $("modelPicker").hidden = data.models.length < 1;
+        $("imageMode").hidden = !data.imageGen;
+        if (!data.imageGen && imageMode) setImageMode(false);
+        // PC offline: only the cloud model is available (and it's selected automatically).
+        setStatus(true, data.localOffline ? "Cloud only" : "Online", data.localOffline ? "The PC is offline; using the cloud model" : "");
+        // Opening the page never wakes the (paid) cloud GPU; picking it or sending to it does.
+        if (visit && !modelSel.selectedOptions[0]?.dataset.cloud) warmup(modelSel.value);
+        return true;
+      } catch (err) {
+        if (err.locked) return false;
+        setStatus(false, "Offline", err.message);
+        return true;
+      }
+    }
+    modelSel.addEventListener("change", () => { buildModelMenu(); warmup(modelSel.value); });
+
+    // Custom model menu (a native <select> can't show descriptions); the hidden <select> holds the state.
+    const modelBtn = $("modelBtn"), modelMenu = $("modelMenu");
+    function buildModelMenu() {
+      const current = modelSel.selectedOptions[0];
+      $("modelBtnLabel").textContent = current ? current.textContent : "Model";
+      modelMenu.innerHTML = [...modelSel.options].map((o) => `
+        <button type="button" class="model-option" role="option" data-id="${escapeHtml(o.value)}" aria-selected="${o.selected}">
+          <span class="model-option-text"><span class="model-option-name">${escapeHtml(o.textContent)}</span>
+          <span class="model-option-desc">${escapeHtml(o.dataset.desc || "")}</span></span>
+          <svg class="model-check" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>`).join("");
+    }
+    function toggleModelMenu(open = modelMenu.hidden) {
+      modelMenu.hidden = !open;
+      modelBtn.setAttribute("aria-expanded", String(open));
+      if (open) (modelMenu.querySelector('[aria-selected="true"]') || modelMenu.firstElementChild)?.focus();
+    }
+    modelBtn.addEventListener("click", () => toggleModelMenu());
+    modelMenu.addEventListener("click", (e) => {
+      const opt = e.target.closest(".model-option");
+      if (!opt) return;
+      toggleModelMenu(false);
+      modelBtn.focus();
+      if (opt.dataset.id === modelSel.value) return;
+      modelSel.value = opt.dataset.id;
+      modelSel.dispatchEvent(new Event("change"));
+    });
+    modelMenu.addEventListener("keydown", (e) => {
+      const items = [...modelMenu.querySelectorAll(".model-option")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+      else if (e.key === "Escape") { toggleModelMenu(false); modelBtn.focus(); }
+    });
+    document.addEventListener("click", (e) => { if (!modelMenu.hidden && !e.target.closest("#modelPicker")) toggleModelMenu(false); });
+
+    // ---------- Model loading ----------
+    // Asks the host PC to load the chosen model and shows LM Studio's real load progress.
+    const WARM_FOR_MS = 10 * 60e3; // re-check before sending if the last check is older than this
+    const warmedAt = {};
+    let warm = { model: null, ctrl: null, promise: null, loading: false };
+    const labelOf = (id) => [...modelSel.options].find((o) => o.value === id)?.textContent || "model";
+
+    function showLoad(model, progress) {
+      const pct = Math.round(progress * 100);
+      $("loadbar").hidden = false;
+      $("loadbar").classList.remove("error", "waking");
+      $("loadText").textContent = `Loading ${labelOf(model)}`;
+      $("loadPct").textContent = `${pct}%`;
+      $("loadFill").style.width = `${pct}%`;
+    }
+    // Cloud GPU cold start: no percentage is available, so show elapsed time and a moving bar.
+    function showWaking(seconds) {
+      $("loadbar").hidden = false;
+      $("loadbar").classList.remove("error");
+      $("loadbar").classList.add("waking");
+      $("loadText").textContent = "Waking up the cloud GPU. This can take a minute or two";
+      $("loadPct").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+    function showLoadError(message) {
+      $("loadbar").hidden = false;
+      $("loadbar").classList.remove("waking");
+      $("loadbar").classList.add("error");
+      $("loadText").textContent = message;
+      $("loadPct").textContent = "";
+      $("loadFill").style.width = "0";
+      setTimeout(() => { if ($("loadbar").classList.contains("error")) $("loadbar").hidden = true; }, 5000);
+    }
+
+    function warmup(model) {
+      if (!model) return Promise.resolve(true);
+      if (warm.model === model && warm.promise) return warm.promise;
+      warm.ctrl?.abort(); // switching models: stop watching the old load (it keeps loading on the PC)
+      const ctrl = new AbortController();
+      const job = { model, ctrl, promise: null, loading: false };
+      warm = job;
+      job.promise = (async () => {
+        try {
+          const r = await api(`/api/warmup?model=${encodeURIComponent(model)}`, { signal: ctrl.signal });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't load the model");
+          if (!(r.headers.get("content-type") || "").includes("event-stream")) { warmedAt[model] = Date.now(); return true; }
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const events = buf.split("\n\n");
+            buf = events.pop();
+            for (const e of events) {
+              if (!e.startsWith("data: ")) continue;
+              const ev = JSON.parse(e.slice(6));
+              if (ev.state === "error") throw new Error(`Couldn't load ${labelOf(model)}: ${ev.error}`);
+              if (ev.state === "loaded") warmedAt[model] = Date.now();
+              else if (ev.state === "loading") { job.loading = true; showLoad(model, ev.progress || 0); }
+              else if (ev.state === "waking") { job.loading = true; showWaking(ev.elapsed || 0); }
+            }
+          }
+          if (job.loading) showLoad(model, 1);
+          return !!warmedAt[model];
+        } catch (err) {
+          if (err.name !== "AbortError" && !err.locked) showLoadError(err.message);
+          return false;
+        } finally {
+          if (warm === job) {
+            const wasLoading = job.loading;
+            warm = { model: null, ctrl: null, promise: null, loading: false };
+            if (wasLoading && !$("loadbar").classList.contains("error")) setTimeout(() => { if (!warm.loading) $("loadbar").hidden = true; }, 600);
+            updateSendState();
+          }
+        }
+      })();
+      return job.promise;
+    }
+
+    // ---------- Attachments ----------
+    const MAX_IMAGES = 4;        // per message
+    const MAX_PDF_CHARS = 16000; // ~4k tokens, so a PDF fits the model's context alongside the chat
+    const MAX_PDF_PAGES = 60;
+    const SCAN_PAGES = 3;        // scanned PDFs: how many pages to send as images
+    const MAX_REQUEST_BYTES = 4_000_000; // Vercel rejects request bodies over 4.5 MB
+    let pending = [];
+
+    const imageCount = () =>
+      pending.reduce((n, p) => n + (p.status === "error" ? 0 : p.kind === "image" ? 1 : (p.scans || []).length), 0);
+
+    $("attach").addEventListener("click", () => $("fileInput").click());
+    $("fileInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+    input.addEventListener("paste", (e) => {
+      const files = [...(e.clipboardData?.files || [])];
+      if (files.length) { e.preventDefault(); addFiles(files); }
+    });
+    let dragDepth = 0;
+    $("app").addEventListener("dragenter", (e) => {
+      if (![...e.dataTransfer.types].includes("Files")) return;
+      e.preventDefault(); dragDepth++; $("app").classList.add("dragging");
+    });
+    $("app").addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
+    $("app").addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("app").classList.remove("dragging"); } });
+    $("app").addEventListener("drop", (e) => {
+      e.preventDefault(); dragDepth = 0; $("app").classList.remove("dragging");
+      addFiles(e.dataTransfer.files);
+    });
+
+    function addFiles(list) {
+      for (const file of list) {
+        const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+        const isImage = file.type.startsWith("image/");
+        const item = { id: uuid(), kind: isPdf ? "pdf" : "image", name: file.name || "Pasted image", status: "loading" };
+        if (!isPdf && !isImage) fail(item, "Only images and PDFs");
+        else if (file.size > 30e6) fail(item, "Too large (30 MB max)");
+        else if (isImage && imageCount() >= MAX_IMAGES) fail(item, `${MAX_IMAGES} images max`);
+        pending.push(item);
+        if (item.status === "loading") {
+          (isPdf ? readPdf(file, item) : readImage(file, item))
+            .catch((err) => fail(item, err.message || "Couldn't read file"))
+            .finally(renderTray);
+        }
+      }
+      renderTray();
+      input.focus();
+    }
+
+    function fail(item, message) {
+      item.status = "error";
+      item.error = message;
+      setTimeout(() => { pending = pending.filter((p) => p !== item); renderTray(); }, 4000);
+    }
+
+    function toJpeg(source, w, h, max, quality) {
+      const s = Math.min(1, max / Math.max(w, h));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(w * s));
+      c.height = Math.max(1, Math.round(h * s));
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(source, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", quality);
+    }
+
+    async function readImage(file, item) {
+      const url = URL.createObjectURL(file);
+      try {
+        const img = new Image();
+        img.src = url;
+        await img.decode().catch(() => { throw new Error("Unsupported image format"); });
+        item.images = [toJpeg(img, img.naturalWidth, img.naturalHeight, 1280, 0.85)];
+        item.thumb = toJpeg(img, img.naturalWidth, img.naturalHeight, 160, 0.7);
+        item.status = "ready";
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    let pdfjsPromise = null;
+    function loadPdfJs() {
+      return (pdfjsPromise ||= new Promise((resolve, reject) => {
+        const base = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+        const s = document.createElement("script");
+        s.src = base + "pdf.min.js";
+        s.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = base + "pdf.worker.min.js"; resolve(pdfjsLib); };
+        s.onerror = () => { pdfjsPromise = null; reject(new Error("Couldn't load the PDF reader")); };
+        document.head.appendChild(s);
+      }));
+    }
+
+    async function renderPage(page, max, quality) {
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: max / Math.max(base.width, base.height) });
+      const c = document.createElement("canvas");
+      c.width = Math.ceil(viewport.width);
+      c.height = Math.ceil(viewport.height);
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      return c.toDataURL("image/jpeg", quality);
+    }
+
+    async function readPdf(file, item) {
+      const pdfjs = await loadPdfJs();
+      let doc;
+      try {
+        doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      } catch (err) {
+        throw new Error(err?.name === "PasswordException" ? "PDF is password-protected" : "Couldn't open this PDF");
+      }
+      item.pages = doc.numPages;
+      item.thumb = await renderPage(await doc.getPage(1), 160, 0.7);
+
+      let text = "";
+      for (let i = 1; i <= Math.min(doc.numPages, MAX_PDF_PAGES) && text.length < MAX_PDF_CHARS; i++) {
+        const content = await (await doc.getPage(i)).getTextContent();
+        const pageText = content.items.map((t) => t.str + (t.hasEOL ? "\n" : " ")).join("").replace(/[ \t]+/g, " ").trim();
+        if (pageText) text += `\n\n[Page ${i}]\n${pageText}`;
+      }
+
+      if (text.replace(/\[Page \d+\]|\s/g, "").length < 20) {
+        // Scanned PDF with no text layer: send the first pages as images instead.
+        item.scans = [];
+        for (let i = 1; i <= Math.min(doc.numPages, SCAN_PAGES) && imageCount() < MAX_IMAGES; i++) {
+          item.scans.push(await renderPage(await doc.getPage(i), 1280, 0.8));
+        }
+        if (!item.scans.length) throw new Error(`${MAX_IMAGES} images max`);
+        item.images = item.scans;
+      } else {
+        item.truncated = text.length > MAX_PDF_CHARS || doc.numPages > MAX_PDF_PAGES;
+        item.text = text.slice(0, MAX_PDF_CHARS).trim();
+      }
+      item.status = "ready";
+    }
+
+    const chipSub = (p) =>
+      p.status === "loading" ? "Reading…" :
+      p.status === "error" ? p.error :
+      p.kind === "image" ? "Image" :
+      `${p.pages} page${p.pages === 1 ? "" : "s"}${p.scans ? " · scanned" : p.truncated ? " · partly read" : ""}`;
+
+    function renderTray() {
+      tray.hidden = !pending.length;
+      tray.innerHTML = pending.map((p) => `
+        <div class="chip ${p.status}" data-id="${p.id}">
+          ${p.thumb ? `<img src="${p.thumb}" alt="">` : `<div class="chip-icon">${p.kind === "pdf" ? "PDF" : "IMG"}</div>`}
+          <div class="chip-text">
+            <div class="chip-name">${escapeHtml(p.name)}</div>
+            <div class="chip-sub">${escapeHtml(chipSub(p))}</div>
+          </div>
+          <button type="button" class="chip-x" aria-label="Remove ${escapeHtml(p.name)}">×</button>
+        </div>`).join("");
+      updateSendState();
+    }
+    tray.addEventListener("click", (e) => {
+      const x = e.target.closest(".chip-x");
+      if (!x) return;
+      pending = pending.filter((p) => p.id !== x.closest(".chip").dataset.id);
+      renderTray();
+      input.focus();
+    });
+
+    // Turns the chat history into the model's message format. Attachments are sent
+    // in full only for the latest message that has them, to keep within the context window.
+    function toApiMessages(history) {
+      let lastWithFiles = -1;
+      history.forEach((m, i) => { if (m.role === "user" && m.attachments?.length) lastWithFiles = i; });
+      return history.map((m, i) => {
+        if (m.role !== "user") return { role: m.role, content: m.image ? `[Generated an image of: "${m.image.prompt}"]` : m.content };
+        let text = m.content || "";
+        const atts = m.attachments || [];
+        const images = [];
+        if (i === lastWithFiles) {
+          for (const a of atts) {
+            if (a.text) text += `\n\n[Attached PDF "${a.name}", ${a.pages} pages${a.truncated ? "; only the first part is included" : ""}]\n${a.text}`;
+            else if (a.images?.length) {
+              images.push(...a.images);
+              if (a.kind === "pdf") text += `\n\n[Attached scanned PDF "${a.name}": first ${a.images.length} page(s) shown as images]`;
+            } else text += `\n\n[The attachment "${a.name}" is no longer available]`;
+          }
+        } else if (atts.length) {
+          text += `\n\n[Earlier attachment(s), no longer available: ${atts.map((a) => a.name).join(", ")}]`;
+        }
+        if (!images.length) return { role: "user", content: text };
+        return {
+          role: "user",
+          content: [{ type: "text", text: text || "Please look at the attached image." },
+            ...images.map((url) => ({ type: "image_url", image_url: { url } }))],
+        };
+      });
+    }
+
+    // ---------- Rendering ----------
+    function scrollToBottom(force) {
+      const near = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140;
+      if (force || near) scroller.scrollTop = scroller.scrollHeight;
+    }
+    function updateWelcome() { $("welcome").hidden = messagesEl.children.length > 0; }
+
+    function attachmentsHtml(atts = []) {
+      if (!atts.length) return "";
+      return `<div class="att-row">${atts.map((a) => a.kind === "pdf"
+        ? `<div class="att-file">${a.thumb ? `<img src="${a.thumb}" alt="">` : '<div class="chip-icon">PDF</div>'}<div class="chip-text"><div class="chip-name">${escapeHtml(a.name)}</div><div class="chip-sub">PDF · ${a.pages || "?"} pages</div></div></div>`
+        : `<img class="att-img" src="${a.images?.[0] || a.thumb}" alt="${escapeHtml(a.name)}">`).join("")}</div>`;
+    }
+
+    function addUser(text, attachments) {
+      const el = document.createElement("div");
+      el.className = "msg user";
+      el.innerHTML = `<div class="user-stack">${attachmentsHtml(attachments)}${text ? '<div class="bubble"></div>' : ""}</div>`;
+      if (text) el.querySelector(".bubble").textContent = text;
+      messagesEl.appendChild(el);
+      updateWelcome();
+      scrollToBottom(true);
+    }
+
+    function addAssistant() {
+      const el = document.createElement("div");
+      el.className = "msg assistant";
+      el.innerHTML = `
+        <div class="body">
+          <div class="content"><div class="typing"><span></span><span></span><span></span></div></div>
+          <div class="actions" hidden>
+            <button type="button" class="action copy" title="Copy">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+              <span>Copy</span>
+            </button>
+            <span class="meta"></span>
+          </div>
+        </div>`;
+      messagesEl.appendChild(el);
+      updateWelcome();
+      scrollToBottom(true);
+      return el;
+    }
+
+    // Token stats, Claude Code style: "↓ 7.9k tokens · 41 tok/s · 3.2s"
+    const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+    function statsText(s, done) {
+      if (!s || !s.out) return "";
+      const parts = [`↓ ${fmtTokens(s.out)} token${s.out === 1 ? "" : "s"}`];
+      if (s.tps) parts.push(`${Math.round(s.tps)} tok/s`);
+      if (done && s.ms) parts.push(`${(s.ms / 1000).toFixed(1)}s`);
+      return parts.join(" · ");
+    }
+
+    function fillAssistant(el, raw, done = false, stats = null) {
+      const { visible } = splitThinking(raw);
+      const content = el.querySelector(".content");
+      if (visible.trim()) content.innerHTML = renderMarkdown(visible);
+      else if (done) content.innerHTML = "";
+      el.dataset.text = visible.trim();
+      const meta = el.querySelector(".meta");
+      meta.textContent = statsText(stats, done);
+      meta.title = stats?.in ? `↑ ${stats.in.toLocaleString()} tokens in (prompt) · ↓ ${stats.out.toLocaleString()} out` : "";
+      el.querySelector(".copy").hidden = !(done && visible.trim());
+      el.querySelector(".actions").hidden = !(meta.textContent || (done && visible.trim()));
+      el.classList.toggle("streaming", !done);
+    }
+
+    function renderHistory() {
+      messagesEl.innerHTML = "";
+      for (const m of chat.history) {
+        if (m.role === "user") addUser(m.content, m.attachments);
+        else if (m.image) renderImage(addAssistant(), m);
+        else fillAssistant(addAssistant(), m.content, true, m.stats);
+      }
+      updateWelcome();
+      scrollToBottom(true);
+    }
+
+    // Copy buttons (whole answer + code blocks)
+    messagesEl.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".copy, .copy-code");
+      if (!btn) return;
+      const text = btn.classList.contains("copy-code")
+        ? btn.closest(".code").querySelector("code").textContent
+        : btn.closest(".msg").dataset.text;
+      try { await navigator.clipboard.writeText(text); } catch { return; }
+      const label = btn.querySelector("span") || btn;
+      const old = label.textContent;
+      label.textContent = "Copied";
+      setTimeout(() => (label.textContent = old), 1400);
+    });
+
+    // ---------- Sending ----------
+    function updateSendState() {
+      if (controller) { sendBtn.disabled = false; return; }
+      // A model load doesn't block sending: send() waits for it while the loading bar shows.
+      const loading = pending.some((p) => p.status === "loading");
+      const ready = pending.some((p) => p.status === "ready");
+      sendBtn.disabled = loading || (!input.value.trim() && !ready);
+    }
+    function setBusy(busy) {
+      sendBtn.classList.toggle("busy", busy);
+      sendBtn.setAttribute("aria-label", busy ? "Stop" : "Send");
+      updateSendState();
+    }
+
+    function showError(el, message) {
+      const e = document.createElement("div");
+      e.className = "error";
+      e.textContent = message;
+      el.querySelector(".body").appendChild(e);
+    }
+
+    async function send(question, files = []) {
+      const attachments = files.map((f) => ({
+        kind: f.kind, name: f.name, thumb: f.thumb, pages: f.pages,
+        truncated: f.truncated, text: f.text, images: f.images,
+      }));
+      chat.history.push({ role: "user", content: question, ...(attachments.length && { attachments }) });
+      saveChat();
+      addUser(question, attachments);
+      const el = addAssistant();
+      let answer = "";
+      const stats = { out: 0, in: 0, tps: 0, ms: 0 };
+      const startedAt = performance.now();
+      let firstTokenAt = 0;
+      const myController = (controller = new AbortController());
+      setBusy(true);
+
+      try {
+        // LM Studio unloads idle models, so make sure it's loaded (showing progress) before asking.
+        const model = modelSel.value;
+        if (!warmedAt[model] || Date.now() - warmedAt[model] > WARM_FOR_MS) await warmup(model);
+        if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
+        const body = JSON.stringify({
+          messages: toApiMessages(chat.history),
+          model: modelSel.value,
+          conversationId: chat.id,
+          attachments: attachments.map(({ kind, name, thumb, pages }) => ({ kind, name, thumb, pages })),
+        });
+        if (body.length > MAX_REQUEST_BYTES) throw new Error("Those attachments are too large to send together. Try fewer or smaller files.");
+        const r = await api("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: controller.signal,
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Something went wrong (${r.status})`);
+
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const events = buf.split("\n\n");
+          buf = events.pop();
+          for (const ev of events) {
+            if (!ev.startsWith("data: ")) continue;
+            const msg = JSON.parse(ev.slice(6));
+            if (msg.error) throw new Error(msg.error);
+            if (msg.content) answer += msg.content;
+            if (msg.t) {
+              if (!firstTokenAt) firstTokenAt = performance.now();
+              stats.out = msg.t;
+            }
+            if (msg.usage) { stats.out = msg.usage.out || stats.out; stats.in = msg.usage.in || 0; }
+          }
+          const genSecs = firstTokenAt ? (performance.now() - firstTokenAt) / 1000 : 0;
+          if (genSecs > 0.3) stats.tps = stats.out / genSecs;
+          fillAssistant(el, answer, false, stats);
+          scrollToBottom();
+        }
+        setStatus(true, "Online");
+      } catch (err) {
+        if (err.locked) { el.remove(); chat.history.pop(); controller = null; setBusy(false); return; }
+        if (err.name !== "AbortError") showError(el, err.message);
+      } finally {
+        // The user started a new chat (or opened another) mid-answer: just release the busy state.
+        if (!el.isConnected) {
+          if (controller === myController) { controller = null; setBusy(false); }
+          return;
+        }
+        stats.ms = Math.round(performance.now() - startedAt);
+        fillAssistant(el, answer, true, stats);
+        const clean = splitThinking(answer).visible.trim();
+        if (clean) chat.history.push({ role: "assistant", content: clean, ...(stats.out && { stats }) });
+        else chat.history.pop(); // drop the unanswered question so the next turn stays valid
+        saveChat();
+        controller = null;
+        setBusy(false);
+        input.focus();
+      }
+    }
+
+    // ---------- Image generation (FLUX.1 schnell on a cloud GPU) ----------
+    let imageMode = false;
+    function setImageMode(on) {
+      imageMode = on;
+      $("imageMode").setAttribute("aria-pressed", String(on));
+      $("attach").disabled = on;
+      input.placeholder = on ? "Describe an image to create" : "Ask anything";
+      input.focus();
+    }
+    $("imageMode").addEventListener("click", () => setImageMode(!imageMode));
+
+    const imageSrc = (img) => (img.id ? `/api/image?id=${encodeURIComponent(img.id)}` : img.data || "");
+
+    function renderImage(el, m) {
+      const src = imageSrc(m.image);
+      el.classList.remove("streaming");
+      el.querySelector(".content").innerHTML = src
+        ? `<figure class="gen-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(m.image.prompt)}" loading="lazy"></figure>`
+        : `<p class="muted">This image wasn't saved. Log in to keep the images you create.</p>`;
+      el.dataset.text = "";
+      const actions = el.querySelector(".actions");
+      el.querySelector(".copy").hidden = true;
+      actions.querySelector(".download")?.remove();
+      if (src) actions.insertAdjacentHTML("afterbegin",
+        `<a class="action download" href="${escapeHtml(src)}" download="yai-image.jpg">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Download</span></a>`);
+      el.querySelector(".meta").textContent = m.stats?.ms ? `FLUX.1 schnell · ${(m.stats.ms / 1000).toFixed(1)}s` : "FLUX.1 schnell";
+      actions.hidden = false;
+    }
+
+    // Re-encodes the generated image as a JPEG small enough to save with the chat.
+    async function toStoredJpeg(src) {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext("2d").drawImage(img, 0, 0);
+      let out = c.toDataURL("image/jpeg", 0.88);
+      if (out.length > 880_000) out = c.toDataURL("image/jpeg", 0.72);
+      return out;
+    }
+
+    async function sendImage(prompt) {
+      chat.history.push({ role: "user", content: prompt, mode: "image" });
+      saveChat();
+      addUser(prompt);
+      const el = addAssistant();
+      const status = (text) => {
+        el.querySelector(".content").innerHTML = `<div class="image-status"><div class="image-ph"></div><span>${escapeHtml(text)}</span></div>`;
+        scrollToBottom();
+      };
+      status("Starting…");
+      const myController = (controller = new AbortController());
+      setBusy(true);
+      const startedAt = performance.now();
+      let msg = null;
+      try {
+        const r = await api("/api/image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, conversationId: chat.id }),
+          signal: controller.signal,
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Something went wrong (${r.status})`);
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "", result = null;
+        while (!result) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const events = buf.split("\n\n");
+          buf = events.pop();
+          for (const ev of events) {
+            if (!ev.startsWith("data: ")) continue;
+            const m = JSON.parse(ev.slice(6));
+            if (m.error) throw new Error(m.error);
+            if (m.image) result = m.image;
+            else if (m.state === "waking") status(`Waking up the image GPU. This can take a minute · ${Math.floor(m.elapsed / 60)}:${String(m.elapsed % 60).padStart(2, "0")}`);
+            else if (m.state === "generating") status(`Creating your image · ${m.elapsed}s`);
+          }
+        }
+        if (!result) throw new Error("No image came back. Try again.");
+        const jpeg = await toStoredJpeg(result);
+        let id = null;
+        if (user) {
+          const saved = await fetch("/api/image", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: jpeg }) });
+          if (saved.ok) id = (await saved.json()).id;
+        }
+        msg = { role: "assistant", content: "", image: { prompt, ...(id ? { id } : { data: jpeg }) }, stats: { ms: Math.round(performance.now() - startedAt) } };
+        renderImage(el, msg);
+      } catch (err) {
+        if (err.locked) { el.remove(); chat.history.pop(); controller = null; setBusy(false); return; }
+        el.querySelector(".content").innerHTML = "";
+        if (err.name !== "AbortError") showError(el, err.message);
+      } finally {
+        if (!el.isConnected) {
+          if (controller === myController) { controller = null; setBusy(false); }
+          return;
+        }
+        if (msg) chat.history.push(msg);
+        else chat.history.pop();
+        saveChat();
+        controller = null;
+        setBusy(false);
+        input.focus();
+      }
+    }
+
+    $("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (controller) return controller.abort();
+      if (imageMode) {
+        const prompt = input.value.trim();
+        if (!prompt) return;
+        input.value = "";
+        autosize();
+        return sendImage(prompt);
+      }
+      if (pending.some((p) => p.status === "loading")) return;
+      const q = input.value.trim();
+      const files = pending.filter((p) => p.status === "ready");
+      if (!q && !files.length) return;
+      input.value = "";
+      pending = [];
+      renderTray();
+      autosize();
+      send(q, files);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+    });
+    function autosize() {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 220) + "px";
+      updateSendState();
+    }
+    input.addEventListener("input", autosize);
+
+    document.querySelectorAll(".suggestion").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (controller) return;
+        send(b.dataset.prompt);
+      })
+    );
+
+    function startNewChat() {
+      controller?.abort();
+      chat = newChatObj();
+      pending = [];
+      renderTray();
+      saveChat();
+      renderHistory();
+      renderChatList();
+      closeSidebar();
+      input.focus();
+    }
+    $("newChat").addEventListener("click", startNewChat);
+    $("sideNew").addEventListener("click", startNewChat);
+    // The logo goes back to the home screen (a fresh chat).
+    $("home").addEventListener("click", (e) => { e.preventDefault(); startNewChat(); });
+
+    // ---------- Start ----------
+    (async () => {
+      try {
+        const me = await (await fetch("/api/auth?action=me", { cache: "no-store" })).json();
+        if (me.user) {
+          user = me.user;
+          isAdmin = !!me.admin;
+          loadChatList();
+        }
+      } catch {}
+      updateAccountUI();
+      renderHistory();
+      if (await loadModels(true)) showApp();
+      setInterval(() => { if (!document.hidden && !controller && !$("shell").hidden) loadModels(); }, 30000);
+    })();
+  </script>
+</body>
+</html>
