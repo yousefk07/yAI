@@ -303,6 +303,7 @@ function toolResult(text, { color: col, summary } = {}) {
 // A short note under a step, at the step's indent: "   ✓ applied · 1 file changed".
 function note(text) {
   print("   " + text);
+  if (last) last = "step";
 }
 
 // ---------- diffs ----------
@@ -368,6 +369,7 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
   if (hidden > 0) rows.push(c.faint(` … ${hidden} more line${hidden === 1 ? "" : "s"}`));
   flushRow();
   frame(rows, { indent: 3, inner });
+  last = "step"; // so yAI's next words get a blank line before them
   return { added, removed };
 }
 

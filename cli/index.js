@@ -669,6 +669,7 @@ async function runAgent(content) {
 // ---------- @file mentions and !commands ----------
 function expandMentions(text) {
   const extra = [];
+  ui.resetSections(); // the attached files sit right under the user's message
   for (const m of text.matchAll(/(^|\s)@("[^"]+"|[^\s]+)/g)) {
     const p = m[2].replace(/^"|"$/g, "").replace(/[.,;:!?)]+$/, "");
     let abs;
@@ -681,18 +682,21 @@ function expandMentions(text) {
     if (fs.statSync(abs).isDirectory()) {
       const list = [...T.walk(ctx, abs, 2)].slice(0, 200).map(({ entry, level }) => "  ".repeat(level) + entry.name + (entry.isDirectory() ? "/" : ""));
       extra.push(`<folder path="${relPath(abs)}">\n${list.join("\n")}\n</folder>`);
-      print(c.dim(`   Listed ${relPath(abs)}/`));
+      ui.toolHeader("List", relPath(abs) + "/");
+      ui.toolResult(`Listed ${list.length} entries`);
       continue;
     }
     const buf = fs.readFileSync(abs);
     if (buf.length > 300000 || buf.subarray(0, 8000).includes(0)) {
-      print(c.yellow(`   Skipped ${relPath(abs)} (binary or too large)`));
+      ui.toolHeader("Read", relPath(abs));
+      ui.toolResult("skipped · binary or too large", { color: c.yellow });
       continue;
     }
     const lines = buf.toString("utf8").split(/\r?\n/);
     ctx.readFiles.add(abs);
     extra.push(`<file path="${relPath(abs)}">\n${lines.map((l, i) => `${i + 1}\t${l}`).join("\n")}\n</file>`);
-    print(c.dim(`   Read ${relPath(abs)} (${lines.length} lines)`));
+    ui.toolHeader("Read", relPath(abs));
+    ui.toolResult(`Read ${lines.length} line${lines.length === 1 ? "" : "s"}`);
   }
   return extra.length ? `${text}\n\n${extra.join("\n\n")}` : text;
 }
@@ -790,7 +794,9 @@ function resumeSession() {
 // The first thing the user asked in a saved conversation, for the welcome box and /resume.
 function sessionTitle(s) {
   const first = (s.messages || []).find((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("<tool_result"));
-  return ui.middle((first?.content || "").replace(/\s+/g, " ").trim(), 48) || "untitled";
+  // Only what was typed: attached @files are added after it as <file> / <folder> blocks.
+  const typed = (first?.content || "").split(/\n\n<(?:file|folder) path=/)[0];
+  return ui.middle(typed.replace(/\s+/g, " ").trim(), 48) || "untitled";
 }
 function ago(iso) {
   const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
@@ -903,8 +909,8 @@ async function chooseModel(arg) {
   if (!arg) {
     print("");
     state.models.forEach((m, i) => {
-      const mark = m.id === state.model ? c.ink("▸") : " ";
-      print(` ${mark} ${String(i + 1).padStart(2)}. ${c.bold(m.label)} ${c.dim("· " + (m.desc || m.id))}`);
+      const mark = m.id === state.model ? c.accent("◆") : " ";
+      print(` ${mark} ${String(i + 1).padStart(2)}. ${c.bold(c.ink(m.label))} ${c.dim("· " + (m.desc || m.id))}`);
     });
     if (state.localOffline) print(c.yellow("   The PC is offline, so only cloud models are listed."));
     arg = ((await question(c.dim(" Pick a model (number or name, Enter to keep): "))) || "").trim();
@@ -915,7 +921,7 @@ async function chooseModel(arg) {
   state.model = m.id;
   api.cfg.model = m.id;
   api.save();
-  print(c.green(`   Model: ${m.label}`) + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
+  ui.note(`${c.green("✓")} ${c.ink("Model: " + m.label)}` + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
 }
 
 async function compact() {
