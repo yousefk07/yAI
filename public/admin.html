@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>yAI Admin</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .dash { max-width: 1180px; margin: 0 auto; padding: 22px 16px 40px; }
+    .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .stat .label { font-size: 13px; color: var(--muted); }
+    .stat .value { font: 400 34px/1.1 var(--serif); letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .stat .sub { font-size: 12.5px; color: var(--muted); }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .tabs { display: inline-flex; background: var(--surface-2); border-radius: 9px; padding: 3px; }
+    .tab { border: 0; background: none; padding: 6px 14px; border-radius: 7px; font-size: 14px; font-weight: 500; color: var(--muted); }
+    .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .search {
+      flex: 1; min-width: 180px; padding: 9px 12px; border-radius: 12px;
+      border: 1px solid var(--border); background: var(--surface); outline: none;
+    }
+    .search:focus { border-color: var(--text); }
+    .updated { font-size: 12.5px; color: var(--muted); margin-left: auto; }
+    .banner { padding: 12px 14px; border-radius: 12px; margin-bottom: 14px; font-size: 14px;
+      color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+    .split { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 14px; align-items: start; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .convo-list { max-height: 70vh; overflow-y: auto; }
+    .convo { display: block; width: 100%; text-align: left; border: 0; background: none;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .convo:hover { background: var(--surface-2); }
+    .convo.active { background: var(--surface-2); }
+    .convo .q { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .convo .meta { font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+    .pill { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+    .pill.err { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+    .transcript { padding: 18px 20px; max-height: 70vh; overflow-y: auto; }
+    .transcript-head { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 16px; }
+    .transcript-head b { color: var(--text); font-weight: 600; }
+    .turn-time { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 10px; }
+    .empty-state { padding: 40px 20px; text-align: center; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font-size: 12.5px; color: var(--muted); font-weight: 500; background: var(--surface-2); position: sticky; top: 0; }
+    td.detail { max-width: 460px; overflow-wrap: anywhere; }
+    .table-wrap { max-height: 70vh; overflow: auto; }
+    .type { font-weight: 600; font-size: 12.5px; }
+    .type.chat { color: var(--text); } .type.visit { color: var(--ok); } .type.denied { color: var(--bad); } .type.signup, .type.login { color: var(--link); } .type.image { color: var(--warn); }
+    .back { display: none; }
+    @media (max-width: 860px) {
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split { grid-template-columns: 1fr; }
+      .split.viewing .list-panel { display: none; }
+      .split:not(.viewing) .view-panel { display: none; }
+      .back { display: inline-flex; }
+      .hide-md { display: none; }
+    }
+    @media (max-width: 560px) {
+      body { font-size: 15px; }
+      .topbar .btn-ghost { padding: 6px 10px; font-size: 13px; }
+      .brand-name .muted { display: none; }
+      .dash { padding: 14px 12px 32px; }
+      .stats { gap: 8px; margin-bottom: 14px; }
+      .stat { padding: 12px 14px; border-radius: 14px; }
+      .stat .label { font-size: 12px; }
+      .stat .value { font-size: 28px; }
+      .stat .sub { font-size: 11.5px; }
+      .toolbar { gap: 8px; }
+      .tabs { width: 100%; }
+      .tab { flex: 1; }
+      .search { order: 3; flex: 1 1 100%; font-size: 16px; }
+      .updated { display: none; }
+      #refresh { order: 2; margin-left: auto; }
+      .toolbar .tabs { flex: 1; width: auto; }
+      .convo { padding: 12px 14px; }
+      .transcript { padding: 14px 12px; max-height: none; }
+      .convo-list { max-height: none; }
+      .transcript-head { padding: 12px 14px; font-size: 12.5px; }
+      .transcript .logo-sm { display: none; }
+      .table-wrap { max-height: none; }
+      th, td { padding: 9px 10px; font-size: 13px; }
+      .gate-card input { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="yai-mark" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="var(--ink)" /><path d="M19 17 L32.5 35.5 M45 17 L28 48" fill="none" stroke="var(--on-ink)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" /><circle cx="45.5" cy="45.5" r="4.2" fill="var(--on-ink)" /></symbol></svg>
+  <section id="login" class="gate" hidden>
+    <form id="loginForm" class="gate-card">
+      <div class="wordmark"><svg class="mark" aria-hidden="true"><use href="#yai-mark"/></svg>yAI</div>
+      <h1>Admin sign in</h1>
+      <p class="muted">Activity dashboard for site visits and conversations.</p>
+      <input id="username" autocomplete="username" placeholder="Username" aria-label="Username" />
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />
+      <p id="loginError" class="gate-error" role="alert"></p>
+      <button class="btn-primary" id="loginBtn" type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand"><svg class="mark" aria-hidden="true"><use href="#yai-mark"/></svg><span class="brand-name">yAI <span class="muted" style="font-weight:400">/ Admin</span></span></div>
+      <div class="topbar-right">
+        <a class="btn-ghost" href="/" style="text-decoration:none">Open chat</a>
+        <button class="btn-ghost" id="logout" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <div class="dash">
+      <div id="banner" class="banner" hidden></div>
+      <div class="stats">
+        <div class="stat"><div class="label">Accounts</div><div class="value" id="sAccounts">–</div><div class="sub" id="sAccounts24"></div></div>
+        <div class="stat"><div class="label">Visitors</div><div class="value" id="sVisitors">–</div><div class="sub" id="sVisitors24"></div></div>
+        <div class="stat"><div class="label">Conversations</div><div class="value" id="sConvos">–</div><div class="sub" id="sConvos24"></div></div>
+        <div class="stat"><div class="label">Questions asked</div><div class="value" id="sQuestions">–</div><div class="sub" id="sQuestions24"></div></div>
+        <div class="stat"><div class="label">Wrong access codes</div><div class="value" id="sDenied">–</div><div class="sub" id="sDenied24"></div></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="convos" type="button">Conversations</button>
+          <button class="tab" data-tab="log" type="button">Activity log</button>
+        </div>
+        <input id="search" class="search" type="search" placeholder="Search questions, answers, locations…" />
+        <span class="updated" id="updated"></span>
+        <button class="btn-ghost" id="refresh" type="button">Refresh</button>
+      </div>
+
+      <div id="convosView" class="split">
+        <div class="panel list-panel"><div class="convo-list" id="convoList"></div></div>
+        <div class="panel view-panel" id="viewPanel"><div class="empty-state">Select a conversation</div></div>
+      </div>
+
+      <div id="logView" class="panel" hidden>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Event</th><th class="hide-md">Who</th><th>Location</th><th>Details</th></tr></thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
+  <script src="/md.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = escapeHtml;
+    let events = [], users = [], selected = null, tab = "convos";
+
+    const fmtTime = (ts) => new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const ago = (ts) => {
+      const s = (Date.now() - new Date(ts)) / 1000;
+      if (s < 60) return "just now";
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      return `${Math.floor(s / 86400)}d ago`;
+    };
+    const place = (e) => [e.city, e.region, e.country].filter(Boolean).join(", ") || "Unknown";
+    const shortId = (id) => (id ? id.slice(0, 6) : "–");
+    const who = (e) => (e.user ? `@${e.user}` : `guest ${shortId(e.visitorId)}`);
+    const device = (ua = "") =>
+      /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" :
+      /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : /curl|bot|spider/i.test(ua) ? "Bot/script" : "Other";
+
+    // ---------- Auth ----------
+    async function load() {
+      const r = await fetch("/api/admin/activity", { cache: "no-store" });
+      if (r.status === 401) return showLogin();
+      const data = await r.json();
+      showApp();
+      // Signed in through an admin account: signing out of the dashboard alone would do nothing.
+      $("logout").hidden = data.via === "account";
+      $("banner").hidden = !data.error && !data.note;
+      $("banner").textContent = data.error || data.note || "";
+      if (data.events) events = data.events;
+      if (data.users) users = data.users;
+      $("updated").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
+      render();
+    }
+    function showLogin() { $("app").hidden = true; $("login").hidden = false; $("username").focus(); }
+    function showApp() { $("login").hidden = true; $("app").hidden = false; }
+
+    $("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("loginBtn").disabled = true;
+      $("loginError").textContent = "";
+      try {
+        const r = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: $("username").value, password: $("password").value }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          $("loginError").textContent = data.error || "Sign in failed";
+          $("loginForm").classList.remove("shake"); void $("loginForm").offsetWidth; $("loginForm").classList.add("shake");
+          return;
+        }
+        $("password").value = "";
+        await load();
+      } finally {
+        $("loginBtn").disabled = false;
+      }
+    });
+    $("logout").addEventListener("click", async () => {
+      await fetch("/api/admin/logout", { method: "POST" });
+      events = [];
+      showLogin();
+    });
+
+    // ---------- Data ----------
+    function conversations() {
+      const map = new Map();
+      for (const e of events) {
+        if (e.type !== "chat") continue;
+        const key = e.conversationId || `${e.visitorId}-${e.ts}`;
+        if (!map.has(key)) map.set(key, { id: key, turns: [], visitorId: e.visitorId, first: e, last: e });
+        const c = map.get(key);
+        c.turns.push(e);
+        c.last = e;
+      }
+      return [...map.values()].sort((a, b) => new Date(b.last.ts) - new Date(a.last.ts));
+    }
+
+    function matches(c, q) {
+      if (!q) return true;
+      const hay = c.turns.map((t) => `${t.question} ${t.answer}`).join(" ") + ` ${place(c.first)} ${c.visitorId} ${c.first.user || ""}`;
+      return hay.toLowerCase().includes(q);
+    }
+
+    function renderStats(convos) {
+      const day = Date.now() - 864e5;
+      const recent = (e) => new Date(e.ts) > day;
+      const visitors = new Set(events.map((e) => e.visitorId || e.ip).filter(Boolean));
+      const visitors24 = new Set(events.filter(recent).map((e) => e.visitorId || e.ip).filter(Boolean));
+      const chats = events.filter((e) => e.type === "chat");
+      const denied = events.filter((e) => e.type === "denied");
+      $("sAccounts").textContent = users.length;
+      $("sAccounts24").textContent = `${users.filter((u) => new Date(u.createdAt) > day).length} new in last 24h`;
+      $("sVisitors").textContent = visitors.size;
+      $("sVisitors24").textContent = `${visitors24.size} in last 24h`;
+      $("sConvos").textContent = convos.length;
+      $("sConvos24").textContent = `${convos.filter((c) => recent(c.last)).length} active in last 24h`;
+      $("sQuestions").textContent = chats.length;
+      $("sQuestions24").textContent = `${chats.filter(recent).length} in last 24h`;
+      $("sDenied").textContent = denied.length;
+      $("sDenied24").textContent = `${denied.filter(recent).length} in last 24h`;
+    }
+
+    function render() {
+      const q = $("search").value.trim().toLowerCase();
+      const convos = conversations();
+      renderStats(convos);
+
+      // Conversations list
+      const shown = convos.filter((c) => matches(c, q));
+      $("convoList").innerHTML = shown.length
+        ? shown.map((c) => `
+            <button class="convo ${c.id === selected ? "active" : ""}" data-id="${esc(c.id)}" type="button">
+              <div class="q">${c.first.attachments?.length ? "📎 " : ""}${esc(c.first.question || (c.first.attachments?.length ? c.first.attachments.map((a) => a.name).join(", ") : "(empty)"))}</div>
+              <div class="meta">
+                <span>${esc(ago(c.last.ts))}</span><span>${esc(who(c.first))}</span><span>${esc(place(c.first))}</span>
+                <span class="pill">${c.turns.length} ${c.turns.length === 1 ? "question" : "questions"}</span>
+                ${c.turns.some((t) => t.error) ? '<span class="pill err">error</span>' : ""}
+              </div>
+            </button>`).join("")
+        : `<div class="empty-state">${events.length ? "No matches" : "No conversations yet"}</div>`;
+
+      renderTranscript(convos.find((c) => c.id === selected));
+
+      // Activity log
+      const rows = events.slice().reverse().filter((e) => {
+        if (!q) return true;
+        return `${e.type} ${e.question || ""} ${e.answer || ""} ${e.codeTried || ""} ${e.prompt || ""} ${place(e)} ${e.visitorId || ""} ${e.ip || ""} ${e.user || ""}`.toLowerCase().includes(q);
+      }).slice(0, 1000);
+      $("logBody").innerHTML = rows.length
+        ? rows.map((e) => {
+            const detail =
+              e.type === "chat" ? esc(e.question || "") + (e.attachments?.length ? ` <span class="pill">📎 ${esc(e.attachments.map((a) => a.name).join(", "))}</span>` : "") + (e.error ? ` <span class="pill err">${esc(e.error)}</span>` : "") :
+              e.type === "denied" ? `Tried code: <code>${esc(e.codeTried || "")}</code>${e.during ? " (sign-up)" : ""}` :
+              e.type === "image" ? `${e.blocked ? "<span class=\"pill err\">blocked</span> " : ""}${esc(e.prompt || "")}${e.ms ? ` <span class=\"pill\">${(e.ms / 1000).toFixed(1)}s</span>` : ""}` :
+              e.type === "signup" ? `New account @${esc(e.user || "")}` :
+              e.type === "login" ? `Logged in as @${esc(e.user || "")}` :
+              e.type === "visit" ? esc(device(e.ua)) : "";
+            return `<tr>
+              <td style="white-space:nowrap">${esc(fmtTime(e.ts))}</td>
+              <td><span class="type ${esc(e.type)}">${esc(e.type)}</span></td>
+              <td class="hide-md"><span title="${esc(e.visitorId || "")}">${esc(who(e))}</span></td>
+              <td>${esc(place(e))}</td>
+              <td class="detail">${detail}</td></tr>`;
+          }).join("")
+        : `<tr><td colspan="5" class="empty-state">${events.length ? "No matches" : "No activity yet"}</td></tr>`;
+    }
+
+    function renderTranscript(c) {
+      $("convosView").classList.toggle("viewing", !!c);
+      if (!c) { $("viewPanel").innerHTML = '<div class="empty-state">Select a conversation</div>'; return; }
+      const f = c.first;
+      $("viewPanel").innerHTML = `
+        <div class="transcript-head">
+          <button class="btn-ghost back" id="back" type="button">← Back</button>
+          <span><b title="${esc(c.visitorId || "")}">${esc(who(f))}</b></span>
+          <span>${esc(place(f))}</span>
+          <span>${esc(device(f.ua))}</span>
+          <span class="hide-md">IP ${esc(f.ip || "–")}</span>
+          <span>Started ${esc(fmtTime(f.ts))}</span>
+        </div>
+        <div class="transcript">
+          ${c.turns.map((t) => `
+            <div class="turn-time">${esc(fmtTime(t.ts))}${t.ms ? ` · ${(t.ms / 1000).toFixed(1)}s` : ""}${t.tokensOut ? ` · ↓ ${t.tokensOut.toLocaleString()} tokens` : ""}${t.think ? " · Think on" : ""}${t.model ? ` · ${esc(t.model)}` : ""}</div>
+            <div class="msg user"><div class="user-stack">
+              ${t.attachments?.length ? `<div class="att-row">${t.attachments.map((a) => a.kind === "pdf"
+                ? `<div class="att-file">${a.thumb ? `<img src="${esc(a.thumb)}" alt="">` : '<div class="chip-icon">PDF</div>'}<div class="chip-text"><div class="chip-name">${esc(a.name)}</div><div class="chip-sub">PDF · ${esc(a.pages ?? "?")} pages</div></div></div>`
+                : a.thumb ? `<img class="att-img" src="${esc(a.thumb)}" alt="${esc(a.name)}" title="${esc(a.name)}">` : `<span class="pill">image: ${esc(a.name)}</span>`).join("")}</div>` : ""}
+              ${t.question ? `<div class="bubble">${esc(t.question)}</div>` : ""}
+            </div></div>
+            <div class="msg assistant">
+              <div class="logo logo-sm">Y</div>
+              <div class="body">
+                <div class="content">${t.answer ? renderMarkdown(t.answer) : '<span class="muted">(no answer)</span>'}</div>
+                ${t.stopped ? '<span class="pill">stopped by user</span>' : ""}
+                ${t.error ? `<div class="error">${esc(t.error)}</div>` : ""}
+              </div>
+            </div>`).join("")}
+        </div>`;
+      $("back")?.addEventListener("click", () => { selected = null; render(); });
+    }
+
+    $("convoList").addEventListener("click", (e) => {
+      const btn = e.target.closest(".convo");
+      if (!btn) return;
+      selected = btn.dataset.id;
+      render();
+      if (matchMedia("(max-width: 860px)").matches) $("viewPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    document.querySelectorAll(".tab").forEach((t) =>
+      t.addEventListener("click", () => {
+        tab = t.dataset.tab;
+        document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+        $("convosView").hidden = tab !== "convos";
+        $("logView").hidden = tab !== "log";
+      })
+    );
+    $("search").addEventListener("input", render);
+    $("refresh").addEventListener("click", load);
+
+    load();
+    setInterval(() => { if (!document.hidden && !$("app").hidden) load(); }, 20000);
+  </script>
+</body>
+</html>
