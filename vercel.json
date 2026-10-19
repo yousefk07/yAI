@@ -25,5 +25,6 @@
     "api/image.js": {
       "maxDuration": 60
     }
+    //redeploy
   }
 }
