@@ -1,0 +1,29 @@
+{
+  "framework": null,
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "cleanUrls": true,
+  "functions": {
+    "api/chat.js": {
+      "maxDuration": 300
+    },
+    "api/models.js": {
+      "maxDuration": 15
+    },
+    "api/admin/activity.js": {
+      "maxDuration": 15
+    },
+    "api/warmup.js": {
+      "maxDuration": 300
+    },
+    "api/auth.js": {
+      "maxDuration": 15
+    },
+    "api/chats.js": {
+      "maxDuration": 15
+    },
+    "api/image.js": {
+      "maxDuration": 300
+    }
+  }
+}

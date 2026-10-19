@@ -1,0 +1,15 @@
+.env
+.env.*
+bridge.js
+server.js
+activity.jsonl
+logs
+start.ps1
+*.cmd
+data
+docs
+README.md
+.claude
+stop.ps1
+.agents
+skills-lock.json
