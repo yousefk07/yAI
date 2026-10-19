@@ -254,14 +254,12 @@ function applyEdit(ctx, plan) {
 }
 
 function showEdit(ctx, plan, { applied }) {
-  toolHeader(plan.label, rel(ctx, plan.abs));
+  // One "▸ edit  path  +12 −2" row (or "▸ create  path  new · 40 lines"), then the diff in the │ gutter.
+  toolHeader(plan.created ? "Create" : "Edit", rel(ctx, plan.abs));
   const { lines, added, removed } = renderDiff(plan.before, plan.after);
-  const verb = applied ? (plan.created ? "Wrote" : "Updated") : "Will update";
-  const summary = plan.created
-    ? `${verb === "Will update" ? "Will create" : "Wrote"} ${plural(added, "line")} to ${c.bold(rel(ctx, plan.abs))}`
-    : `${verb} ${c.bold(rel(ctx, plan.abs))} with ${plural(added, "addition")} and ${plural(removed, "removal")}`;
-  print(`  ⎿  ${summary}`);
-  for (const l of lines) print("     " + l);
+  const summary = plan.created ? c.dim(`new · ${plural(added, "line")}`) : `${c.green("+" + added)} ${c.red("−" + removed)}`;
+  toolResult(summary, { color: (s) => s });
+  for (const l of lines) print("   " + c.dim("│ ") + l);
   return { added, removed };
 }
 
@@ -302,7 +300,7 @@ async function execRun(ctx, a, signal) {
   const command = (a.command || "").trim();
   if (!command) throw new ToolError("<command> is required.");
   const timeout = Math.min(Math.max(parseInt(a.timeout, 10) || 120, 1), 600);
-  spinner.start("Running");
+  spinner.start("running");
   const { out, code, killedFor } = await runCommand(ctx, command, timeout, signal);
   spinner.stop();
   const lines = out ? out.split("\n") : [];

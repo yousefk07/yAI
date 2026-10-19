@@ -170,20 +170,20 @@ function syncMute() {
   ui.rlOutput.muted = state.busy && !state.asking;
 }
 
+// The prompt is the y mark: "y› ".
 function promptText() {
-  const mark = state.mode === "acceptEdits" ? c.accent("⏵⏵ ") : state.mode === "plan" ? c.cyan("⏸ ") : "";
-  return `${mark}${c.bold(">")} `;
+  return `${c.bold(c.ink("y›"))} `;
 }
 
+// The rule above the prompt carries the mode on its right: ask · auto-edit · plan.
+const MODE_NAMES = { default: "ask", acceptEdits: "auto-edit", plan: "plan · read-only" };
 function modeLine() {
-  if (state.mode === "acceptEdits") return c.accent("  ⏵⏵ accept edits on") + c.dim(" (shift+tab to cycle)");
-  if (state.mode === "plan") return c.cyan("  ⏸ plan mode on") + c.dim(" (shift+tab to cycle)");
-  return c.dim("  ? /help · shift+tab cycles modes · @file attaches · !cmd runs a command");
+  const name = state.mode === "default" ? c.dim(MODE_NAMES.default) : c.bold(c.ink(MODE_NAMES[state.mode]));
+  return ui.rule(`${name}${c.dim(" · ⇧⇥ mode · /help")}`);
 }
 
 function showPrompt() {
   if (state.printMode) return;
-  print(c.dim("─".repeat(Math.min(ui.columns(), 120))));
   print(modeLine());
   rl.setPrompt(promptText());
   rl.prompt(true);
@@ -310,7 +310,7 @@ function setupReadline() {
       if (state.busy) {
         if (text.trim()) {
           queue.push(text);
-          print(c.dim(`  ⎿  Queued: ${text.split("\n")[0].slice(0, 60)}`));
+          print(c.dim(`   Queued: ${text.split("\n")[0].slice(0, 60)}`));
         }
         return;
       }
@@ -475,21 +475,20 @@ async function callModel() {
   return text;
 }
 
+// "apply this edit?  y yes · a always · n no ›" — one line, one letter, Enter means yes.
 async function askPermission(questionText, alwaysLabel) {
   spinner.stop();
+  const k = (key, label) => `${c.bold(c.ink(key))} ${c.dim(label)}`;
+  const line = `   ${c.ink(questionText)}  ${k("y", "yes")}${c.dim(" · ")}${k("a", alwaysLabel)}${c.dim(" · ")}${k("n", "no")} ${c.dim("›")} `;
   print("");
-  print(" " + c.bold(questionText));
-  print(`   ${c.accent("1.")} Yes`);
-  print(`   ${c.accent("2.")} ${alwaysLabel}`);
-  print(`   ${c.accent("3.")} No, and tell yAI what to do differently ${c.dim("(esc)")}`);
   for (;;) {
-    const raw = await question(c.dim(" Choose 1-3 (Enter = 1): "));
+    const raw = await question(line);
     if (raw === null) return { no: true, feedback: "" };
     const a = raw.trim().toLowerCase();
-    if (a === "" || a === "1" || a === "y" || a === "yes") return "yes";
-    if (a === "2") return "always";
-    if (a === "3" || a === "n" || a === "no") {
-      const fb = await question(c.dim(" What should yAI do instead? (Enter to just stop) "));
+    if (a === "" || a === "y" || a === "yes" || a === "1") return "yes";
+    if (a === "a" || a === "always" || a === "2") return "always";
+    if (a === "n" || a === "no" || a === "3") {
+      const fb = await question(`   ${c.ink("what should yAI do instead?")} ${c.dim("(enter to just stop) ›")} `);
       return { no: true, feedback: (fb || "").trim() };
     }
   }
@@ -520,13 +519,13 @@ async function execTool(call) {
       if (state.mode !== "acceptEdits") {
         T.showEdit(ctx, plan, { applied: false });
         const ans = await askPermission(
-          plan.created ? `Do you want to create ${relPath(plan.abs)}?` : `Do you want to make this edit to ${relPath(plan.abs)}?`,
-          `Yes, allow all edits during this session ${c.dim("(shift+tab)")}`
+          plan.created ? "create this file?" : "apply this edit?",
+          "always (auto-edit)"
         );
         if (ans.no) return rejected(ans);
         if (ans === "always") state.mode = "acceptEdits";
         T.applyEdit(ctx, plan);
-        print(c.dim(`  ⎿  ${plan.created ? "Created" : "Saved"} ${relPath(plan.abs)}`));
+        print(c.green(`   ✓ ${plan.created ? "created" : "saved"}`));
       } else {
         T.applyEdit(ctx, plan);
         T.showEdit(ctx, plan, { applied: true });
@@ -546,7 +545,7 @@ async function execTool(call) {
     }
     if (!allowed && !(state.printMode && state.allowCommands)) {
       const prefix = commandPrefix(command);
-      const ans = await askPermission("Do you want to run this command?", chained ? "Yes, and run it without asking next time (not available for chained commands)" : `Yes, and don't ask again for ${c.bold(prefix)} commands in this folder`);
+      const ans = await askPermission("run this command?", chained ? "always (not for chained commands)" : `always for "${prefix}" here`);
       if (ans.no) return rejected(ans);
       if (ans === "always" && !chained) {
         project().allowedCommands.push(prefix);
@@ -565,7 +564,7 @@ async function execTool(call) {
 }
 
 function rejected(ans) {
-  print(c.red("  ⎿  Rejected") + (ans.feedback ? c.dim(` · ${ans.feedback}`) : ""));
+  print(c.red("   ✕ declined") + (ans.feedback ? c.dim(` · ${ans.feedback}`) : ""));
   if (!ans.feedback) return { output: "The user rejected this action and wants you to stop. Wait for their next instruction.", stop: true };
   return { output: `The user rejected this action and said: ${ans.feedback}` };
 }
@@ -581,13 +580,14 @@ async function runAgent(content) {
   const started = Date.now();
   const startOut = state.usage.out;
   print("");
+  ui.resetSections();
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       const text = await callModel();
       spinner.stop();
       if (state.interrupted) {
         if (text.trim()) state.messages.push({ role: "assistant", content: text });
-        print(c.red("  ⎿  Interrupted") + c.dim(" · What should yAI do instead?"));
+        print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
         return;
       }
       const call = parseToolCall(text);
@@ -596,25 +596,25 @@ async function runAgent(content) {
       let result;
       if (call.cutOff) {
         result = { output: `Error: your ${call.name} call was cut off before </tool> (the reply hit its length limit). Split the work: write a large file in parts with write_file and <append>true</append>.` };
-        print(c.yellow("  ⎿  The tool call was cut off; asking yAI to split it up"));
+        print(c.yellow("   ! that step was cut off · asking yAI to split it up"));
       } else result = await execTool(call);
       if (state.interrupted) {
         pushUser(`<tool_result name="${call.name}">\nInterrupted by the user.\n</tool_result>`);
-        print(c.red("  ⎿  Interrupted") + c.dim(" · What should yAI do instead?"));
+        print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
         return;
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (result.stop) return;
-      if (step === MAX_STEPS - 1) print(c.yellow(`  ⎿  Paused after ${MAX_STEPS} steps. Say "continue" to keep going.`));
+      if (step === MAX_STEPS - 1) print(c.yellow(`   ‖ paused after ${MAX_STEPS} steps · say "continue" to keep going`));
     }
     const secs = Math.round((Date.now() - started) / 1000);
     const out = state.usage.out - startOut;
-    if (secs >= 5) print(c.dim(`\n✻ Worked for ${secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}${out ? ` · ↓ ${kTokens(out)} tokens` : ""}`));
-    if (state.mode === "plan") print(c.dim("  shift+tab to leave plan mode, then tell yAI to go ahead"));
-    if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow("  Context is getting long. Run /compact to summarize it and keep going."));
+    if (secs >= 5) print(c.dim(`\n done in ${secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}${out ? ` · ${kTokens(out)} tok` : ""}`));
+    if (state.mode === "plan") print(c.dim(" ⇧⇥ to leave plan mode, then tell yAI to go ahead"));
+    if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
   } catch (err) {
     spinner.stop();
-    print(c.red(`  ⎿  ${err.message}`));
+    print(c.red(`   ✕ ${err.message}`));
     if (err.auth) state.user = null;
   } finally {
     spinner.stop();
@@ -640,18 +640,18 @@ function expandMentions(text) {
     if (fs.statSync(abs).isDirectory()) {
       const list = [...T.walk(ctx, abs, 2)].slice(0, 200).map(({ entry, level }) => "  ".repeat(level) + entry.name + (entry.isDirectory() ? "/" : ""));
       extra.push(`<folder path="${relPath(abs)}">\n${list.join("\n")}\n</folder>`);
-      print(c.dim(`  ⎿  Listed ${relPath(abs)}/`));
+      print(c.dim(`   Listed ${relPath(abs)}/`));
       continue;
     }
     const buf = fs.readFileSync(abs);
     if (buf.length > 300000 || buf.subarray(0, 8000).includes(0)) {
-      print(c.yellow(`  ⎿  Skipped ${relPath(abs)} (binary or too large)`));
+      print(c.yellow(`   Skipped ${relPath(abs)} (binary or too large)`));
       continue;
     }
     const lines = buf.toString("utf8").split(/\r?\n/);
     ctx.readFiles.add(abs);
     extra.push(`<file path="${relPath(abs)}">\n${lines.map((l, i) => `${i + 1}\t${l}`).join("\n")}\n</file>`);
-    print(c.dim(`  ⎿  Read ${relPath(abs)} (${lines.length} lines)`));
+    print(c.dim(`   Read ${relPath(abs)} (${lines.length} lines)`));
   }
   return extra.length ? `${text}\n\n${extra.join("\n\n")}` : text;
 }
@@ -664,7 +664,7 @@ async function shellCommand(command) {
     ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command);
     const { out, code } = await T.runCommand(ctx, command, 600, state.abort.signal);
     const lines = out ? out.split("\n") : ["(no output)"];
-    lines.slice(0, 40).forEach((l, i) => print((i ? "     " : "  ⎿  ") + l));
+    lines.slice(0, 40).forEach((l, i) => print((i ? "     " : "   ") + l));
     if (lines.length > 40) print(c.dim(`     … +${lines.length - 40} lines`));
     state.pendingContext.push(`I ran \`${command}\` myself (exit code ${code}). Output:\n\`\`\`\n${T.clipOutput(out, 8000)}\n\`\`\``);
   } finally {
@@ -677,7 +677,7 @@ async function shellCommand(command) {
 // ---------- slash commands ----------
 const HELP = [
   ["/model [name|#]", "Switch model"],
-  ["/mode [default|accept|plan]", "Ask before edits · auto-accept edits · read-only planning (shift+tab cycles)"],
+  ["/mode [ask|auto|plan]", "ask before edits · auto-edit · read-only planning (⇧⇥ cycles)"],
   ["/clear", "Start a new conversation"],
   ["/compact", "Summarize the conversation to free up context"],
   ["/init", "Write a YAI.md with notes about this project"],
@@ -698,7 +698,7 @@ async function chooseModel(arg) {
   if (!arg) {
     print("");
     state.models.forEach((m, i) => {
-      const mark = m.id === state.model ? c.green("●") : " ";
+      const mark = m.id === state.model ? c.ink("▸") : " ";
       print(` ${mark} ${String(i + 1).padStart(2)}. ${c.bold(m.label)} ${c.dim("· " + (m.desc || m.id))}`);
     });
     if (state.localOffline) print(c.yellow("   The PC is offline, so only cloud models are listed."));
@@ -710,7 +710,7 @@ async function chooseModel(arg) {
   state.model = m.id;
   api.cfg.model = m.id;
   api.save();
-  print(c.green(`  ⎿  Model: ${m.label}`) + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
+  print(c.green(`   Model: ${m.label}`) + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
 }
 
 async function compact() {
@@ -749,11 +749,11 @@ async function compact() {
       { role: "assistant", content: "Got it. I'll continue from there." },
     ];
     ctx.readFiles.clear();
-    print(c.green("  ⎿  Compacted the conversation") + c.dim(` (${kTokens(Math.round(JSON.stringify(saved).length / 3.6))} → ${kTokens(Math.round(JSON.stringify(state.messages).length / 3.6))} tokens)`));
+    print(c.green("   Compacted the conversation") + c.dim(` (${kTokens(Math.round(JSON.stringify(saved).length / 3.6))} → ${kTokens(Math.round(JSON.stringify(state.messages).length / 3.6))} tokens)`));
   } catch (err) {
     spinner.stop();
     state.messages = saved;
-    print(c.red(`  ⎿  ${state.interrupted ? "Interrupted" : err.message}`));
+    print(c.red(`   ${state.interrupted ? "Interrupted" : err.message}`));
   } finally {
     state.busy = false;
     state.abort = null;
@@ -769,18 +769,18 @@ async function command(line) {
     case "/help":
     case "/?":
       print("");
-      for (const [n, d] of HELP) print(`  ${c.accent(n.padEnd(30))} ${d}`);
+      for (const [n, d] of HELP) print(`  ${c.bold(c.ink(n.padEnd(30)))} ${c.dim(d)}`);
       print("");
       print(c.dim("  @path        attach a file or folder to your message (Tab completes)"));
       print(c.dim("  !command     run a shell command yourself; yAI sees the output"));
-      print(c.dim("  esc          stop yAI · shift+tab cycles modes · paste works for multi-line text"));
+      print(c.dim("  esc          stop yAI · ⇧⇥ cycles ask / auto-edit / plan · paste works for multi-line text"));
       return;
     case "/model":
       return chooseModel(arg);
     case "/mode": {
-      const want = { default: "default", ask: "default", accept: "acceptEdits", edits: "acceptEdits", plan: "plan" }[arg.toLowerCase()];
+      const want = { default: "default", ask: "default", accept: "acceptEdits", edits: "acceptEdits", auto: "acceptEdits", "auto-edit": "acceptEdits", plan: "plan" }[arg.toLowerCase()];
       state.mode = want || MODES[(MODES.indexOf(state.mode) + 1) % MODES.length];
-      return print(c.dim(`  ⎿  Mode: ${{ default: "ask before edits and commands", acceptEdits: "accept edits", plan: "plan (read-only)" }[state.mode]}`));
+      return print(c.dim(`   mode: ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}`));
     }
     case "/clear":
     case "/new":
@@ -800,7 +800,7 @@ async function command(line) {
       print(`  Account   ${state.user ? c.green(state.user) : c.red("signed out")} ${c.dim("· " + api.baseUrl())}`);
       print(`  Model     ${modelLabel()}${state.localOffline ? c.yellow(" · PC offline, cloud only") : ""}`);
       print(`  Folder    ${root}`);
-      print(`  Mode      ${{ default: "ask before edits and commands", acceptEdits: "accept edits", plan: "plan (read-only)" }[state.mode]}`);
+      print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}`);
       print(`  Context   ~${kTokens(tokens)} tokens in ${state.messages.length} messages`);
       print(`  Usage     ↓ ${kTokens(state.usage.out)} tokens generated this session`);
       const allowed = project().allowedCommands;
@@ -822,7 +822,7 @@ async function command(line) {
       api.cfg.url = /^https?:\/\//.test(value) ? value : "https://" + value;
       delete api.cfg.cookie;
       api.save();
-      print(c.green(`  ⎿  Site: ${api.baseUrl()}`));
+      print(c.green(`   Site: ${api.baseUrl()}`));
       state.warmed.clear();
       await ensureLogin();
       return loadModels().catch((e) => print(c.red(e.message)));
@@ -851,7 +851,7 @@ async function handleInput(input) {
   }
   while (queue.length && !state.busy) {
     const next = queue.shift();
-    print(c.bold("> ") + next.split("\n")[0]);
+    print(c.bold(c.ink("y› ")) + next.split("\n")[0]);
     await runAgent(expandMentions(next));
   }
   showPrompt();
@@ -937,17 +937,11 @@ async function main() {
 
   const home = os.homedir();
   const shownRoot = root.toLowerCase().startsWith(home.toLowerCase()) ? "~" + root.slice(home.length) : root;
+  const details = [];
+  if (state.localOffline) details.push("the PC is offline · cloud models only");
+  if (!fs.existsSync(path.join(root, "YAI.md")) && !fs.existsSync(path.join(root, "CLAUDE.md"))) details.push("/init writes notes about this project for next time");
+  ui.banner({ version: VERSION, cwd: shownRoot, model: modelLabel(), user: state.user, details });
   print("");
-  ui.box([
-    `${c.accent("✻")} ${c.bold("Welcome to yAI Code")} ${c.dim("v" + VERSION)}`,
-    "",
-    c.dim(`  signed in as ${state.user} · /help for help`),
-    c.dim(`  model: ${modelLabel()}${state.localOffline ? " (PC offline, cloud only)" : ""}`),
-    c.dim(`  cwd: ${shownRoot}`),
-  ]);
-  if (!fs.existsSync(path.join(root, "YAI.md")) && !fs.existsSync(path.join(root, "CLAUDE.md"))) {
-    print(c.dim("\n Tip: run /init so yAI writes notes about this project for future sessions."));
-  }
   showPrompt();
 }
 
