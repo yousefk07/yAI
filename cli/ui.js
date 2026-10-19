@@ -140,7 +140,7 @@ function markdownWriter() {
 
 // ---------- steps: one row each ("read    src/app.js · 42 lines") ----------
 // Looking around (read, list, find, search) is quiet; changing things (edit, create, run) stands out.
-const VERB = { Read: "read", List: "list", Find: "find", Search: "search", Update: "edit", Edit: "edit", Write: "create", Create: "create", PowerShell: "run", Bash: "run", Shell: "run" };
+const VERB = { Read: "read", List: "list", Find: "find", Search: "search", Update: "edit", Edit: "edit", Write: "create", Create: "create", PowerShell: "run", Bash: "run", Shell: "run", Image: "image", Video: "video" };
 const LOOKS = new Set(["read", "list", "find", "search"]);
 let pending = null;
 

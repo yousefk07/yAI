@@ -685,10 +685,105 @@ const HELP = [
   ["/init", "Write a YAI.md with notes about this project"],
   ["/status", "Account, model, folder and usage"],
   ["/login, /logout", "Sign in or out of your yAI account"],
+  ["/image [16:9] [@photo] <prompt>", "Make an image, or edit a photo; saved in yai-media/"],
+  ["/video [16:9] <prompt>", "Make a 5-second video with sound; saved in yai-media/"],
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/clear", "/compact", "/init", "/status", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/clear", "/compact", "/init", "/status", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+
+// ---------- /image and /video: the web app's Make Image / Make Video, saved into the project ----------
+const MEDIA_DIR = "yai-media";
+const ASPECTS = ["1:1", "16:9", "9:16"];
+const PHOTO_TYPES = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+const MAX_PHOTO_BYTES = 2_200_000; // the site takes up to 3 MB of base64
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "media";
+// yai-media/<prompt-slug>.png, then -2, -3 … so nothing is ever overwritten.
+function mediaFile(prompt, ext) {
+  const dir = path.join(root, MEDIA_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  for (let n = 1; ; n++) {
+    const file = path.join(dir, `${slug(prompt)}${n > 1 ? "-" + n : ""}${ext}`);
+    if (!fs.existsSync(file)) return file;
+  }
+}
+// A wait that Esc can cut short.
+const wait = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => (clearTimeout(t), reject(new Error("stopped"))), { once: true });
+  });
+
+async function makeMedia(kind, arg) {
+  const words = arg.split(/\s+/).filter(Boolean);
+  const aspect = ASPECTS.includes(words[0]) ? words.shift() : undefined;
+  const photo = words[0] && words[0].startsWith("@") ? words.shift().slice(1) : null;
+  const prompt = words.join(" ");
+  if (!prompt) return print(c.yellow(`Usage: /${kind} [16:9|9:16|1:1] ${kind === "image" ? "[@photo.jpg] " : ""}<what you want>`));
+  if (photo && kind === "video") return print(c.yellow("Animating a photo is turned off for now. Describe the video instead."));
+  if (!state.user) await ensureLogin();
+
+  let image;
+  if (photo) {
+    const abs = T.resolve(ctx, photo);
+    const mime = PHOTO_TYPES[path.extname(abs).toLowerCase()];
+    if (!mime) return print(c.yellow("Attach a .jpg, .png or .webp photo."));
+    let buf;
+    try {
+      buf = fs.readFileSync(abs);
+    } catch {
+      return print(c.red(`File not found: ${photo}`));
+    }
+    if (buf.length > MAX_PHOTO_BYTES) return print(c.yellow("That photo is over 2 MB. Make it smaller first (the website shrinks photos for you)."));
+    image = `data:${mime};base64,${buf.toString("base64")}`;
+  }
+
+  state.busy = true;
+  state.interrupted = false;
+  state.abort = new AbortController();
+  syncMute();
+  ui.resetSections();
+  print("");
+  ui.toolHeader(kind === "video" ? "Video" : "Image", (photo ? `@${photo} ` : "") + prompt);
+  let job;
+  try {
+    const started = await api.startMedia({ kind, prompt, image, aspect });
+    job = started.job;
+    spinner.start(`starting ${started.label || kind}`);
+    let result;
+    while (!result) {
+      await wait(kind === "video" ? 5000 : 2500, state.abort.signal);
+      const s = await api.pollMedia(job, state.abort.signal);
+      if (s.error) throw new Error(s.error);
+      if (s.image || s.video) result = s;
+      else spinner.text(s.state === "waking" ? `waking the GPU (${s.elapsed}s, can take a few minutes)` : `making the ${kind} (${s.elapsed}s)`);
+    }
+    let file, buf;
+    if (result.image) {
+      const [, mime, b64] = result.image.match(/^data:([^;]+);base64,(.*)$/);
+      buf = Buffer.from(b64, "base64");
+      file = mediaFile(prompt, { "image/png": ".png", "image/webp": ".webp" }[mime] || ".jpg");
+    } else {
+      spinner.text("downloading the video");
+      buf = await api.downloadVideo(result.video.id, state.abort.signal);
+      file = mediaFile(prompt, ".mp4");
+    }
+    fs.writeFileSync(file, buf);
+    spinner.stop();
+    ui.toolResult(`saved ${T.rel(ctx, file)}${result.ms ? ` · ${Math.round(result.ms / 1000)}s` : ""}`, { color: c.green });
+    // yAI hears about it, so "use that image on the page" works in the next message.
+    state.pendingContext.push(`I made ${kind === "video" ? "a video" : "an image"} with /${kind} ("${prompt}") and saved it as ${T.rel(ctx, file)}.`);
+  } catch (err) {
+    spinner.stop();
+    if (job && state.interrupted) api.cancelMedia(job);
+    ui.toolResult(state.interrupted ? "stopped" : err.message, { color: state.interrupted ? c.yellow : c.red });
+  } finally {
+    state.busy = false;
+    state.abort = null;
+    syncMute();
+  }
+}
 
 const INIT_PROMPT =
   "Look through this project and create a YAI.md file at the root with notes for future sessions: what the project is, " +
@@ -771,7 +866,7 @@ async function command(line) {
     case "/help":
     case "/?":
       print("");
-      for (const [n, d] of HELP) print(`  ${c.bold(c.ink(n.padEnd(30)))} ${c.dim(d)}`);
+      for (const [n, d] of HELP) print(`  ${c.bold(c.ink(n.padEnd(34)))} ${c.dim(d)}`);
       print("");
       print(c.dim("  @path        attach a file or folder to your message (Tab completes)"));
       print(c.dim("  !command     run a shell command yourself; yAI sees the output"));
@@ -796,6 +891,9 @@ async function command(line) {
       return compact();
     case "/init":
       return runAgent(INIT_PROMPT);
+    case "/image":
+    case "/video":
+      return makeMedia(cmd.slice(1), arg);
     case "/status": {
       const tokens = Math.round(JSON.stringify(state.messages).length / 3.6);
       print("");

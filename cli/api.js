@@ -146,4 +146,22 @@ async function chat({ messages, model, system, conversationId, signal, onText, o
   return { usage };
 }
 
-module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat };
+// ---------- images and videos (the web app's Make Image / Make Video) ----------
+// A job is started, then polled until the GPU is done (see lib/images.js on the site).
+async function startMedia({ kind, prompt, image, aspect }) {
+  return json("/api/image", { method: "POST", body: { kind, prompt, image, aspect } });
+}
+async function pollMedia(job, signal) {
+  return json(`/api/image?job=${encodeURIComponent(job)}`, { signal });
+}
+async function cancelMedia(job) {
+  await request(`/api/image?job=${encodeURIComponent(job)}`, { method: "DELETE" }).catch(() => {});
+}
+// A finished video is stored on the site; this downloads it.
+async function downloadVideo(id, signal) {
+  const res = await request(`/api/image?video=${encodeURIComponent(id)}`, { signal });
+  if (!res.ok) throw new Error(await errorOf(res));
+  return Buffer.from(await res.arrayBuffer());
+}
+
+module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo };
