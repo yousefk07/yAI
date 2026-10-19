@@ -1,0 +1,11 @@
+.env
+.env.*
+.vercel
+node_modules
+activity.jsonl
+logs
+data
+CLAUDE.md
+.claude/
+.agents/
+skills-lock.json

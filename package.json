@@ -1,0 +1,14 @@
+{
+  "name": "local-llm-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web chat interface for a local LLM served by LM Studio",
+  "scripts": {
+    "start": "node server.js",
+    "bridge": "node --env-file-if-exists=.env bridge.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:8787"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
