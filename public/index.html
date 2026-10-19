@@ -112,7 +112,7 @@
             <li><button type="button" class="suggestion" data-prompt="Explain how black holes work, simply"><span><span class="suggestion-tag">Talk</span>Explain how black holes work, simply</span></button></li>
             <li data-feature="imageGen" hidden><button type="button" class="suggestion" data-mode="image"><span><span class="suggestion-tag">Image</span>Create an image from a description</span></button></li>
             <li data-feature="imageEdit" hidden><button type="button" class="suggestion" data-mode="image"><span><span class="suggestion-tag">Edit</span>Upload a photo and change it with words</span></button></li>
-            <li data-feature="videoGen" hidden><button type="button" class="suggestion" data-mode="video"><span><span class="suggestion-tag">Video</span>Make a short video with sound, from text or a photo</span></button></li>
+            <li data-feature="videoGen" hidden><button type="button" class="suggestion" data-mode="video"><span><span class="suggestion-tag">Video</span>Make a short video with sound from a description</span></button></li>
           </ul>
           <p class="welcome-note" id="welcomeNote">Chatting as a guest. <button type="button" class="link-btn" id="welcomeSignup">Create an account</button> to keep your chat history.</p>
         </div>
@@ -1010,12 +1010,12 @@
         pending = pending.filter((p) => p.kind === "image" && p.status !== "error" && kept++ < 1);
         renderTray();
       }
-      $("attach").disabled = mode === "image" && !features.imageEdit;
+      $("attach").disabled = (mode === "image" && !features.imageEdit) || mode === "video"; // photo → video is off for now
       $("fileInput").accept = mode === "chat" ? "image/*,application/pdf,.pdf" : "image/*";
       $("attach").title = mode === "image" ? "Attach a photo to edit" : mode === "video" ? "Attach a photo to animate" : "Attach image or PDF";
       input.placeholder =
         mode === "image" ? (features.imageEdit ? "Describe an image, or attach a photo and say how to change it" : "Describe an image to create")
-        : mode === "video" ? "Describe a video, or attach a photo to bring it to life"
+        : mode === "video" ? "Describe a video to create"
         : "Ask anything";
       updateAspectPick();
       input.focus();
