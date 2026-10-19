@@ -1,7 +1,7 @@
 # yAI
 
 A ChatGPT-style web app that runs AI models on my own hardware: small models on my laptop's GPU, and a
-27B model plus an image generator on serverless cloud GPUs that only run while someone is using them.
+27B model, an image generator and a video generator on serverless cloud GPUs that only run while someone is using them.
 
 ![yAI chat interface](docs/screenshot.png)
 
@@ -9,14 +9,16 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 |---|---|---|
 | **Qwen 3.8 27B** (4-bit AWQ) | RunPod serverless vLLM, 48 GB GPU | ~34 tokens/s |
 | Qwen 3.5 4B, Phi 4 Mini, Gemma 4 E2B and others | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
-| **FLUX.1 [schnell]** (images) | RunPod serverless vLLM-Omni, 48 GB GPU | ~4 s per 1024×1024 image |
+| **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
+| **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
 
 ## Features
 
 - **Streaming chat** with Markdown, tables, code blocks and LaTeX math (KaTeX)
 - **Hybrid routing**: local models when the PC is on; the cloud model is always available and becomes the
   default automatically when the PC is offline
-- **Image generation** with FLUX.1 [schnell], behind a prompt safety filter and per-user daily limits
+- **Make Image / Make Video**: text → image, photo editing (image → image), text → video and photo → video,
+  behind a prompt safety filter and per-user daily limits
 - **Accounts** with saved chat history and images, or guest access with an invite code
 - **Image and PDF input**: images are downscaled in the browser; PDF text is extracted with pdf.js, and
   scanned PDFs fall back to rendering their pages as images
@@ -28,13 +30,16 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 
 ```
                          ┌─▶ RunPod serverless: Qwen 3.8 27B (vLLM)       scales to zero when idle
-Browser ─▶ Vercel ───────┼─▶ RunPod serverless: FLUX.1 schnell (vLLM-Omni)
-   (UI + /api functions) ├─▶ Upstash Redis: accounts, chats, images, activity log
+Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Image 2.1, MiniMax H3 (ComfyUI)
+   (UI + /api functions) ├─▶ Upstash Redis: accounts, chats, images, videos, activity log
                          └─▶ Cloudflare Tunnel ─▶ bridge.js on the PC ─▶ LM Studio (local models)
 ```
 
 - **`api/`** holds the Vercel functions. They check access, route each request to the right model, and
   re-emit model output as simple Server-Sent Events, so the browser never talks to a model server directly.
+- **Image and video jobs are polled.** `/api/image` starts a RunPod job and gives the browser a signed token
+  for it. The browser polls until the result is ready, so a slow video never hits a function time limit.
+  Workflows live in `workflows/` (ComfyUI "Export (API)" format, with `$prompt` and `$image` placeholders).
 - **Cloud GPUs scale to zero.** A conversation costs about $0.05 and an image well under a cent. After a quiet
   period the first request wakes a GPU (up to a minute or two), and the UI shows a timer while it does.
 - **`bridge.js`** runs on the PC. It only listens on localhost, requires a shared bearer token, and only allows
@@ -74,7 +79,9 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `LMSTUDIO_URL`, `BRIDGE_TOKEN` | Tunnel URL + `/v1`, and the shared secret for the bridge |
 | `RUNPOD_API_KEY` | RunPod API key for the cloud endpoints |
 | `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B as `qwen3.8-27b-cloud` |
-| `RUNPOD_IMAGE_ENDPOINT_ID` | Serverless vLLM-Omni endpoint serving FLUX.1 schnell |
+| `RUNPOD_IMAGE_ENDPOINT_ID` | ComfyUI endpoint for text → image (`workflows/t2i.json`) |
+| `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
+| `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis (set automatically by the Vercel integration) |
 | `ACCESS_CODE` | Invite code for guests and for creating accounts |
 | `SESSION_SECRET` | Signs user and admin sessions |

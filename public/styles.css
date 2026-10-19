@@ -93,7 +93,7 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action
 .btn-ghost {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
   background: transparent; border: 1px solid var(--border); border-radius: 8px;
-  font-size: 13.5px; font-weight: 500; color: var(--text-2); text-decoration: none;
+  font-size: 13.5px; font-weight: 500; color: var(--text-2); text-decoration: none; white-space: nowrap; flex: none;
 }
 .btn-ghost:hover { background: var(--hover); color: var(--text); }
 .icon-btn {
@@ -458,14 +458,46 @@ a.menu-item { color: inherit; text-decoration: none; }
 .mode-btn:hover { color: var(--text); border-color: var(--border-strong); }
 .mode-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
-.gen-image { margin: 0; }
-.gen-image img { display: block; width: 100%; max-width: 512px; height: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.gen-media { margin: 0; }
+.gen-media img, .gen-media video {
+  display: block; width: 100%; max-width: 512px; height: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2);
+}
+.gen-media video { max-width: 640px; background: #000; }
 .image-status { display: flex; flex-direction: column; gap: 10px; color: var(--muted); font-size: 14px; }
 .image-ph {
   width: 100%; max-width: 512px; aspect-ratio: 1; border-radius: 12px; border: 1px solid var(--border);
   background: linear-gradient(100deg, var(--surface-2) 30%, var(--hover) 50%, var(--surface-2) 70%) 0 0 / 300% 100%;
   animation: shimmer 1.6s linear infinite;
 }
+.image-ph.video { max-width: 640px; aspect-ratio: 16 / 9; }
 @keyframes shimmer { to { background-position: -150% 0; } }
 a.action.download { text-decoration: none; }
-@media (max-width: 600px) { .mode-btn span { display: none; } .mode-btn { width: 34px; padding: 0; justify-content: center; } }
+/* "Image" / "Edit" / "Video" label in front of the media suggestions */
+/* Tag + text in a row, so wrapped text lines up with itself and every suggestion starts at the same spot */
+.suggestion > span { display: flex; align-items: baseline; gap: 12px; }
+.suggestion-tag {
+  flex: none; width: 52px; text-align: center; padding: 1px 0; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11.5px; font-weight: 500; letter-spacing: 0.02em; color: var(--muted);
+}
+.suggestion:hover .suggestion-tag { color: var(--text); border-color: var(--border-strong); }
+/* Shape picker (1:1 / 16:9 / 9:16), shown in Make Image / Make Video mode */
+.aspect-pick { display: inline-flex; height: 32px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.aspect-pick[hidden] { display: none; }
+.aspect-pick button {
+  display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: none;
+  color: var(--muted); font-size: 12px; font-weight: 500;
+}
+.aspect-pick button + button { border-left: 1px solid var(--border); }
+.aspect-pick button { color: var(--faint); }
+.aspect-pick button:hover { color: var(--text); }
+.aspect-pick button[aria-checked="true"] { background: var(--hover); color: var(--text); box-shadow: inset 0 -2px 0 var(--text); }
+.aspect-pick .ar { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; }
+@media (max-width: 600px) {
+  .mode-btn { padding: 0 9px; font-size: 12.5px; }
+  /* Make room for the shape picker: the inactive mode button and the shapes show icons only */
+  .composer.media .mode-btn[aria-pressed="false"] span, .aspect-pick .ar-label { display: none; }
+  .composer.media .mode-btn[aria-pressed="false"] { width: 34px; padding: 0; justify-content: center; }
+}
+/* Very narrow phones: in Make Image / Make Video mode the active button drops its label too */
+@media (max-width: 380px) { .composer.media .mode-btn span { display: none; } .composer.media .mode-btn { width: 34px; padding: 0; justify-content: center; } }
+@media (max-width: 330px) { .mode-btn span { display: none; } .mode-btn { width: 34px; padding: 0; justify-content: center; } }

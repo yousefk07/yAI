@@ -23,7 +23,7 @@
       "maxDuration": 15
     },
     "api/image.js": {
-      "maxDuration": 300
+      "maxDuration": 60
     }
   }
 }

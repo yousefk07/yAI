@@ -27,6 +27,7 @@ const ROUTES = {
   "POST /api/image": handleImage,
   "PUT /api/image": handleImage,
   "GET /api/image": handleImage,
+  "DELETE /api/image": handleImage,
 };
 
 const PUBLIC_DIR = path.join(__dirname, "public");

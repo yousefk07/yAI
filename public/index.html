@@ -107,12 +107,12 @@
       <main id="scroller" class="scroller">
         <div id="welcome" class="welcome">
           <h2>What can I help with?</h2>
-          <p class="muted">Ask a question, or attach an image or PDF to talk about it.</p>
+          <p class="muted">Ask anything, make images and videos, or attach a photo or PDF to talk about it.</p>
           <ul class="suggestions">
-            <li><button type="button" class="suggestion" data-prompt="Explain how the stock market works, simply">Explain how the stock market works, simply</button></li>
-            <li><button type="button" class="suggestion" data-prompt="Write a short, catchy Instagram caption for a gym">Write a short Instagram caption for a gym</button></li>
-            <li><button type="button" class="suggestion" data-prompt="Plan a 3-day trip to Toronto on a budget">Plan a 3-day trip to Toronto on a budget</button></li>
-            <li><button type="button" class="suggestion" data-prompt="Write a Python function that reverses a string">Write a Python function that reverses a string</button></li>
+            <li><button type="button" class="suggestion" data-prompt="Explain how black holes work, simply"><span><span class="suggestion-tag">Talk</span>Explain how black holes work, simply</span></button></li>
+            <li data-feature="imageGen" hidden><button type="button" class="suggestion" data-mode="image"><span><span class="suggestion-tag">Image</span>Create an image from a description</span></button></li>
+            <li data-feature="imageEdit" hidden><button type="button" class="suggestion" data-mode="image"><span><span class="suggestion-tag">Edit</span>Upload a photo and change it with words</span></button></li>
+            <li data-feature="videoGen" hidden><button type="button" class="suggestion" data-mode="video"><span><span class="suggestion-tag">Video</span>Make a short video with sound, from text or a photo</span></button></li>
           </ul>
           <p class="welcome-note" id="welcomeNote">Chatting as a guest. <button type="button" class="link-btn" id="welcomeSignup">Create an account</button> to keep your chat history.</p>
         </div>
@@ -131,10 +131,19 @@
             <button id="attach" class="icon-btn" type="button" aria-label="Attach image or PDF" title="Attach image or PDF">
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button id="imageMode" class="mode-btn" type="button" aria-pressed="false" title="Generate an image" hidden>
+            <button id="imageMode" class="mode-btn" type="button" aria-pressed="false" title="Create an image, or attach a photo to edit it" hidden>
               <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 17.5l5-5 4 4 2.5-2.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-              <span>Image</span>
+              <span>Make Image</span>
             </button>
+            <button id="videoMode" class="mode-btn" type="button" aria-pressed="false" title="Create a video, or attach a photo to animate it" hidden>
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 10.5l5-3v9l-5-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span>Make Video</span>
+            </button>
+            <div id="aspectPick" class="aspect-pick" role="radiogroup" aria-label="Shape" hidden>
+              <button type="button" role="radio" data-aspect="1:1" title="Square"><span class="ar" style="width:11px;height:11px"></span><span class="ar-label">1:1</span></button>
+              <button type="button" role="radio" data-aspect="16:9" title="Wide"><span class="ar" style="width:15px;height:9px"></span><span class="ar-label">16:9</span></button>
+              <button type="button" role="radio" data-aspect="9:16" title="Tall"><span class="ar" style="width:9px;height:15px"></span><span class="ar-label">9:16</span></button>
+            </div>
             <input id="fileInput" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
             <span class="composer-hint hide-sm">Enter to send · Shift + Enter for a new line</span>
             <button id="send" class="send" type="submit" aria-label="Send" disabled>
@@ -448,8 +457,7 @@
         }
         buildModelMenu();
         $("modelPicker").hidden = data.models.length < 1;
-        $("imageMode").hidden = !data.imageGen;
-        if (!data.imageGen && imageMode) setImageMode(false);
+        applyFeatures(data);
         // PC offline: only the cloud model is available (and it's selected automatically).
         setStatus(true, data.localOffline ? "Cloud only" : "Online", data.localOffline ? "The PC is offline; using the cloud model" : "");
         // Opening the page never wakes the (paid) cloud GPU; picking it or sending to it does.
@@ -586,6 +594,9 @@
     const SCAN_PAGES = 3;        // scanned PDFs: how many pages to send as images
     const MAX_REQUEST_BYTES = 4_000_000; // Vercel rejects request bodies over 4.5 MB
     let pending = [];
+    // "chat" | "image" (text → image, or edit an attached photo) | "video" (text → video, or animate a photo)
+    let mode = "chat";
+    const aspect = { image: "1:1", video: "16:9" }; // chosen output shape per media mode
 
     const imageCount = () =>
       pending.reduce((n, p) => n + (p.status === "error" ? 0 : p.kind === "image" ? 1 : (p.scans || []).length), 0);
@@ -615,6 +626,8 @@
         const item = { id: uuid(), kind: isPdf ? "pdf" : "image", name: file.name || "Pasted image", status: "loading" };
         if (!isPdf && !isImage) fail(item, "Only images and PDFs");
         else if (file.size > 30e6) fail(item, "Too large (30 MB max)");
+        else if (mode !== "chat" && isPdf) fail(item, `Attach a photo to ${mode === "video" ? "animate" : "edit"}`);
+        else if (mode !== "chat" && imageCount() >= 1) fail(item, "One photo at a time");
         else if (isImage && imageCount() >= MAX_IMAGES) fail(item, `${MAX_IMAGES} images max`);
         pending.push(item);
         if (item.status === "loading") {
@@ -653,6 +666,7 @@
         await img.decode().catch(() => { throw new Error("Unsupported image format"); });
         item.images = [toJpeg(img, img.naturalWidth, img.naturalHeight, 1280, 0.85)];
         item.thumb = toJpeg(img, img.naturalWidth, img.naturalHeight, 160, 0.7);
+        item.ratio = img.naturalWidth / img.naturalHeight; // a video from this photo keeps its shape
         item.status = "ready";
       } finally {
         URL.revokeObjectURL(url);
@@ -735,6 +749,7 @@
           <button type="button" class="chip-x" aria-label="Remove ${escapeHtml(p.name)}">×</button>
         </div>`).join("");
       updateSendState();
+      updateAspectPick();
     }
     tray.addEventListener("click", (e) => {
       const x = e.target.closest(".chip-x");
@@ -750,7 +765,9 @@
       let lastWithFiles = -1;
       history.forEach((m, i) => { if (m.role === "user" && m.attachments?.length) lastWithFiles = i; });
       return history.map((m, i) => {
-        if (m.role !== "user") return { role: m.role, content: m.image ? `[Generated an image of: "${m.image.prompt}"]` : m.content };
+        if (m.role !== "user") {
+          return { role: m.role, content: m.image ? `[Generated an image of: "${m.image.prompt}"]` : m.video ? `[Generated a video of: "${m.video.prompt}"]` : m.content };
+        }
         let text = m.content || "";
         const atts = m.attachments || [];
         const images = [];
@@ -846,7 +863,7 @@
       messagesEl.innerHTML = "";
       for (const m of chat.history) {
         if (m.role === "user") addUser(m.content, m.attachments);
-        else if (m.image) renderImage(addAssistant(), m);
+        else if (m.image || m.video) renderMedia(addAssistant(), m);
         else fillAssistant(addAssistant(), m.content, true, m.stats);
       }
       updateWelcome();
@@ -873,7 +890,8 @@
       // A model load doesn't block sending: send() waits for it while the loading bar shows.
       const loading = pending.some((p) => p.status === "loading");
       const ready = pending.some((p) => p.status === "ready");
-      sendBtn.disabled = loading || (!input.value.trim() && !ready);
+      // Images and videos always need a description; chat can send just an attachment.
+      sendBtn.disabled = loading || (!input.value.trim() && (mode !== "chat" || !ready));
     }
     function setBusy(busy) {
       sendBtn.classList.toggle("busy", busy);
@@ -971,36 +989,85 @@
       }
     }
 
-    // ---------- Image generation (FLUX.1 schnell on a cloud GPU) ----------
-    let imageMode = false;
-    function setImageMode(on) {
-      imageMode = on;
-      $("imageMode").setAttribute("aria-pressed", String(on));
-      $("attach").disabled = on;
-      input.placeholder = on ? "Describe an image to create" : "Ask anything";
+    // ---------- Image and video generation (cloud GPUs) ----------
+    let features = { imageGen: false, imageEdit: false, videoGen: false };
+
+    function applyFeatures(data) {
+      features = { imageGen: !!data.imageGen, imageEdit: !!data.imageEdit, videoGen: !!data.videoGen };
+      $("imageMode").hidden = !(features.imageGen || features.imageEdit);
+      $("videoMode").hidden = !features.videoGen;
+      document.querySelectorAll(".suggestions [data-feature]").forEach((li) => (li.hidden = !features[li.dataset.feature]));
+      if ((mode === "image" && $("imageMode").hidden) || (mode === "video" && !features.videoGen)) setMode("chat");
+    }
+
+    function setMode(next) {
+      mode = next;
+      $("imageMode").setAttribute("aria-pressed", String(mode === "image"));
+      $("videoMode").setAttribute("aria-pressed", String(mode === "video"));
+      // Media modes take at most one photo: drop PDFs and extra images.
+      if (mode !== "chat") {
+        let kept = 0;
+        pending = pending.filter((p) => p.kind === "image" && p.status !== "error" && kept++ < 1);
+        renderTray();
+      }
+      $("attach").disabled = mode === "image" && !features.imageEdit;
+      $("fileInput").accept = mode === "chat" ? "image/*,application/pdf,.pdf" : "image/*";
+      $("attach").title = mode === "image" ? "Attach a photo to edit" : mode === "video" ? "Attach a photo to animate" : "Attach image or PDF";
+      input.placeholder =
+        mode === "image" ? (features.imageEdit ? "Describe an image, or attach a photo and say how to change it" : "Describe an image to create")
+        : mode === "video" ? "Describe a video, or attach a photo to bring it to life"
+        : "Ask anything";
+      updateAspectPick();
       input.focus();
     }
-    $("imageMode").addEventListener("click", () => setImageMode(!imageMode));
+    // Output shape for new images and videos (state is next to `mode`). With a photo attached it's
+    // automatic: an edit keeps the photo's shape, and a video from a photo uses the closest shape.
+    const photoAspect = (r) => (r > 1.3 ? "16:9" : r < 0.77 ? "9:16" : "1:1");
+    function updateAspectPick() {
+      const pick = $("aspectPick");
+      const photo = pending.some((p) => p.kind === "image" && p.status !== "error");
+      pick.hidden = mode === "chat" || photo;
+      $("form").classList.toggle("media", mode !== "chat");
+      if (pick.hidden) return;
+      pick.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.aspect === aspect[mode])));
+    }
+    $("aspectPick").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      aspect[mode] = b.dataset.aspect;
+      updateAspectPick();
+      input.focus();
+    });
+    $("imageMode").addEventListener("click", () => setMode(mode === "image" ? "chat" : "image"));
+    $("videoMode").addEventListener("click", () => setMode(mode === "video" ? "chat" : "video"));
 
-    const imageSrc = (img) => (img.id ? `/api/image?id=${encodeURIComponent(img.id)}` : img.data || "");
+    const mediaSrc = (m) =>
+      m.video ? (m.video.id ? `/api/image?video=${encodeURIComponent(m.video.id)}` : "")
+      : m.image.id ? `/api/image?id=${encodeURIComponent(m.image.id)}` : m.image.data || "";
 
-    function renderImage(el, m) {
-      const src = imageSrc(m.image);
+    function renderMedia(el, m) {
+      const src = mediaSrc(m);
+      const item = m.video || m.image;
       el.classList.remove("streaming");
-      el.querySelector(".content").innerHTML = src
-        ? `<figure class="gen-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(m.image.prompt)}" loading="lazy"></figure>`
-        : `<p class="muted">This image wasn't saved. Log in to keep the images you create.</p>`;
+      el.querySelector(".content").innerHTML = !src
+        ? `<p class="muted">This ${m.video ? "video" : "image"} wasn't saved. Log in to keep what you create.</p>`
+        : m.video
+          ? `<figure class="gen-media"><video src="${escapeHtml(src)}" controls playsinline loop preload="metadata" aria-label="${escapeHtml(item.prompt)}"></video></figure>`
+          : `<figure class="gen-media"><img src="${escapeHtml(src)}" alt="${escapeHtml(item.prompt)}" loading="lazy"></figure>`;
       el.dataset.text = "";
       const actions = el.querySelector(".actions");
       el.querySelector(".copy").hidden = true;
       actions.querySelector(".download")?.remove();
       if (src) actions.insertAdjacentHTML("afterbegin",
-        `<a class="action download" href="${escapeHtml(src)}" download="yai-image.jpg">
+        `<a class="action download" href="${escapeHtml(src)}" download="${m.video ? "yai-video.mp4" : "yai-image.jpg"}">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Download</span></a>`);
-      el.querySelector(".meta").textContent = m.stats?.ms ? `FLUX.1 schnell · ${(m.stats.ms / 1000).toFixed(1)}s` : "FLUX.1 schnell";
+      const label = m.label || (m.video ? "MiniMax H3" : "Qwen-Image 2.1");
+      el.querySelector(".meta").textContent = m.stats?.ms ? `${label} · ${fmtDuration(m.stats.ms / 1000)}` : label;
       actions.hidden = false;
     }
+    const fmtDuration = (s) => (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
+    const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
     // Re-encodes the generated image as a JPEG small enough to save with the chat.
     async function toStoredJpeg(src) {
@@ -1016,56 +1083,72 @@
       return out;
     }
 
-    async function sendImage(prompt) {
-      chat.history.push({ role: "user", content: prompt, mode: "image" });
+    const sleep = (ms, signal) => new Promise((resolve, reject) => {
+      const t = setTimeout(resolve, ms);
+      signal.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Stopped", "AbortError")); }, { once: true });
+    });
+
+    // kind: "image" or "video"; photo: an attached image (edit it, or use it as the video's first frame).
+    async function sendMedia(kind, prompt, photo) {
+      const attachments = photo ? [{ kind: "image", name: photo.name, thumb: photo.thumb, images: photo.images }] : [];
+      chat.history.push({ role: "user", content: prompt, mode: kind, ...(attachments.length && { attachments }) });
       saveChat();
-      addUser(prompt);
+      addUser(prompt, attachments);
       const el = addAssistant();
+      // Edits keep the photo's shape (the server ignores this); everything else uses the chosen shape.
+      const shape = photo ? photoAspect(photo.ratio || 1) : aspect[kind];
+      const phRatio = photo && kind === "image" ? photo.ratio || 1 : shape.replace(":", " / ");
       const status = (text) => {
-        el.querySelector(".content").innerHTML = `<div class="image-status"><div class="image-ph"></div><span>${escapeHtml(text)}</span></div>`;
+        el.querySelector(".content").innerHTML = `<div class="image-status"><div class="image-ph${kind === "video" ? " video" : ""}" style="aspect-ratio:${phRatio}"></div><span>${escapeHtml(text)}</span></div>`;
         scrollToBottom();
       };
       status("Starting…");
       const myController = (controller = new AbortController());
+      const signal = myController.signal;
       setBusy(true);
       const startedAt = performance.now();
-      let msg = null;
+      let msg = null, job = null;
       try {
         const r = await api("/api/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, conversationId: chat.id }),
-          signal: controller.signal,
+          body: JSON.stringify({ kind, prompt, image: photo?.images?.[0], aspect: shape, conversationId: chat.id }),
+          signal,
         });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Something went wrong (${r.status})`);
-        const reader = r.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "", result = null;
+        const started = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(started.error || `Something went wrong (${r.status})`);
+        job = started.job;
+        const verb = kind === "video" ? (photo ? "Animating your photo" : "Creating your video") : photo ? "Editing your image" : "Creating your image";
+        let result = null;
         while (!result) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const events = buf.split("\n\n");
-          buf = events.pop();
-          for (const ev of events) {
-            if (!ev.startsWith("data: ")) continue;
-            const m = JSON.parse(ev.slice(6));
-            if (m.error) throw new Error(m.error);
-            if (m.image) result = m.image;
-            else if (m.state === "waking") status(`Waking up the image GPU. This can take a minute · ${Math.floor(m.elapsed / 60)}:${String(m.elapsed % 60).padStart(2, "0")}`);
-            else if (m.state === "generating") status(`Creating your image · ${m.elapsed}s`);
+          await sleep(2000, signal);
+          const p = await (await fetch(`/api/image?job=${encodeURIComponent(job)}`, { cache: "no-store", signal })).json().catch(() => ({}));
+          if (p.error) throw new Error(p.error);
+          if (p.image || p.video) result = p;
+          else if (p.state === "waking") {
+            status(kind === "video"
+              ? `Waking up the video GPU. After a break this can take a few minutes · ${clock(p.elapsed)}`
+              : `Waking up the image GPU. This can take a minute · ${clock(p.elapsed)}`);
+          } else if (p.state === "generating") {
+            status(kind === "video" ? `${verb}. Videos take about 3 minutes · ${clock(p.elapsed)}` : `${verb} · ${p.elapsed}s`);
           }
         }
-        if (!result) throw new Error("No image came back. Try again.");
-        const jpeg = await toStoredJpeg(result);
-        let id = null;
-        if (user) {
-          const saved = await fetch("/api/image", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: jpeg }) });
-          if (saved.ok) id = (await saved.json()).id;
+        const stats = { ms: Math.round(performance.now() - startedAt) };
+        if (result.video) {
+          msg = { role: "assistant", content: "", video: { prompt, id: result.video.id }, label: started.label, stats };
+        } else {
+          const jpeg = await toStoredJpeg(result.image);
+          let id = null;
+          if (user) {
+            const saved = await fetch("/api/image", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: jpeg, job }) });
+            if (saved.ok) id = (await saved.json()).id;
+          }
+          msg = { role: "assistant", content: "", image: { prompt, ...(id ? { id } : { data: jpeg }) }, label: started.label, stats };
         }
-        msg = { role: "assistant", content: "", image: { prompt, ...(id ? { id } : { data: jpeg }) }, stats: { ms: Math.round(performance.now() - startedAt) } };
-        renderImage(el, msg);
+        job = null;
+        renderMedia(el, msg);
       } catch (err) {
+        if (job) fetch(`/api/image?job=${encodeURIComponent(job)}`, { method: "DELETE" }).catch(() => {}); // stopped: don't pay for it
         if (err.locked) { el.remove(); chat.history.pop(); controller = null; setBusy(false); return; }
         el.querySelector(".content").innerHTML = "";
         if (err.name !== "AbortError") showError(el, err.message);
@@ -1086,12 +1169,16 @@
     $("form").addEventListener("submit", (e) => {
       e.preventDefault();
       if (controller) return controller.abort();
-      if (imageMode) {
+      if (mode !== "chat") {
+        if (pending.some((p) => p.status === "loading")) return;
         const prompt = input.value.trim();
         if (!prompt) return;
+        const photo = pending.find((p) => p.status === "ready" && p.kind === "image");
         input.value = "";
+        pending = [];
+        renderTray();
         autosize();
-        return sendImage(prompt);
+        return sendMedia(mode, prompt, photo);
       }
       if (pending.some((p) => p.status === "loading")) return;
       const q = input.value.trim();
@@ -1116,6 +1203,8 @@
     document.querySelectorAll(".suggestion").forEach((b) =>
       b.addEventListener("click", () => {
         if (controller) return;
+        // Image/Edit/Video suggestions just switch on that mode; the user writes the prompt.
+        if (b.dataset.mode) return setMode(b.dataset.mode);
         send(b.dataset.prompt);
       })
     );
