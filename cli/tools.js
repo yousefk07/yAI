@@ -187,7 +187,7 @@ const tools = {
       const width = String(offset + slice.length).length;
       let out = slice.map((l, i) => `${String(offset + i).padStart(width)}\t${l}`).join("\n");
       if (offset - 1 + slice.length < lines.length) out += `\n(file has ${lines.length} lines; read more with <offset>${offset + slice.length}</offset>)`;
-      return clipOutput(out, 40000);
+      return clipOutput(out, ctx.budget || 40000);
     },
   },
 
@@ -313,7 +313,7 @@ async function execRun(ctx, a, signal) {
   // The row says how it went ("exit 1", "12 lines"); the glance at the output goes under it.
   const summary = failed ? killedFor || `exit ${code}` : lines.length ? plural(lines.length, "line") : "no output";
   toolResult(display, { color: failed ? c.red : undefined, summary });
-  return clipOutput(out || "(no output)") + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
+  return clipOutput(out || "(no output)", ctx.budget) + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
 }
 
 module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput };

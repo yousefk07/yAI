@@ -189,11 +189,17 @@ function gitStatus() {
   return { branch, modified };
 }
 
-// How full the model's context is: the conversation and instructions against the model's window.
+// How full the model's context is: the conversation and instructions against the model's window
+// (24k tokens on the cloud GPU, about 8k for the local models), at roughly 3.6 characters a token.
+const contextChars = () => (/cloud/.test(state.model) ? 24000 : 8192) * 3.6;
+const usedChars = () => JSON.stringify(state.messages).length + systemPrompt().length;
 function contextPercent() {
-  const limit = /cloud/.test(state.model) ? 24000 : 8192;
-  const tokens = (JSON.stringify(state.messages).length + 6000) / 3.6;
-  return Math.min(100, Math.round((tokens / limit) * 100));
+  return Math.min(100, Math.round((usedChars() / contextChars()) * 100));
+}
+// How much of a file or a command's output can go back to the model and still leave it room to
+// answer. A small local model can't take a 400-line file whole, so the middle is cut instead.
+function toolBudget() {
+  return Math.max(2500, Math.min(40000, Math.floor(contextChars() * 0.85 - usedChars())));
 }
 
 // The line above the prompt: "main ● 2 modified   ctx 23%   approvals: ask        ⇧⇥ plan mode   /undo".
@@ -541,6 +547,7 @@ function commandPrefix(cmd) {
 
 // Runs one tool call and returns { output, stop }.
 async function execTool(call) {
+  ctx.budget = toolBudget();
   const tool = T.tools[call.name];
   if (!tool) return { output: `Error: unknown tool "${call.name}". Available: ${Object.keys(T.tools).join(", ")}.` };
   spinner.stop();
@@ -631,8 +638,16 @@ async function runAgent(content) {
         print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
         return;
       }
+      // An empty reply usually means the conversation no longer fits the model; say so instead of
+      // ending silently.
+      if (!text.trim()) {
+        state.messages.push({ role: "assistant", content: "(no reply)" });
+        const full = contextPercent() >= 85;
+        ui.note(`${c.yellow("!")} ${c.ink("No reply from the model.")} ${c.dim(full ? "The conversation is too long for it: /compact, /clear, or a bigger model with /model." : "Try again, or pick another model with /model.")}`);
+        break;
+      }
       const call = parseToolCall(text);
-      state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text || "(no reply)" });
+      state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
       if (!call) break;
       let result;
       if (call.cutOff) {
