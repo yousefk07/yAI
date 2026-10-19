@@ -1,0 +1,86 @@
+# yAI
+
+A ChatGPT-style web app that runs AI models on my own hardware: small models on my laptop's GPU, and a
+27B model plus an image generator on serverless cloud GPUs that only run while someone is using them.
+
+![yAI chat interface](docs/screenshot.png)
+
+| Model | Where it runs | Speed |
+|---|---|---|
+| **Qwen 3.8 27B** (4-bit AWQ) | RunPod serverless vLLM, 48 GB GPU | ~34 tokens/s |
+| Qwen 3.5 4B, Phi 4 Mini, Gemma 4 E2B and others | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
+| **FLUX.1 [schnell]** (images) | RunPod serverless vLLM-Omni, 48 GB GPU | ~4 s per 1024×1024 image |
+
+## Features
+
+- **Streaming chat** with Markdown, tables, code blocks and LaTeX math (KaTeX)
+- **Hybrid routing**: local models when the PC is on; the cloud model is always available and becomes the
+  default automatically when the PC is offline
+- **Image generation** with FLUX.1 [schnell], behind a prompt safety filter and per-user daily limits
+- **Accounts** with saved chat history and images, or guest access with an invite code
+- **Image and PDF input**: images are downscaled in the browser; PDF text is extracted with pdf.js, and
+  scanned PDFs fall back to rendering their pages as images
+- **Live status**: LM Studio's real model-load progress, and a timer while a cloud GPU wakes up
+- **Token stats** on every answer (tokens, tokens/s, time) and an **admin dashboard** for activity
+- No framework and no npm dependencies: plain HTML, CSS and JavaScript, Node.js serverless functions
+
+## How it works
+
+```
+                         ┌─▶ RunPod serverless: Qwen 3.8 27B (vLLM)       scales to zero when idle
+Browser ─▶ Vercel ───────┼─▶ RunPod serverless: FLUX.1 schnell (vLLM-Omni)
+   (UI + /api functions) ├─▶ Upstash Redis: accounts, chats, images, activity log
+                         └─▶ Cloudflare Tunnel ─▶ bridge.js on the PC ─▶ LM Studio (local models)
+```
+
+- **`api/`** holds the Vercel functions. They check access, route each request to the right model, and
+  re-emit model output as simple Server-Sent Events, so the browser never talks to a model server directly.
+- **Cloud GPUs scale to zero.** A conversation costs about $0.05 and an image well under a cent. After a quiet
+  period the first request wakes a GPU (up to a minute or two), and the UI shows a timer while it does.
+- **`bridge.js`** runs on the PC. It only listens on localhost, requires a shared bearer token, and only allows
+  the chat, model-list and warm-up routes. It also runs one shared warm-up per model, so several users picking
+  the same model load it once.
+- **Thinking is forced off** (`reasoning_effort: "none"` / `enable_thinking: false`), and any reasoning a model
+  produces anyway is stripped before it reaches the user.
+
+### Security
+
+- Passwords are hashed with **scrypt**; sessions are **HMAC-signed, HttpOnly** cookies, with separate keys for
+  user and admin sessions so one can't be replayed as the other.
+- All model and user text is HTML-escaped before Markdown formatting, so it can't inject markup.
+- Image prompts are screened for explicit content, minors, gore and real, named people, and rate-limited per day.
+
+## Running it
+
+Requirements: Node.js 18+. For local models: [LM Studio](https://lmstudio.ai) and
+[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+For cloud models: a [RunPod](https://www.runpod.io) account with serverless endpoints, and an Upstash Redis
+database (added to the Vercel project from the Vercel Marketplace).
+
+1. Create a `.env` with a long random `BRIDGE_TOKEN`:
+   ```
+   node -e "console.log('BRIDGE_TOKEN=' + require('crypto').randomBytes(32).toString('hex'))" > .env
+   ```
+2. Start LM Studio's server, then `npm run bridge` and `npm run tunnel`.
+3. Deploy to Vercel and set the environment variables below, using the tunnel URL plus `/v1` as `LMSTUDIO_URL`.
+
+On Windows, `Start yAI.cmd` does steps 2–3 in one go (it points Vercel at the new tunnel URL and redeploys),
+and `Stop yAI.cmd` unloads every model and stops everything, freeing the GPU.
+
+For local development without Vercel: `npm start`, then open http://127.0.0.1:3000.
+
+| Variable | Purpose |
+|---|---|
+| `LMSTUDIO_URL`, `BRIDGE_TOKEN` | Tunnel URL + `/v1`, and the shared secret for the bridge |
+| `RUNPOD_API_KEY` | RunPod API key for the cloud endpoints |
+| `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B as `qwen3.8-27b-cloud` |
+| `RUNPOD_IMAGE_ENDPOINT_ID` | Serverless vLLM-Omni endpoint serving FLUX.1 schnell |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis (set automatically by the Vercel integration) |
+| `ACCESS_CODE` | Invite code for guests and for creating accounts |
+| `SESSION_SECRET` | Signs user and admin sessions |
+| `ADMIN_ACCOUNTS` | Comma-separated usernames with admin access |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Optional separate admin login for `/admin` |
+| `SYSTEM_PROMPT`, `MODEL` | Optional: assistant instructions and default model |
+
+Without the Upstash variables, accounts, chats and the activity log are stored on the PC by `bridge.js`.
+The model menu is an allowlist in `lib/handlers.js` (`MODELS`).
