@@ -8,7 +8,7 @@
       "maxDuration": 300
     },
     "api/models.js": {
-      "maxDuration": 15
+      "maxDuration": 60
     },
     "api/admin/activity.js": {
       "maxDuration": 15
