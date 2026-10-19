@@ -47,6 +47,8 @@ const state = {
   usage: { in: 0, out: 0 },
   allowEdits: false,
   printMode: false,
+  undo: [], // edits yAI made this session, newest last: { abs, before, created }
+  placeholder: false, // the faint "Ask yAI…" hint is showing in the empty prompt
 };
 const projectKey = crypto.createHash("sha1").update(root.toLowerCase()).digest("hex").slice(0, 16);
 const project = () => ((api.cfg.projects ||= {})[projectKey] ||= { path: root, allowedCommands: [] });
@@ -170,31 +172,63 @@ function syncMute() {
   ui.rlOutput.muted = state.busy && !state.asking;
 }
 
-// The prompt is the y mark: "y› ".
+// The prompt: "› ", with a faint hint while it's empty.
+const PLACEHOLDER = "Ask yAI, or / for commands";
 function promptText() {
-  return `${c.bold(c.ink("y›"))} `;
+  return ` ${c.user("›")} `;
 }
 
-// The rule above the prompt carries the mode on its right: ask · auto-edit · plan.
+// Git branch and how many files are modified, for the footer and the welcome box.
+function gitStatus() {
+  const branch = gitBranch();
+  if (!branch) return null;
+  let modified = 0;
+  try {
+    modified = execSync("git status --porcelain", { cwd: root, stdio: ["ignore", "pipe", "ignore"], timeout: 2000 }).toString().split("\n").filter(Boolean).length;
+  } catch {}
+  return { branch, modified };
+}
+
+// How full the model's context is: the conversation and instructions against the model's window.
+function contextPercent() {
+  const limit = /cloud/.test(state.model) ? 24000 : 8192;
+  const tokens = (JSON.stringify(state.messages).length + 6000) / 3.6;
+  return Math.min(100, Math.round((tokens / limit) * 100));
+}
+
+// The line above the prompt: "main ● 2 modified   ctx 23%   approvals: ask        ⇧⇥ plan mode   /undo".
 const MODE_NAMES = { default: "ask", acceptEdits: "auto-edit", plan: "plan · read-only" };
-function modeLine() {
-  const name = state.mode === "default" ? c.dim(MODE_NAMES.default) : c.bold(c.ink(MODE_NAMES[state.mode]));
-  return ui.rule(`${name}${c.dim(" · ⇧⇥ mode · /help")}`);
+function footerLine() {
+  const left = [];
+  const git = gitStatus();
+  if (git) left.push(c.faint(git.branch) + (git.modified ? " " + c.yellow(`● ${git.modified} modified`) : ""));
+  left.push(c.faint(`ctx ${contextPercent()}%`));
+  left.push(c.faint("approvals: ") + (state.mode === "default" ? c.faint("ask") : c.yellow(MODE_NAMES[state.mode])));
+  const right = [c.faint(state.mode === "plan" ? "⇧⇥ leave plan" : "⇧⇥ plan mode"), c.faint(state.undo.length ? "/undo" : "/help")];
+  return ui.footer(left, right);
 }
 
 function showPrompt() {
   if (state.printMode) return;
-  print(modeLine());
+  print("");
+  print(footerLine());
   rl.setPrompt(promptText());
   rl.prompt(true);
+  showPlaceholder();
+}
+function showPlaceholder() {
+  if (!process.stdout.isTTY || rl.line) return;
+  process.stdout.write(c.faint(PLACEHOLDER) + `\x1b[${PLACEHOLDER.length}D`);
+  state.placeholder = true;
 }
 
 function setMode(mode, { announce = true } = {}) {
   state.mode = mode;
   if (announce && !state.busy) {
-    process.stdout.write("\r\x1b[K\x1b[1A\r\x1b[K" + modeLine() + "\n");
+    process.stdout.write("\r\x1b[K\x1b[1A\r\x1b[K" + footerLine() + "\n");
     rl.setPrompt(promptText());
     rl.prompt(true);
+    showPlaceholder();
   }
 }
 
@@ -257,6 +291,11 @@ function setupReadline() {
   rl = readline.createInterface({ input: process.stdin, output: ui.rlOutput, terminal: true, history, historySize: 300, completer });
 
   process.stdin.on("keypress", (s, key) => {
+    // The first key clears the faint hint (readline has already drawn the key; this wipes the rest).
+    if (state.placeholder && !state.asking) {
+      state.placeholder = false;
+      process.stdout.write("\x1b[K");
+    }
     if (!key) return;
     if (key.name === "escape") {
       if (state.asking) {
@@ -295,6 +334,7 @@ function setupReadline() {
       fs.writeFileSync(HISTORY_FILE, [...rl.history].reverse().join("\n") + "\n");
     } catch {}
     process.stdout.write("\n");
+    ui.resetTerminal();
     process.exit(0);
   });
 
@@ -443,7 +483,7 @@ async function callModel() {
           lineBuf = lineBuf.slice(i + 1);
         }
         // Show long paragraphs as they arrive, wrapped at the terminal width.
-        const width = Math.max(40, ui.columns() - 4);
+        const width = ui.textWidth();
         while (!inTool && lineBuf.length > width && !/^\s*(<|```)/.test(lineBuf)) {
           const cut = lineBuf.lastIndexOf(" ", width);
           if (cut < width / 2) break;
@@ -475,12 +515,12 @@ async function callModel() {
   return text;
 }
 
-// "apply this edit?  y yes · a always · n no ›" — one line, one letter, Enter means yes.
+// "Apply edit to math.js?" then "[Y] Yes  [A] Yes to All  [N] No  (default is "Y"):", PowerShell-style.
+// One letter, Enter means yes.
 async function askPermission(questionText, alwaysLabel) {
   spinner.stop();
-  const k = (key, label) => `${c.bold(c.ink(key))} ${c.dim(label)}`;
-  const line = `   ${c.ink(questionText)}  ${k("y", "yes")}${c.dim(" · ")}${k("a", alwaysLabel)}${c.dim(" · ")}${k("n", "no")} ${c.dim("›")} `;
-  print("");
+  print(`   ${c.ink(questionText)}`);
+  const line = ui.choices([["Y", "Yes"], ["A", alwaysLabel], ["N", "No"]], "Y");
   for (;;) {
     const raw = await question(line);
     if (raw === null) return { no: true, feedback: "" };
@@ -488,7 +528,7 @@ async function askPermission(questionText, alwaysLabel) {
     if (a === "" || a === "y" || a === "yes" || a === "1") return "yes";
     if (a === "a" || a === "always" || a === "2") return "always";
     if (a === "n" || a === "no" || a === "3") {
-      const fb = await question(`   ${c.ink("what should yAI do instead?")} ${c.dim("(enter to just stop) ›")} `);
+      const fb = await question(`   ${c.ink("What should yAI do instead?")} ${c.dim("(Enter to just stop):")} `);
       return { no: true, feedback: (fb || "").trim() };
     }
   }
@@ -516,20 +556,16 @@ async function execTool(call) {
     if (tool.kind === "edit") {
       const plan = tool.prepare(ctx, call.args);
       if (plan.before === plan.after) return { output: "No change: the new content is the same as the old." };
+      const name = path.basename(plan.abs);
+      T.showEdit(ctx, plan);
       if (state.mode !== "acceptEdits") {
-        T.showEdit(ctx, plan, { applied: false });
-        const ans = await askPermission(
-          plan.created ? "create this file?" : "apply this edit?",
-          "always (auto-edit)"
-        );
+        const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply edit to ${name}?`, "Yes to All");
         if (ans.no) return rejected(ans);
         if (ans === "always") state.mode = "acceptEdits";
-        T.applyEdit(ctx, plan);
-        print(c.green(`   ✓ ${plan.created ? "created" : "saved"}`));
-      } else {
-        T.applyEdit(ctx, plan);
-        T.showEdit(ctx, plan, { applied: true });
       }
+      state.undo.push({ abs: plan.abs, before: plan.before, created: plan.created });
+      T.applyEdit(ctx, plan);
+      ui.note(`${c.green("✓")} ${c.dim(plan.created ? "created · 1 new file" : "applied · 1 file changed")}`);
       return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` };
     }
 
@@ -546,13 +582,16 @@ async function execTool(call) {
       return { output: "Running commands isn't allowed in this mode." };
     }
     if (!allowed && !(state.printMode && state.allowCommands)) {
+      // The question shows the command, so the waiting step row is dropped and redrawn after.
+      ui.cancelRow();
       const prefix = commandPrefix(command);
-      const ans = await askPermission("run this command?", chained ? "always (not for chained commands)" : `always for "${prefix}" here`);
+      const ans = await askPermission(`Run ${c.bold(ui.middle(shownCommand, ui.columns() - 12))}?`, chained ? "Yes, this once" : `Always for "${prefix}"`);
       if (ans.no) return rejected(ans);
       if (ans === "always" && !chained) {
         project().allowedCommands.push(prefix);
         api.save();
       }
+      ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", shownCommand);
     }
     return { output: await T.execRun(ctx, call.args, state.abort.signal) };
   } catch (err) {
@@ -566,7 +605,7 @@ async function execTool(call) {
 }
 
 function rejected(ans) {
-  print(c.red("   ✕ declined") + (ans.feedback ? c.dim(` · ${ans.feedback}`) : ""));
+  ui.note(`${c.red("✕")} ${c.dim("declined")}` + (ans.feedback ? c.dim(` · ${ans.feedback}`) : ""));
   if (!ans.feedback) return { output: "The user rejected this action and wants you to stop. Wait for their next instruction.", stop: true };
   return { output: `The user rejected this action and said: ${ans.feedback}` };
 }
@@ -611,7 +650,7 @@ async function runAgent(content) {
     }
     const secs = Math.round((Date.now() - started) / 1000);
     const out = state.usage.out - startOut;
-    if (secs >= 5) print(c.dim(`\n done in ${secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}${out ? ` · ${kTokens(out)} tok` : ""}`));
+    if (secs >= 5) print(c.faint(`\n done in ${secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}${out ? ` · ${kTokens(out)} tokens` : ""}`));
     if (state.mode === "plan") print(c.dim(" ⇧⇥ to leave plan mode, then tell yAI to go ahead"));
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
   } catch (err) {
@@ -665,9 +704,9 @@ async function shellCommand(command) {
   try {
     ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command);
     const { out, code } = await T.runCommand(ctx, command, 600, state.abort.signal);
-    const lines = out ? out.split("\n") : ["(no output)"];
-    lines.slice(0, 40).forEach((l, i) => print((i ? "     " : "   ") + l));
-    if (lines.length > 40) print(c.dim(`     … +${lines.length - 40} lines`));
+    const lines = out ? out.split("\n") : [];
+    const shown = lines.slice(0, 40).join("\n") + (lines.length > 40 ? `\n… ${lines.length - 40} more lines` : "");
+    ui.toolResult(shown, { color: code ? c.red : undefined, summary: code ? `exit ${code}` : lines.length ? `${lines.length} line${lines.length === 1 ? "" : "s"}` : "no output" });
     state.pendingContext.push(`I ran \`${command}\` myself (exit code ${code}). Output:\n\`\`\`\n${T.clipOutput(out, 8000)}\n\`\`\``);
   } finally {
     state.busy = false;
@@ -685,12 +724,81 @@ const HELP = [
   ["/init", "Write a YAI.md with notes about this project"],
   ["/status", "Account, model, folder and usage"],
   ["/login, /logout", "Sign in or out of your yAI account"],
+  ["/plan", "Think first: read-only planning mode"],
+  ["/undo", "Revert the last edit yAI made (not commands)"],
+  ["/resume", "Continue the last conversation in this folder"],
+  ["/theme [name]", "Midnight · Classic Blue · Paper · Amber"],
   ["/image [16:9] [@photo] <prompt>", "Make an image, or edit a photo; saved in yai-media/"],
   ["/video [16:9] <prompt>", "Make a 5-second video with sound; saved in yai-media/"],
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/clear", "/compact", "/init", "/status", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+
+// ---------- /theme ----------
+const THEME_KEYS = Object.keys(ui.THEMES);
+async function chooseTheme(arg) {
+  if (!arg) {
+    print("");
+    THEME_KEYS.forEach((k, i) => {
+      const t = ui.THEMES[k];
+      const mark = k === ui.themeKey ? c.accent("◆") : " ";
+      print(` ${mark} ${String(i + 1)}. ${c.bold(c.ink(t.name.padEnd(13)))} ${c.dim(t.note)}`);
+    });
+    arg = ((await question(c.dim(" Pick a theme (number or name, Enter to keep): "))) || "").trim();
+    if (!arg) return;
+  }
+  const q = arg.toLowerCase();
+  const key = THEME_KEYS[Number(q) - 1] || THEME_KEYS.find((k) => k === q || ui.THEMES[k].name.toLowerCase().startsWith(q));
+  if (!key) return print(c.yellow(`No theme matches "${arg}". Try midnight, blue, paper or amber.`));
+  ui.setTheme(key);
+  api.cfg.theme = key;
+  api.save();
+  ui.note(`${c.green("✓")} ${c.ink("Theme: " + ui.THEMES[key].name)}`);
+}
+
+// ---------- /undo ----------
+function undoLast() {
+  const u = state.undo.pop();
+  if (!u) return print(c.dim("   Nothing to undo. (/undo reverts edits yAI made this session, not commands.)"));
+  try {
+    if (u.created) fs.unlinkSync(u.abs);
+    else fs.writeFileSync(u.abs, u.before);
+  } catch (err) {
+    return print(c.red(`   Couldn't undo: ${err.message}`));
+  }
+  ctx.readFiles.delete(u.abs);
+  ui.note(`${c.yellow("↺")} ${c.ink(u.created ? `removed ${relPath(u.abs)}` : `reverted ${relPath(u.abs)}`)}`);
+  // yAI hears about it, so it doesn't build on the change that was taken back.
+  state.pendingContext.push(`I undid your last change: ${u.created ? `${relPath(u.abs)} was deleted` : `${relPath(u.abs)} is back to how it was before your edit`}. Re-read it before changing it again.`);
+}
+
+// ---------- /resume ----------
+function readSession() {
+  try {
+    return JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function resumeSession() {
+  const s = readSession();
+  if (!s || !s.messages?.length) return print(c.dim("   No earlier conversation in this folder."));
+  state.messages = s.messages;
+  ui.note(`${c.green("✓")} ${c.ink(`Continuing “${sessionTitle(s)}”`)} ${c.dim(`· ${state.messages.length} messages · ${ago(s.savedAt)}`)}`);
+}
+// The first thing the user asked in a saved conversation, for the welcome box and /resume.
+function sessionTitle(s) {
+  const first = (s.messages || []).find((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("<tool_result"));
+  return ui.middle((first?.content || "").replace(/\s+/g, " ").trim(), 48) || "untitled";
+}
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  const d = Math.round(s / 86400);
+  return d === 1 ? "yesterday" : `${d} days ago`;
+}
 
 // ---------- /image and /video: the web app's Make Image / Make Video, saved into the project ----------
 const MEDIA_DIR = "yai-media";
@@ -771,7 +879,7 @@ async function makeMedia(kind, arg) {
     }
     fs.writeFileSync(file, buf);
     spinner.stop();
-    ui.toolResult(`saved ${T.rel(ctx, file)}${result.ms ? ` · ${Math.round(result.ms / 1000)}s` : ""}`, { color: c.green });
+    ui.toolResult(`saved ${T.rel(ctx, file)}`, { color: c.green });
     // yAI hears about it, so "use that image on the page" works in the next message.
     state.pendingContext.push(`I made ${kind === "video" ? "a video" : "an image"} with /${kind} ("${prompt}") and saved it as ${T.rel(ctx, file)}.`);
   } catch (err) {
@@ -894,6 +1002,15 @@ async function command(line) {
     case "/image":
     case "/video":
       return makeMedia(cmd.slice(1), arg);
+    case "/theme":
+      return chooseTheme(arg);
+    case "/undo":
+      return undoLast();
+    case "/resume":
+      return resumeSession();
+    case "/plan":
+      state.mode = "plan";
+      return ui.note(`${c.yellow("◆")} ${c.ink("plan mode")} ${c.dim("· read-only: yAI investigates and proposes a plan · ⇧⇥ to leave")}`);
     case "/status": {
       const tokens = Math.round(JSON.stringify(state.messages).length / 3.6);
       print("");
@@ -935,9 +1052,19 @@ async function command(line) {
   }
 }
 
+// readline has echoed what was typed after "› "; redraw it as the user's message on the panel.
+function restyleInput(text) {
+  if (!process.stdout.isTTY || text.includes("\n")) return;
+  const rows = Math.max(1, Math.ceil((3 + text.length) / ui.columns()));
+  process.stdout.write("\x1b[1A\r\x1b[K".repeat(rows));
+  ui.userLine(text);
+}
+
 async function handleInput(input) {
+  state.placeholder = false;
   const text = input.trim();
   if (!text) return showPrompt();
+  restyleInput(input);
   try {
     if (text.startsWith("/") && !text.includes("\n") && /^\/[a-z?]+(\s|$)/i.test(text)) await command(text);
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());
@@ -951,7 +1078,7 @@ async function handleInput(input) {
   }
   while (queue.length && !state.busy) {
     const next = queue.shift();
-    print(c.bold(c.ink("y› ")) + next.split("\n")[0]);
+    ui.userLine(next);
     await runAgent(expandMentions(next));
   }
   showPrompt();
@@ -994,6 +1121,7 @@ async function main() {
 
   if (printPrompt !== null) {
     state.printMode = true;
+    ui.setTheme(api.cfg.theme || "midnight", { paint: false }); // a one-off answer leaves the terminal's colours alone
     if (!process.stdin.isTTY) {
       let piped = "";
       for await (const chunk of process.stdin) piped += chunk;
@@ -1012,6 +1140,8 @@ async function main() {
     process.exit(1);
   }
 
+  ui.setTheme(api.cfg.theme || "midnight");
+  process.on("exit", () => ui.resetTerminal()); // the terminal gets its own colours back however yai ends
   setupReadline();
   await ensureLogin();
   try {
@@ -1025,28 +1155,49 @@ async function main() {
     else print(c.yellow(`No model matches "${modelArg}".`));
   }
 
-  if (resume) {
-    try {
-      const s = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
-      state.messages = s.messages || [];
-      print(c.dim(`Continuing your conversation from ${new Date(s.savedAt).toLocaleString()} (${state.messages.length} messages).`));
-    } catch {
-      print(c.dim("No earlier conversation in this folder."));
+  // The welcome box: workspace and git, the project notes, the last conversation, the account.
+  const git = gitStatus();
+  const rows = [["workspace", root, git ? c.dim(`(git: ${git.branch}, ${git.modified ? `${git.modified} modified` : "clean"})`) : ""]];
+  const notes = ["YAI.md", "CLAUDE.md", "AGENTS.md"].find((n) => fs.existsSync(path.join(root, n)));
+  if (notes) {
+    const n = fs.readFileSync(path.join(root, notes), "utf8").split("\n").length;
+    rows.push(["instructions", `${notes} loaded`, c.dim(`· ${n} lines`)]);
+  } else rows.push(["instructions", "none yet", c.dim("· /init writes YAI.md")]);
+  const saved = readSession();
+  if (saved?.messages?.length && !resume) rows.push(["last session", `“${sessionTitle(saved)}”`, c.dim(`· ${ago(saved.savedAt)} · /resume`)]);
+  rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
+  ui.welcome({ version: VERSION, model: modelLabel(), shell: process.platform === "win32" ? "PowerShell" : path.basename(process.env.SHELL || "bash"), rows });
+
+  // First time in a folder: ask before working in it.
+  if (!project().trusted) {
+    print("");
+    print(` ${c.yellow("?")} ${c.ink("Trust this folder? yAI will read files and propose commands in")} ${c.bold(c.ink(root))}${c.ink(".")}`);
+    for (;;) {
+      const a = ((await question(` ${ui.choices([["Y", "Yes"], ["S", "Yes, this session only"], ["N", "No"], ["?", "Help"]], "Y").trimStart()}`)) || "").trim().toLowerCase();
+      if (a === "" || a === "y" || a === "yes") {
+        project().trusted = true;
+        api.save();
+        break;
+      }
+      if (a === "s") break;
+      if (a === "n" || a === "no") {
+        print(c.dim("   OK. Start yai in a folder you trust."));
+        return rl.close();
+      }
+      print(c.dim("   yAI reads files in this folder and asks before it edits a file or runs a command. Trusting it just skips this question next time."));
     }
   }
 
-  const home = os.homedir();
-  const shownRoot = root.toLowerCase().startsWith(home.toLowerCase()) ? "~" + root.slice(home.length) : root;
-  const details = [];
-  if (state.localOffline) details.push("the PC is offline · cloud models only");
-  if (!fs.existsSync(path.join(root, "YAI.md")) && !fs.existsSync(path.join(root, "CLAUDE.md"))) details.push("/init writes notes about this project for next time");
-  ui.banner({ version: VERSION, cwd: shownRoot, model: modelLabel(), user: state.user, details });
+  if (resume) resumeSession();
   print("");
+  const hint = (cmd, text) => `${c.dim(cmd)} ${c.faint(text)}`;
+  print(" " + [hint("/plan", "think first"), hint("/undo", "revert last edit"), hint("/image", "make an image"), hint("/theme", "colours"), hint("@file", "attach")].join("   "));
   showPrompt();
 }
 
 main().catch((err) => {
   spinner.stop();
   console.error(c.red(err.message));
+  ui.resetTerminal();
   process.exit(1);
 });

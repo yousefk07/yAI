@@ -60,6 +60,9 @@ yai
 ```
 
 - `/model` switch model · `/mode` or **shift+tab** cycle ask / accept edits / plan (read-only) · `/clear` · `/compact` · `/init` (writes YAI.md) · `/status` · `/login` · `/logout`
+- `/theme` picks a look (Midnight, Classic Blue, Paper, Amber) · `/undo` reverts yAI's last edit · `/resume` continues the last conversation · `/plan` read-only planning
+- `/image [16:9] [@photo.jpg] prompt` and `/video [16:9] prompt` make images and videos into `yai-media/`
+- The first run in a folder asks whether to trust it; the footer above the prompt shows the git branch, modified files, context used and the approval mode.
 - `@file` attaches a file (Tab completes) · `!command` runs a command yourself · **Esc** stops yAI
 - `yai -c` continues the last conversation in a folder · `yai -p "question"` answers once (read-only)
 - Paths are locked to the folder you started in. Sign-in is stored in `~/.yai/config.json` (30-day session).

@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
-const { c, print, toolHeader, toolResult, renderDiff, spinner } = require("./ui");
+const { c, print, toolHeader, toolResult, diffBox, spinner } = require("./ui");
 
 const IGNORED = new Set([".git", "node_modules", ".next", ".vercel", "dist", "build", "coverage", "__pycache__", ".venv", "venv", ".cache", ".turbo"]);
 const MAX_OUTPUT = 20000; // characters of tool output sent back to the model
@@ -253,15 +253,10 @@ function applyEdit(ctx, plan) {
   ctx.readFiles.add(plan.abs);
 }
 
-function showEdit(ctx, plan, { applied }) {
-  // One "edit  path · +12 −2" row (or "create  path · new · 40 lines"), then the diff in the │ gutter.
-  // A new file shows its first lines only; an edit shows the changed lines you're approving.
-  toolHeader(plan.created ? "Create" : "Edit", rel(ctx, plan.abs));
-  const { lines, added, removed } = renderDiff(plan.before, plan.after, { maxLines: plan.created ? 8 : 40 });
-  const summary = plan.created ? c.dim(`new · ${plural(added, "line")}`) : `${c.green("+" + added)} ${c.red("−" + removed)}`;
-  toolResult(summary, { color: (s) => s });
-  for (const l of lines) print("   " + c.dim("│ ") + l);
-  return { added, removed };
+// The proposed change in a box: the file and +/− counts, then the changed lines. A new file shows its
+// first lines only; an edit shows every changed line, since that's what's being approved.
+function showEdit(ctx, plan) {
+  return diffBox(rel(ctx, plan.abs), plan.before, plan.after, { created: plan.created, maxLines: plan.created ? 8 : 40 });
 }
 
 // Runs a command, killing the whole process tree on Esc or timeout.
@@ -311,11 +306,13 @@ async function execRun(ctx, a, signal) {
   const shown = failed ? lines.slice(-6) : lines.slice(0, 4);
   const more = lines.length - shown.length;
   const display = !shown.length
-    ? "(no output)"
+    ? ""
     : failed
       ? (more > 0 ? `… ${more} earlier lines\n` : "") + shown.join("\n")
       : shown.join("\n") + (more > 0 ? `\n… ${more} more lines` : "");
-  toolResult(display + (killedFor ? `\n${killedFor}` : code ? `\nexit code ${code}` : ""), { color: code || killedFor ? c.red : c.dim });
+  // The row says how it went ("exit 1", "12 lines"); the glance at the output goes under it.
+  const summary = failed ? killedFor || `exit ${code}` : lines.length ? plural(lines.length, "line") : "no output";
+  toolResult(display, { color: failed ? c.red : undefined, summary });
   return clipOutput(out || "(no output)") + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
 }
 
