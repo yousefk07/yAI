@@ -536,7 +536,9 @@ async function execTool(call) {
     // Shell commands
     const command = (call.args.command || "").trim();
     if (!command) throw new T.ToolError("<command> is required.");
-    ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command.length > 160 ? command.slice(0, 157) + "…" : command);
+    // Paths inside the project are shown relative to it, so the row shows the file, not C:\Users\…
+    const shownCommand = command.split(ctx.root + path.sep).join("").split(ctx.root).join(".");
+    ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", shownCommand);
     const chained = /[;&|`><]|\$\(/.test(command);
     const allowed = !state.printMode && !chained && (SAFE_COMMANDS.test(command) || project().allowedCommands.includes(commandPrefix(command)));
     if (state.printMode && !state.allowCommands) {

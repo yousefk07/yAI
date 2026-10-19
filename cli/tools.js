@@ -254,9 +254,10 @@ function applyEdit(ctx, plan) {
 }
 
 function showEdit(ctx, plan, { applied }) {
-  // One "▸ edit  path  +12 −2" row (or "▸ create  path  new · 40 lines"), then the diff in the │ gutter.
+  // One "edit  path · +12 −2" row (or "create  path · new · 40 lines"), then the diff in the │ gutter.
+  // A new file shows its first lines only; an edit shows the changed lines you're approving.
   toolHeader(plan.created ? "Create" : "Edit", rel(ctx, plan.abs));
-  const { lines, added, removed } = renderDiff(plan.before, plan.after);
+  const { lines, added, removed } = renderDiff(plan.before, plan.after, { maxLines: plan.created ? 8 : 40 });
   const summary = plan.created ? c.dim(`new · ${plural(added, "line")}`) : `${c.green("+" + added)} ${c.red("−" + removed)}`;
   toolResult(summary, { color: (s) => s });
   for (const l of lines) print("   " + c.dim("│ ") + l);
@@ -303,10 +304,17 @@ async function execRun(ctx, a, signal) {
   spinner.start("running");
   const { out, code, killedFor } = await runCommand(ctx, command, timeout, signal);
   spinner.stop();
+  // A glance, not the whole output (the model still gets all of it): the first few lines when it
+  // worked, the last few when it failed, because that's where errors are.
   const lines = out ? out.split("\n") : [];
-  const shown = lines.slice(0, 12);
+  const failed = !!(code || killedFor);
+  const shown = failed ? lines.slice(-6) : lines.slice(0, 4);
   const more = lines.length - shown.length;
-  const display = (shown.length ? shown.join("\n") : "(no output)") + (more > 0 ? `\n… +${more} lines` : "");
+  const display = !shown.length
+    ? "(no output)"
+    : failed
+      ? (more > 0 ? `… ${more} earlier lines\n` : "") + shown.join("\n")
+      : shown.join("\n") + (more > 0 ? `\n… ${more} more lines` : "");
   toolResult(display + (killedFor ? `\n${killedFor}` : code ? `\nexit code ${code}` : ""), { color: code || killedFor ? c.red : c.dim });
   return clipOutput(out || "(no output)") + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
 }

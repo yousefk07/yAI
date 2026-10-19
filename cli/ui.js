@@ -1,6 +1,7 @@
 "use strict";
 // Terminal output in yAI's own look ("Ink"): the website's monochrome ink on paper, the y. mark,
-// ▸ rows for each step, │ gutters for output and diffs, a quiet dot pulse while it works.
+// one quiet row per step (a coloured verb, no marker), short │ gutters for output and diffs that
+// never wrap, and a quiet dot pulse while it works.
 // Colour is only used for meaning: green = added / done, rose = removed / failed, amber = careful.
 
 const { Writable } = require("stream");
@@ -94,7 +95,9 @@ function section(kind) {
   if (last && last !== kind) rawPrint("");
   last = kind;
 }
+let indented = false; // the last line was a step's output (│ gutter, "✓ saved" …), not a step row
 function rawPrint(text) {
+  indented = /^ {3}/.test(stripAnsi(text));
   if (spin) process.stdout.write("\r\x1b[K");
   process.stdout.write(text + "\n");
   if (spin) drawSpinner();
@@ -108,12 +111,16 @@ function inline(s) {
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?:;]|$)/g, (_, p, x) => p + c.italic(x));
 }
 
-// A streamed reply: plain text on a one-space margin, no bullets or badges.
+// A streamed reply: plain text on a one-space margin, no bullets or badges. Runs of blank lines
+// collapse to one, and trailing blank lines are dropped, so a step never follows a gap of three.
 function markdownWriter() {
-  let inCode = false, first = true;
+  let inCode = false, first = true, blank = false;
   return (line) => {
     let out;
     let m;
+    if (!inCode && !line.trim()) return void (blank = !first);
+    if (blank) print("");
+    blank = false;
     if (/^\s*```/.test(line)) {
       inCode = !inCode;
       const lang = line.replace(/```/, "").trim();
@@ -131,15 +138,30 @@ function markdownWriter() {
   };
 }
 
-// ---------- steps: one ▸ row each ("▸ read     src/app.js     42 lines") ----------
+// ---------- steps: one row each ("read    src/app.js · 42 lines") ----------
+// Looking around (read, list, find, search) is quiet; changing things (edit, create, run) stands out.
 const VERB = { Read: "read", List: "list", Find: "find", Search: "search", Update: "edit", Edit: "edit", Write: "create", Create: "create", PowerShell: "run", Bash: "run", Shell: "run" };
+const LOOKS = new Set(["read", "list", "find", "search"]);
 let pending = null;
 
+// Cut from the middle, so both ends stay readable: a command's name and a path's file name.
+function middle(s, n) {
+  if (s.length <= n) return s;
+  const head = Math.ceil((n - 1) * 0.4);
+  return s.slice(0, head) + "…" + s.slice(s.length - (n - 1 - head));
+}
+// One gutter line, cut to the terminal width so it never wraps under the │.
+function clipLine(s, indent = 6) {
+  const room = Math.max(20, columns() - indent);
+  return s.length > room ? s.slice(0, room - 1) + "…" : s;
+}
+
 function rowText(verb, arg, result, col) {
-  const room = Math.max(16, Math.min(40, columns() - 40));
-  const a = arg.length > room ? arg.slice(0, room - 1) + "…" : arg;
-  const head = " " + c.dim("▸ ") + c.ink(verb.padEnd(8)) + " " + c.bold(a);
-  return head + (result ? " ".repeat(Math.max(2, room - a.length + 2)) + (col ? col(result) : c.dim(result)) : "");
+  const res = result ? stripAnsi(result) : "";
+  const a = middle(arg, Math.max(16, columns() - 12 - (res ? res.length + 3 : 0)));
+  const quiet = LOOKS.has(verb);
+  const head = " " + (quiet ? c.dim(verb.padEnd(7)) : c.bold(c.ink(verb.padEnd(7)))) + " " + (quiet ? c.ink(a) : c.bold(c.ink(a)));
+  return head + (result ? c.dim(" · ") + (col ? col(result) : c.dim(result)) : "");
 }
 function flushRow() {
   if (!pending) return;
@@ -151,6 +173,8 @@ function flushRow() {
 // The row is held back a moment so a one-line result can sit on the same line.
 function toolHeader(name, arg) {
   flushRow();
+  // A step that showed output gets a blank line after it, so the next step doesn't sit on top of it.
+  if (last === "step" && indented) rawPrint("");
   section("step");
   pending = { verb: VERB[name] || String(name).toLowerCase(), arg: String(arg || "") };
 }
@@ -163,7 +187,7 @@ function toolResult(text, { color: col } = {}) {
     return rawPrint(rowText(p.verb, p.arg, short, col));
   }
   flushRow();
-  lines.forEach((l) => rawPrint("   " + c.dim("│ ") + (col ? col(l) : c.dim(l))));
+  lines.forEach((l) => rawPrint("   " + c.dim("│ ") + (col ? col(clipLine(l)) : c.dim(clipLine(l)))));
 }
 // A short note under a step, on the same margin.
 function note(text) {
@@ -259,4 +283,4 @@ function resetSections() {
   last = "";
 }
 
-module.exports = { resetSections, c, print, spinner, markdownWriter, toolHeader, toolResult, note, renderDiff, box, banner, rule, MARK, rlOutput, stripAnsi, columns };
+module.exports = { resetSections, c, print, spinner, markdownWriter, toolHeader, toolResult, note, renderDiff, box, banner, rule, MARK, rlOutput, stripAnsi, columns, middle };
