@@ -48,7 +48,24 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 - **Thinking is forced off** (`reasoning_effort: "none"` / `enable_thinking: false`), and any reasoning a model
   produces anyway is stripped before it reaches the user.
 
-### Security
+### yAI Code (terminal agent)
+
+A Claude Code–style agent for the terminal that uses the same models as the site. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
+
+```powershell
+cd path\to\yAI
+npm link            # once: makes the `yai` command available everywhere
+cd path\to\any\project
+yai
+```
+
+- `/model` switch model · `/mode` or **shift+tab** cycle ask / accept edits / plan (read-only) · `/clear` · `/compact` · `/init` (writes YAI.md) · `/status` · `/login` · `/logout`
+- `@file` attaches a file (Tab completes) · `!command` runs a command yourself · **Esc** stops yAI
+- `yai -c` continues the last conversation in a folder · `yai -p "question"` answers once (read-only)
+- Paths are locked to the folder you started in. Sign-in is stored in `~/.yai/config.json` (30-day session).
+- The server only accepts the agent's system prompt from signed-in users (`agent: true` in `/api/chat`).
+
+## Security
 
 - Passwords are hashed with **scrypt**; sessions are **HMAC-signed, HttpOnly** cookies, with separate keys for
   user and admin sessions so one can't be replayed as the other.

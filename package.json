@@ -6,9 +6,13 @@
   "scripts": {
     "start": "node server.js",
     "bridge": "node --env-file-if-exists=.env bridge.js",
-    "tunnel": "cloudflared tunnel --url http://localhost:8787"
+    "tunnel": "cloudflared tunnel --url http://localhost:8787",
+    "yai": "node cli/index.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "bin": {
+    "yai": "cli/index.js"
   }
 }
