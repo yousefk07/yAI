@@ -18,7 +18,7 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 - **Hybrid routing**: local models when the PC is on; the cloud model is always available and becomes the
   default automatically when the PC is offline
 - **Make Image / Make Video**: text → image, photo editing (image → image), text → video and photo → video,
-  behind a prompt safety filter and per-user daily limits
+  with per-user daily limits; only sexual content involving minors or real people is blocked
 - **Accounts** with saved chat history and images, or guest access with an invite code
 - **Image and PDF input**: images are downscaled in the browser; PDF text is extracted with pdf.js, and
   scanned PDFs fall back to rendering their pages as images
@@ -70,7 +70,7 @@ yai
 - Passwords are hashed with **scrypt**; sessions are **HMAC-signed, HttpOnly** cookies, with separate keys for
   user and admin sessions so one can't be replayed as the other.
 - All model and user text is HTML-escaped before Markdown formatting, so it can't inject markup.
-- Image prompts are screened for explicit content, minors, gore and real, named people, and rate-limited per day.
+- Image and video prompts are not censored, except anything sexual involving minors and sexual images of real people (a named person or an uploaded photo). They are rate-limited per day.
 
 ## Running it
 
