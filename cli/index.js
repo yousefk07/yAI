@@ -500,7 +500,24 @@ function parseToolCall(text) {
   return { name, args, raw: text.slice(0, endTag >= 0 ? endTag + 7 : text.length) };
 }
 
+// Wakes the cloud GPU in the background as soon as yAI Code opens (or switches to a cloud model), so it is
+// usually ready by the time the first question is typed. Failures are ignored: the first request wakes it anyway.
+function prewarm() {
+  const model = state.model;
+  if (!/cloud/.test(model) || state.warmed.has(model) || state.warming) return false;
+  state.warming = api
+    .warmup(model, { signal: AbortSignal.timeout(300000), onProgress: () => {} })
+    .then(() => state.warmed.add(model))
+    .catch(() => {})
+    .finally(() => (state.warming = null));
+  return true;
+}
+
 async function ensureWarm() {
+  if (state.warming) {
+    spinner.text("waiting for the cloud GPU to finish waking up");
+    await state.warming;
+  }
   if (state.warmed.has(state.model)) return;
   spinner.text(`Starting ${modelLabel()}`);
   await api.warmup(state.model, { signal: state.abort.signal, onProgress: (t) => spinner.text(t) });
@@ -1059,6 +1076,7 @@ async function chooseModel(arg) {
   api.cfg.model = m.id;
   api.cfg.modelPicked = 2;
   api.save();
+  prewarm(); // a newly picked cloud model starts waking right away
   ui.note(`${c.green("✓")} ${c.ink("Model: " + m.label)}` + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
 }
 
@@ -1322,6 +1340,7 @@ async function main() {
   const saved = readSession();
   if (saved?.messages?.length && !resume) rows.push(["last session", `“${sessionTitle(saved)}”`, c.dim(`· ${ago(saved.savedAt)} · /resume`)]);
   rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
+  if (prewarm()) rows.push(["gpu", "waking up in the background", c.dim("· usually ready by the time you've typed your question")]);
   ui.welcome({ version: VERSION, model: modelLabel(), shell: process.platform === "win32" ? "PowerShell" : path.basename(process.env.SHELL || "bash"), rows });
 
   // First time in a folder: ask before working in it.
