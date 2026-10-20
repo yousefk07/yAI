@@ -8,6 +8,7 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 | Model | Where it runs | Speed |
 |---|---|---|
 | **Qwen 3.8 27B** (4-bit AWQ) | RunPod serverless vLLM, 48 GB GPU | ~34 tokens/s |
+| **Qwen3 Coder 30B** (yAI Code only) | RunPod serverless vLLM, 96 GB GPU | not measured yet (only 3B of its 30B parameters work on each token) |
 | Qwen 3.5 4B, Phi 4 Mini, Gemma 4 E2B and others | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
 | **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
 | **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
@@ -50,7 +51,7 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 
 ### yAI Code (terminal agent)
 
-A Claude Code–style agent for the terminal that uses the same models as the site. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
+A Claude Code–style agent for the terminal that uses the same models as the site, plus **Qwen3 Coder 30B**, which only yAI Code can use. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
 
 ```powershell
 cd path\to\yAI
@@ -99,6 +100,7 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `LMSTUDIO_URL`, `BRIDGE_TOKEN` | Tunnel URL + `/v1`, and the shared secret for the bridge |
 | `RUNPOD_API_KEY` | RunPod API key for the cloud endpoints |
 | `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B as `qwen3.8-27b-cloud` |
+| `RUNPOD_CODER_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen3 Coder 30B as `qwen3-coder` (yAI Code only; the website lists it greyed out) |
 | `RUNPOD_IMAGE_ENDPOINT_ID` | ComfyUI endpoint for text → image (`workflows/t2i.json`) |
 | `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
 | `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |

@@ -524,8 +524,10 @@
         // Every visit starts on the default model (Qwen 3.5 4B); a switch lasts until the page is closed.
         const preferred = current || data.default;
         for (const m of data.models) {
-          const o = new Option(m.label, m.id, false, m.id === preferred);
-          o.dataset.desc = m.desc || "";
+          // Code-only models are listed so people know they exist, but can't be picked here.
+          const o = new Option(m.label, m.id, false, m.id === preferred && !m.codeOnly);
+          o.dataset.desc = m.codeOnly ? "Only available in yAI Code" : m.desc || "";
+          o.disabled = !!m.codeOnly;
           if (/-cloud$/.test(m.id)) o.dataset.cloud = "1";
           modelSel.add(o);
         }
@@ -551,7 +553,7 @@
       const current = modelSel.selectedOptions[0];
       $("modelBtnLabel").textContent = current ? current.textContent : "Model";
       modelMenu.innerHTML = [...modelSel.options].map((o) => `
-        <button type="button" class="model-option" role="option" data-id="${escapeHtml(o.value)}" aria-selected="${o.selected}">
+        <button type="button" class="model-option" role="option" data-id="${escapeHtml(o.value)}" aria-selected="${o.selected}"${o.disabled ? ' disabled aria-disabled="true"' : ""}>
           <span class="model-option-text"><span class="model-option-name">${escapeHtml(o.textContent)}</span>
           <span class="model-option-desc">${escapeHtml(o.dataset.desc || "")}</span></span>
           <svg class="model-check" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -560,12 +562,12 @@
     function toggleModelMenu(open = modelMenu.hidden) {
       modelMenu.hidden = !open;
       modelBtn.setAttribute("aria-expanded", String(open));
-      if (open) (modelMenu.querySelector('[aria-selected="true"]') || modelMenu.firstElementChild)?.focus();
+      if (open) (modelMenu.querySelector('[aria-selected="true"]') || modelMenu.querySelector(".model-option:not([disabled])"))?.focus();
     }
     modelBtn.addEventListener("click", () => toggleModelMenu());
     modelMenu.addEventListener("click", (e) => {
       const opt = e.target.closest(".model-option");
-      if (!opt) return;
+      if (!opt || opt.disabled) return;
       toggleModelMenu(false);
       modelBtn.focus();
       if (opt.dataset.id === modelSel.value) return;
@@ -573,7 +575,7 @@
       modelSel.dispatchEvent(new Event("change"));
     });
     modelMenu.addEventListener("keydown", (e) => {
-      const items = [...modelMenu.querySelectorAll(".model-option")];
+      const items = [...modelMenu.querySelectorAll(".model-option:not([disabled])")];
       const i = items.indexOf(document.activeElement);
       if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
       else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }

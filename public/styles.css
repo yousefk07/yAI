@@ -184,6 +184,8 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action
   border: 0; border-radius: 8px; background: none; text-align: left;
 }
 .model-option:hover, .model-option:focus-visible { background: var(--hover); outline: none; }
+.model-option:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-option:disabled:hover { background: none; }
 .model-option-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .model-option-name { font-size: 14px; font-weight: 500; }
 .model-option-desc { font-size: 12.5px; color: var(--muted); }
