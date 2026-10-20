@@ -435,6 +435,12 @@ function parseToolCall(text) {
     if (close < from) continue;
     args[p] = body.slice(from, close).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
   }
+  // Small models often skip the inner tags (<tool name="run">node --test</tool>) or use their own
+  // (<cmd>, <file>). If none of the expected tags were found, the bare text is the first argument.
+  if (tool && tool.params.length && !Object.keys(args).length) {
+    const bare = body.replace(/<\/?[\w-]+>/g, "").trim();
+    if (bare && !bare.includes("\n")) args[tool.params[0]] = bare;
+  }
   const endTag = text.indexOf("</tool>", head.index + head[0].length + end);
   return { name, args, raw: text.slice(0, endTag >= 0 ? endTag + 7 : text.length) };
 }
@@ -580,7 +586,7 @@ async function execTool(call) {
 
     // Shell commands
     const command = (call.args.command || "").trim();
-    if (!command) throw new T.ToolError("<command> is required.");
+    if (!command) throw new T.ToolError("<command> is required. Put the command between the tags, e.g. <command>node --test</command>");
     // Paths inside the project are shown relative to it, so the row shows the file, not C:\Users\…
     const shownCommand = command.split(ctx.root + path.sep).join("").split(ctx.root).join(".");
     ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", shownCommand);
@@ -607,7 +613,7 @@ async function execTool(call) {
     spinner.stop();
     if (!(err instanceof T.ToolError) && !err.code) throw err;
     const shown = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Update", write_file: "Write", run: "Bash" };
-    ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || "");
+    ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || "(nothing given)");
     ui.toolResult(err.message, { color: c.red });
     return { output: `Error: ${err.message}` };
   }
@@ -632,6 +638,7 @@ async function runAgent(content) {
   print("");
   ui.resetSections();
   let cutOffs = 0; // replies in a row that were cut off mid-step
+  let lastError = "", sameError = 0; // the same tool error repeated back to back
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       const text = await callModel();
@@ -673,6 +680,14 @@ async function runAgent(content) {
         return;
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
+      // The same failing step over and over (a small model stuck on one mistake): stop after three.
+      if (String(result.output).startsWith("Error") && result.output === lastError) {
+        if (++sameError >= 2) {
+          ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating the same failing step, so it was stopped.")} ${c.dim("Try a bigger model (/model) or rephrase the request.")}`);
+          break;
+        }
+      } else sameError = 0;
+      lastError = result.output;
       if (result.stop) return;
       if (step === MAX_STEPS - 1) print(c.yellow(`   ‖ paused after ${MAX_STEPS} steps · say "continue" to keep going`));
     }
