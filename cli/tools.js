@@ -296,6 +296,36 @@ function runCommand(ctx, command, timeoutSec, signal) {
   });
 }
 
+// Test results in a command's output (node --test, TAP, Jest, pytest): the failing tests' names and
+// the pass/fail counts, so a test run reads "● name" per failure instead of pages of output.
+function testResults(out) {
+  const failing = new Set();
+  for (const line of out.split("\n")) {
+    const m =
+      line.match(/^\s*✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\s*$/) || // node --test
+      line.match(/^\s*not ok \d+ - (.+?)\s*$/) || // TAP
+      line.match(/^\s*●\s+(?!Console\b)(.+?)\s*$/) || // Jest
+      line.match(/^FAILED\s+(\S+)/); // pytest
+    if (m && !/^failing tests:?$/i.test(m[1]) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(m[1])) failing.add(m[1]);
+  }
+  const count = (word) => {
+    const m = out.match(new RegExp(`^(?:ℹ|#) ${word} (\\d+)\\s*$`, "m")) || out.match(new RegExp(`\\b(\\d+) ${word}(?:ed)?\\b`));
+    return m ? Number(m[1]) : undefined;
+  };
+  return { names: [...failing], pass: count("pass"), fail: count("fail") };
+}
+
+// The line of a failed command's output that says what went wrong. PowerShell puts the message
+// before "At line:1 char:5" (runtime errors) or after the "+ ~~~" marker lines (parse errors);
+// anything else usually ends with it.
+function errorLine(lines) {
+  const clean = lines.map((l) => l.trim()).filter((l) => l && !/OutputEncoding=\[Text\.Encoding\]/.test(l));
+  const at = clean.findIndex((l) => /^At line:\d+ char:\d+/.test(l));
+  if (at > 0) return clean[at - 1];
+  if (at === 0) return clean.find((l, i) => i > 0 && !/^\+/.test(l) && !/^(CategoryInfo|FullyQualifiedErrorId)\b/.test(l)) || "";
+  return clean[clean.length - 1] || "";
+}
+
 async function execRun(ctx, a, signal) {
   const command = (a.command || "").trim();
   if (!command) throw new ToolError("<command> is required.");
@@ -307,17 +337,26 @@ async function execRun(ctx, a, signal) {
   // worked, the last few when it failed, because that's where errors are.
   const lines = out ? out.split("\n") : [];
   const failed = !!(code || killedFor);
-  const shown = failed ? lines.slice(-6) : lines.slice(0, 4);
+  const result = clipOutput(out || "(no output)", ctx.budget) + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
+  // A test run: the counts on the row ("2 failed, 6 passed") and a red dot per failing test.
+  const tests = out && !killedFor ? testResults(out) : { names: [] };
+  if (tests.names.length || tests.pass !== undefined) {
+    const nFail = tests.fail ?? tests.names.length;
+    const counts = [nFail ? `${nFail} failed` : "", tests.pass !== undefined ? `${tests.pass} passed` : ""].filter(Boolean).join(", ");
+    const rows = tests.names.slice(0, 6).map((n) => `${c.red("●")} ${c.ink(n)}`);
+    if (tests.names.length > 6) rows.push(`… ${tests.names.length - 6} more failing`);
+    toolResult(failed ? rows.join("\n") : "", { color: failed ? c.red : undefined, quiet: true, summary: counts || `exit ${code}` });
+    return result;
+  }
+  // A failure is one row with a red ● and the one line that says what went wrong; a success shows
+  // the first few lines.
+  const shown = lines.slice(0, 4);
   const more = lines.length - shown.length;
-  const display = !shown.length
-    ? ""
-    : failed
-      ? (more > 0 ? `… ${more} earlier lines\n` : "") + shown.join("\n")
-      : shown.join("\n") + (more > 0 ? `\n… ${more} more lines` : "");
+  const display = failed ? errorLine(lines) : !shown.length ? "" : shown.join("\n") + (more > 0 ? `\n… ${more} more lines` : "");
   // The row says how it went ("exit 1", "12 lines"); the glance at the output goes under it.
   const summary = failed ? killedFor || `exit ${code}` : lines.length ? plural(lines.length, "line") : "no output";
-  toolResult(display, { color: failed ? c.red : undefined, summary });
-  return clipOutput(out || "(no output)", ctx.budget) + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
+  toolResult(display, { color: failed ? c.red : undefined, quiet: true, summary });
+  return result;
 }
 
-module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput };
+module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine };

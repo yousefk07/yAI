@@ -632,7 +632,7 @@ async function execTool(call) {
     if (!(err instanceof T.ToolError) && !err.code) throw err;
     const shown = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Update", write_file: "Write", run: "Bash" };
     ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || "(nothing given)");
-    ui.toolResult(err.message, { color: c.red });
+    ui.toolResult(err.message, { color: c.red, quiet: true });
     return { output: `Error: ${err.message}` };
   }
 }

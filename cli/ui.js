@@ -247,7 +247,7 @@ const VERB = { Read: "read", List: "list", Find: "find", Search: "search", Updat
 let pending = null;
 
 function rowText(p, result, col) {
-  const icon = col === c.red ? c.red("✕") : col === c.yellow ? c.yellow("!") : c.green("✓");
+  const icon = col === c.red ? c.red("●") : col === c.yellow ? c.yellow("!") : c.green("✓");
   let name = p.verb, arg = p.arg;
   if (p.verb === "run") {
     const sp = p.arg.indexOf(" ");
@@ -284,8 +284,9 @@ function cancelRow() {
   return p;
 }
 // A step's result. A short one-line result sits on the row; anything longer goes under it in the
-// │ gutter, cut to the terminal width. `summary` puts a short label on the row as well.
-function toolResult(text, { color: col, summary } = {}) {
+// │ gutter, cut to the terminal width. `summary` puts a short label on the row as well, and `quiet`
+// keeps the lines under it dim even when the row is red (a failed command shows ✕, not a red wall).
+function toolResult(text, { color: col, summary, quiet } = {}) {
   const lines = text ? String(text).split("\n") : [];
   if (pending && summary === undefined && lines.length === 1 && vis(lines[0]) < 60) {
     const p = pending;
@@ -297,7 +298,7 @@ function toolResult(text, { color: col, summary } = {}) {
     pending = null;
     rawPrint(rowText(p, summary || "", col));
   }
-  const paint = col === c.red ? c.red : c.dim;
+  const paint = col === c.red && !quiet ? c.red : c.dim;
   lines.forEach((l) => rawPrint("     " + c.line("│ ") + paint(clip(l, Math.max(20, width() - 8)))));
 }
 // A short note under a step, at the step's indent: "   ✓ applied · 1 file changed".
