@@ -156,6 +156,8 @@ ${toolDocs}
 - Look before you change anything: use list_files, find_files, search and read_file. Never guess what a file contains.
 - Read a file before editing it. Copy <old> exactly from the read_file output, without the line numbers.
 - Make small, focused edit_file changes; use write_file only for new files or full rewrites. Keep the project's existing style.
+- A reply has a length limit. Write long files in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for the rest.
+- If the user asks for text (an answer, an essay, an explanation) and doesn't ask for a file, reply with the text itself; don't write a file.
 - After changing code, check it when you can (run the tests, or a quick syntax check such as node --check file.js).
 - If a tool returns an error, fix the cause and try again instead of repeating the same call.
 - Questions get answers, not edits. Don't change files the user didn't ask about.
@@ -629,6 +631,7 @@ async function runAgent(content) {
   const startOut = state.usage.out;
   print("");
   ui.resetSections();
+  let cutOffs = 0; // replies in a row that were cut off mid-step
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       const text = await callModel();
@@ -651,9 +654,19 @@ async function runAgent(content) {
       if (!call) break;
       let result;
       if (call.cutOff) {
-        result = { output: `Error: your ${call.name} call was cut off before </tool> (the reply hit its length limit). Split the work: write a large file in parts with write_file and <append>true</append>.` };
-        print(c.yellow("   ! that step was cut off · asking yAI to split it up"));
-      } else result = await execTool(call);
+        // A model that keeps writing the same too-long step would loop forever; give it one more try.
+        cutOffs++;
+        if (cutOffs >= 2) {
+          state.messages[state.messages.length - 1].content = "(my reply was cut off again)";
+          ui.note(`${c.yellow("!")} ${c.ink("yAI's reply was cut off twice: it tried to write more than one reply can hold.")} ${c.dim("Ask for something shorter, or use a bigger model (/model).")}`);
+          break;
+        }
+        result = { output: `Error: your ${call.name} call was cut off before </tool> because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.` };
+        ui.note(`${c.yellow("!")} ${c.dim("that step was cut off · asking yAI to split it up")}`);
+      } else {
+        cutOffs = 0;
+        result = await execTool(call);
+      }
       if (state.interrupted) {
         pushUser(`<tool_result name="${call.name}">\nInterrupted by the user.\n</tool_result>`);
         print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
