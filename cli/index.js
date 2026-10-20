@@ -1428,7 +1428,7 @@ async function main() {
   const saved = readSession();
   if (saved?.messages?.length && !resume) rows.push(["last session", `“${sessionTitle(saved)}”`, c.dim(`· ${ago(saved.savedAt)} · /resume`)]);
   rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
-  if (prewarm()) rows.push(["gpu", "waking up in the background", c.dim("· usually ready by the time you've typed your question")]);
+  if (prewarm()) rows.push(["gpu", "waking up", c.dim("· in the background while you type")]);
   ui.welcome({ version: VERSION, model: modelLabel(), shell: process.platform === "win32" ? "PowerShell" : path.basename(process.env.SHELL || "bash"), rows });
 
   // First time in a folder: ask before working in it.
