@@ -104,17 +104,30 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action
 
 /* ---------- Gate / login ---------- */
 .gate { position: relative; min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
-/* The sign-in page (not the dialog): the tour video fills the screen, dimmed, with the card on top. */
-.gate-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: #0b0d10 url("/yai-tour-poster.jpg") center / cover no-repeat; }
-.gate-bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.gate-bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(11, 13, 16, 0.5) 0%, rgba(11, 13, 16, 0.78) 100%); }
-.gate.dialog .gate-bg { display: none; }
+/* The sign-in page (not the dialog): the tour video in a big card at the top left, the sign-in card
+   to its right. On narrow screens the video sits on top and the card below it. */
+.gate:not(.dialog) {
+  grid-template-columns: minmax(0, 1fr) 400px; align-items: start; align-content: start; place-items: start stretch;
+  gap: 40px; max-width: 1480px; margin: 0 auto; padding: 40px max(24px, env(safe-area-inset-right)) 40px max(24px, env(safe-area-inset-left));
+}
+.gate-tour { margin: 0; min-width: 0; }
+.gate-tour-frame {
+  aspect-ratio: 16 / 9; overflow: hidden; border-radius: 18px; border: 1px solid var(--border);
+  background: #0b0d10 url("/yai-tour-poster.jpg") center / cover no-repeat;
+  box-shadow: 0 1px 2px rgba(20, 20, 15, 0.06), 0 18px 48px rgba(20, 20, 15, 0.16);
+}
+.gate-tour-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gate-tour figcaption { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.gate.dialog .gate-tour { display: none; }
 .gate:not(.dialog) .gate-card {
-  position: relative; z-index: 1; max-width: 400px; padding: 32px 28px 28px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.2);
+  max-width: none; padding: 32px 28px 28px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 18px; box-shadow: 0 1px 2px rgba(20, 20, 15, 0.06), 0 18px 48px rgba(20, 20, 15, 0.12);
 }
 .gate:not(.dialog) .gate-card .wordmark { margin-bottom: 28px; }
+@media (max-width: 1000px) {
+  .gate:not(.dialog) { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 24px; }
+  .gate:not(.dialog) .gate-card { max-width: 520px; width: 100%; justify-self: center; }
+}
 .gate-card { width: 100%; max-width: 360px; }
 .gate-card .wordmark { margin-bottom: 40px; }
 .gate-card h1 { font: 400 34px/1.1 var(--serif); letter-spacing: -0.01em; margin: 0 0 8px; }
