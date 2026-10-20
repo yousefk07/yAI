@@ -90,6 +90,9 @@ const tools = {
     run(ctx, a) {
       const dir = resolve(ctx, a.path || ".");
       const depth = Math.min(Math.max(parseInt(a.depth, 10) || 2, 1), 6);
+      // A missing folder used to come back as "(empty folder)", and the model went looking elsewhere.
+      if (!fs.existsSync(dir)) throw new ToolError(`Not found: ${a.path}. Paths are relative to the project folder (${ctx.root}).`);
+      if (!fs.statSync(dir).isDirectory()) throw new ToolError(`${a.path} is a file, not a folder. Use read_file to see it.`);
       toolHeader("List", rel(ctx, dir));
       const lines = [];
       for (const { abs, entry, level } of walk(ctx, dir, depth)) {
