@@ -27,7 +27,7 @@
     </symbol>
   </svg>
 
-  <!-- Sign in / sign up / guest access -->
+  <!-- Log in / sign up / request access (yAI needs an account) -->
   <section id="gate" class="gate" hidden>
     <!-- First visit: the tour video in a big card at the top left, the sign-in card beside it
          (the video is loaded only when the gate is a page). -->
@@ -45,14 +45,21 @@
       <div class="segmented" role="tablist" id="gateTabs">
         <button type="button" role="tab" data-mode="login">Log in</button>
         <button type="button" role="tab" data-mode="signup">Sign up</button>
-        <button type="button" role="tab" data-mode="guest">Guest</button>
+        <button type="button" role="tab" data-mode="request">Request access</button>
       </div>
       <label class="field" data-for="login signup"><span>Username</span>
         <input id="gateUser" autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
       <label class="field" data-for="login signup"><span>Password</span>
         <input id="gatePass" type="password" /></label>
-      <label class="field" data-for="signup guest"><span>Access code</span>
+      <label class="field" data-for="signup"><span>Access code</span>
         <input id="gateInput" type="password" autocomplete="off" /></label>
+      <div class="gate-request" id="gateRequest" hidden>
+        <ol>
+          <li>Ask for an access code. It opens an email to Yousef.</li>
+          <li>When it arrives, come back and use <b>Sign up</b> to create your account.</li>
+        </ol>
+        <a class="btn-primary" id="requestBtn" href="mailto:yousefkkamel@gmail.com?subject=yAI%20access%20code%20request&amp;body=Hi%20Yousef%2C%0A%0AI%27d%20like%20an%20access%20code%20to%20try%20yAI.%0A%0AName%3A%20">Request access code</a>
+      </div>
       <p id="gateError" class="gate-error" role="alert"></p>
       <button class="btn-primary" type="submit" id="gateSubmit">Log in</button>
     </form>
@@ -126,7 +133,7 @@
             <li data-feature="imageEdit" hidden><button type="button" class="suggestion" data-mode="image"><span><span class="suggestion-tag">Edit</span>Upload a photo and change it with words</span></button></li>
             <li data-feature="videoGen" hidden><button type="button" class="suggestion" data-mode="video"><span><span class="suggestion-tag">Video</span>Make a short video with sound from a description</span></button></li>
           </ul>
-          <p class="welcome-note" id="welcomeNote">Chatting as a guest. <button type="button" class="link-btn" id="welcomeSignup">Create an account</button> to keep your chat history.</p>
+          <p class="welcome-note" id="welcomeNote" hidden><button type="button" class="link-btn" id="welcomeSignup">Create an account</button></p>
         </div>
         <div id="messages" class="messages"></div>
       </main>
@@ -220,7 +227,7 @@
     };
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 
-    let accessCode = store.get("accessCode", "");
+    try { localStorage.removeItem("accessCode"); } catch {} // guest access codes are no longer used
     const visitorId = store.get("visitorId", null) || uuid();
     store.set("visitorId", visitorId);
     let user = null;        // signed-in username, or null for guests
@@ -264,22 +271,22 @@
     async function api(path, opts = {}) {
       const r = await fetch(path, {
         ...opts,
-        headers: { ...opts.headers, "x-access-code": accessCode, "x-visitor-id": visitorId },
+        headers: { ...opts.headers, "x-visitor-id": visitorId },
       });
       if (r.status === 401) {
         if (user) { user = null; updateAccountUI(); } // session expired
-        showGate(accessCode ? "That code isn't right." : "", { mode: accessCode ? "guest" : "login" });
+        showGate("", { mode: "login" });
         throw Object.assign(new Error("locked"), { locked: true });
       }
       return r;
     }
 
-    // ---------- Sign in / sign up / guest access ----------
+    // ---------- Log in / sign up / request access ----------
     let gateMode = "login";
     const GATE_COPY = {
       login: ["Welcome back", "Log in to see your saved chats.", "Log in"],
       signup: ["Create an account", "Your chats are saved so you can pick up on any device.", "Create account"],
-      guest: ["Continue as a guest", "Enter the access code. Guest chats aren't saved to an account.", "Continue"],
+      request: ["Request access", "yAI is invite-only. Ask for an access code, then use it to create your account.", ""],
     };
     function setGateMode(mode) {
       gateMode = mode;
@@ -291,19 +298,20 @@
       document.querySelectorAll("#gateTabs [data-mode]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
       document.querySelectorAll("#gateForm .field").forEach((f) => (f.hidden = !f.dataset.for.split(" ").includes(mode)));
       $("gatePass").autocomplete = mode === "signup" ? "new-password" : "current-password";
-      const first = mode === "guest" ? $("gateInput") : $("gateUser").value ? $("gatePass") : $("gateUser");
+      $("gateRequest").hidden = mode !== "request";
+      $("gateSubmit").hidden = mode === "request";
+      const first = mode === "request" ? $("requestBtn") : $("gateUser").value ? $("gatePass") : $("gateUser");
       setTimeout(() => first.focus(), 0);
     }
     document.querySelectorAll("#gateTabs [data-mode]").forEach((b) => b.addEventListener("click", () => setGateMode(b.dataset.mode)));
 
     // As a page (nothing usable without access) or as a dialog over the app (from "Log in").
-    function showGate(error = "", { mode = "guest", dialog = false } = {}) {
+    function showGate(error = "", { mode = "login", dialog = false } = {}) {
       $("gate").hidden = false;
       $("gate").classList.toggle("dialog", dialog);
       $("shell").hidden = dialog ? false : true;
       $("gateClose").hidden = !dialog;
       gateVideo(!dialog);
-      $("gateTabs").querySelector('[data-mode="guest"]').hidden = dialog;
       setGateMode(mode);
       $("gateError").textContent = error;
       if (error) { $("gateForm").classList.remove("shake"); void $("gateForm").offsetWidth; $("gateForm").classList.add("shake"); }
@@ -328,12 +336,7 @@
         $("gateForm").classList.remove("shake"); void $("gateForm").offsetWidth; $("gateForm").classList.add("shake");
       };
       const code = $("gateInput").value.trim();
-      if (gateMode === "guest") {
-        if (!code) return fail("Enter the access code.");
-        accessCode = code;
-        if (await loadModels(true)) { store.set("accessCode", accessCode); showApp(); }
-        return;
-      }
+      if (gateMode === "request") return;
       const username = $("gateUser").value.trim(), password = $("gatePass").value;
       if (!username || !password) return fail("Enter your username and password.");
       if (gateMode === "signup" && !code) return fail("Enter the access code to create an account.");

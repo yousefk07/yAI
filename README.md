@@ -19,7 +19,7 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
   default automatically when the PC is offline
 - **Make Image / Make Video**: text → image, photo editing (image → image), text → video and photo → video,
   with per-user daily limits; only sexual content involving minors or real people is blocked
-- **Accounts** with saved chat history and images, or guest access with an invite code
+- **Accounts** with saved chat history and images. yAI is invite-only: everything (chat, cloud models, images, video) needs an account, and people request an access code from the sign-in page to create one
 - **Image and PDF input**: images are downscaled in the browser; PDF text is extracted with pdf.js, and
   scanned PDFs fall back to rendering their pages as images
 - **Live status**: LM Studio's real model-load progress, and a timer while a cloud GPU wakes up
@@ -103,7 +103,7 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
 | `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis (set automatically by the Vercel integration) |
-| `ACCESS_CODE` | Invite code for guests and for creating accounts |
+| `ACCESS_CODE` | Invite code needed to create an account |
 | `SESSION_SECRET` | Signs user and admin sessions |
 | `ADMIN_ACCOUNTS` | Comma-separated usernames with admin access |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Optional separate admin login for `/admin` |
