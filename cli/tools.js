@@ -227,7 +227,9 @@ const tools = {
   write_file: {
     params: ["path", "content", "append"],
     describe:
-      "Create a file or replace its whole content. <append>true</append> adds to the end instead (use it to write a long file in parts). " +
+      "Create a file or replace its whole content. Missing folders in <path> are created for you, so to make a new folder just write " +
+      "a file inside it (e.g. calculator/index.html); never write a file only to create a folder. " +
+      "<append>true</append> adds to the end instead (use it to write a long file in parts). " +
       "For changes to an existing file prefer edit_file.",
     kind: "edit",
     prepare(ctx, a) {
@@ -346,11 +348,24 @@ function testResults(out) {
 // The line of a failed command's output that says what went wrong. PowerShell puts the message
 // before "At line:1 char:5" (runtime errors) or after the "+ ~~~" marker lines (parse errors);
 // anything else usually ends with it.
+// PowerShell also wraps a long message over several lines, so the pieces are joined back into one.
 function errorLine(lines) {
   const clean = lines.map((l) => l.trim()).filter((l) => l && !/OutputEncoding=\[Text\.Encoding\]/.test(l));
+  const noise = (l) => /^\+/.test(l) || /^(CategoryInfo|FullyQualifiedErrorId)\b/.test(l) || /^At line:\d+ char:\d+/.test(l);
   const at = clean.findIndex((l) => /^At line:\d+ char:\d+/.test(l));
-  if (at > 0) return clean[at - 1];
-  if (at === 0) return clean.find((l, i) => i > 0 && !/^\+/.test(l) && !/^(CategoryInfo|FullyQualifiedErrorId)\b/.test(l)) || "";
+  if (at > 0) {
+    // "cmd : The term ... is not recognized ... or operable" / "program. Check the spelling ..." / "and try again."
+    const before = clean.slice(Math.max(0, at - 4), at);
+    const start = before.map((l) => / : /.test(l)).lastIndexOf(true);
+    return before.slice(Math.max(0, start)).join(" ");
+  }
+  if (at === 0) {
+    const start = clean.findIndex((l, i) => i > 0 && !noise(l));
+    if (start < 0) return "";
+    const msg = [];
+    for (let i = start; i < clean.length && !noise(clean[i]); i++) msg.push(clean[i]);
+    return msg.join(" ");
+  }
   return clean[clean.length - 1] || "";
 }
 

@@ -456,9 +456,12 @@ const TAG_ALIASES = {
 };
 
 function parseToolCall(text) {
-  const head = /(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?\s*>/.exec(text);
+  // <tool name="run">, and the attribute style some models use: <tool name="run" command="npm test">.
+  const head = /(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?((?:\s+[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*>/.exec(text);
   if (!head) return null;
   const name = head[2];
+  const attrs = {};
+  for (const m of (head[3] || "").matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[m[1]] = m[2] ?? m[3];
   const rest = text.slice(head.index + head[0].length);
   let end = rest.search(/\n[ \t]*<\/tool>/);
   if (end < 0) end = rest.lastIndexOf("</tool>");
@@ -480,9 +483,18 @@ function parseToolCall(text) {
   }
   // Small models often skip the inner tags (<tool name="run">node --test</tool>) or use their own
   // (<cmd>, <file>). If none of the expected tags were found, the bare text is the first argument.
+  for (const p of tool ? tool.params : []) {
+    if (args[p] !== undefined) continue;
+    const key = [p, ...(TAG_ALIASES[p] || [])].find((k) => attrs[k] !== undefined);
+    if (key) args[p] = attrs[key];
+  }
   if (tool && tool.params.length && !Object.keys(args).length) {
-    const bare = body.replace(/<\/?[\w-]+>/g, "").trim();
-    if (bare && !bare.includes("\n")) args[tool.params[0]] = bare;
+    // "command=New-Item ..." / "path: src/app.js": the argument written as name=value instead of in its tag.
+    const first = tool.params[0];
+    const names = [first, ...(TAG_ALIASES[first] || [])].join("|");
+    const bare = body.replace(/<\/?[\w-]+>/g, "").trim().replace(new RegExp(`^(?:${names})\\s*[=:]\\s*`, "i"), "");
+    const unquoted = /^(["'])[\s\S]*\1$/.test(bare) && !bare.slice(1, -1).includes(bare[0]) ? bare.slice(1, -1) : bare;
+    if (unquoted && !unquoted.includes("\n")) args[first] = unquoted;
   }
   const endTag = text.indexOf("</tool>", head.index + head[0].length + end);
   return { name, args, raw: text.slice(0, endTag >= 0 ? endTag + 7 : text.length) };
@@ -694,6 +706,8 @@ async function runAgent(content) {
   ui.resetSections();
   let cutOffs = 0; // replies in a row that were cut off mid-step
   let lastError = "", sameError = 0; // the same tool error repeated back to back
+  let failedRuns = 0; // commands in a row that failed
+  const failedCommands = new Set();
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       const text = await callModel();
@@ -741,7 +755,25 @@ async function runAgent(content) {
         print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
         return;
       }
+      // Failing commands: a small model will try variations of the same broken command forever (2026-10-20:
+      // fifteen mkdir attempts). Say so when it repeats one, push it to rethink after three failures in a row,
+      // and stop after five.
+      if (call.name === "run" && !call.cutOff) {
+        const failed = /\n\[(exit code [1-9]\d*|command [^\]]+)\]$/.test(String(result.output));
+        const cmd = String((call.args || {}).command || "").trim().toLowerCase();
+        if (!failed) failedRuns = 0;
+        else {
+          failedRuns++;
+          if (failedCommands.has(cmd)) result.output += "\nThis exact command already failed earlier in this task. Don't run it again; work out why it fails first.";
+          failedCommands.add(cmd);
+          if (failedRuns === 3) result.output += "\nThree commands in a row have failed. Stop trying variations: read the error, check your assumptions (does the path exist? is it a file or a folder?), and if you still can't see why, tell the user what's going wrong.";
+        }
+      }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
+      if (failedRuns >= 5) {
+        ui.note(`${c.yellow("!")} ${c.ink("Five commands in a row failed, so yAI stopped.")} ${c.dim("Tell it what to do differently, or try a bigger model (/model).")}`);
+        break;
+      }
       // The same failing step over and over (a small model stuck on one mistake): stop after three.
       if (String(result.output).startsWith("Error") && result.output === lastError) {
         if (++sameError >= 2) {
