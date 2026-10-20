@@ -29,6 +29,8 @@
 
   <!-- Sign in / sign up / guest access -->
   <section id="gate" class="gate" hidden>
+    <!-- First visit: the tour video plays behind the card (loaded only when the gate is a page). -->
+    <div class="gate-bg" aria-hidden="true"><video id="gateVideo" muted loop playsinline preload="none" poster="/yai-tour-poster.jpg"></video></div>
     <form id="gateForm" class="gate-card" novalidate>
       <button type="button" class="icon-btn gate-close" id="gateClose" aria-label="Close" hidden>
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -296,12 +298,22 @@
       $("gate").classList.toggle("dialog", dialog);
       $("shell").hidden = dialog ? false : true;
       $("gateClose").hidden = !dialog;
+      gateVideo(!dialog);
       $("gateTabs").querySelector('[data-mode="guest"]').hidden = dialog;
       setGateMode(mode);
       $("gateError").textContent = error;
       if (error) { $("gateForm").classList.remove("shake"); void $("gateForm").offsetWidth; $("gateForm").classList.add("shake"); }
     }
-    function closeGate() { $("gate").hidden = true; input.focus(); }
+    function closeGate() { $("gate").hidden = true; gateVideo(false); input.focus(); }
+    // The tour video behind the sign-in page. It's only downloaded when someone actually sees that
+    // page, and people who prefer less motion get its still frame instead.
+    function gateVideo(play) {
+      const v = $("gateVideo");
+      if (!play) return v.pause();
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      if (!v.getAttribute("src")) v.src = "/yai-tour.mp4";
+      v.play().catch(() => {});
+    }
     $("gateClose").addEventListener("click", closeGate);
     $("gate").addEventListener("click", (e) => { if (e.target === $("gate") && $("gate").classList.contains("dialog")) closeGate(); });
 
@@ -341,6 +353,7 @@
 
     function showApp() {
       $("gate").hidden = true;
+      gateVideo(false);
       $("shell").hidden = false;
       input.focus();
     }
