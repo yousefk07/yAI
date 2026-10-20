@@ -63,4 +63,6 @@ def max():
     model = os.environ.get("YAI_MAX_MODEL", "")
     if not model:
         raise RuntimeError("Set YAI_MAX_MODEL to the Hugging Face repo of the Qwen 3.8 27B model, then deploy again.")
-    serve(model, "qwen3.8-27b-cloud", 24000, ["--limit-mm-per-prompt", '{"image": 8}'])
+    # Its hybrid (linear-attention) layers need one cache block per running request, and only ~186 fit beside the
+    # model on an L40S; vLLM's default of 256 at once made every start fail.
+    serve(model, "qwen3.8-27b-cloud", 24000, ["--limit-mm-per-prompt", '{"image": 8}', "--max-num-seqs", "64"])
