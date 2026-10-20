@@ -202,7 +202,11 @@ const tools = {
       const abs = resolve(ctx, a.path);
       if (!fs.existsSync(abs)) throw new ToolError(`File not found: ${a.path}. Use write_file to create it.`);
       if (!ctx.readFiles.has(abs)) throw new ToolError(`Read ${a.path} with read_file before editing it.`);
-      if (a.old === undefined || a.new === undefined) throw new ToolError("<old> and <new> are required.");
+      if (a.old === undefined || a.new === undefined) {
+        // Say exactly what's missing: small models often close <old> with </new> and skip the fix.
+        const missing = [a.old === undefined && "a complete <old>…</old> block", a.new === undefined && "a <new>…</new> block with the fixed lines"].filter(Boolean).join(" and ");
+        throw new ToolError(`edit_file is missing ${missing}. Write it as: <path>file</path>, then <old> with the exact lines to replace, closed by </old>, then <new> with the replacement, closed by </new>, then </tool>.`);
+      }
       if (a.old === a.new) throw new ToolError("<old> and <new> are the same.");
       const before = fs.readFileSync(abs, "utf8");
       // Windows files often use CRLF while the model writes LF.

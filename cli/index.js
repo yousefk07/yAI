@@ -416,6 +416,15 @@ function trimContext() {
   }
 }
 
+const TAG_ALIASES = {
+  path: ["file", "file_path", "filepath", "filename"],
+  old: ["old_str", "old_text", "search", "find", "original", "before"],
+  new: ["new_str", "new_text", "replace", "replacement", "updated", "after"],
+  command: ["cmd", "shell", "bash", "powershell"],
+  content: ["text", "code", "body"],
+  pattern: ["query", "regex", "glob"],
+};
+
 function parseToolCall(text) {
   const head = /(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?\s*>/.exec(text);
   if (!head) return null;
@@ -428,12 +437,16 @@ function parseToolCall(text) {
   const tool = T.tools[name];
   const args = {};
   for (const p of tool ? tool.params : []) {
-    const open = body.indexOf(`<${p}>`);
-    if (open < 0) continue;
-    const from = open + p.length + 2;
-    const close = ["content", "new"].includes(p) ? body.lastIndexOf(`</${p}>`) : body.indexOf(`</${p}>`, from);
-    if (close < from) continue;
-    args[p] = body.slice(from, close).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+    // The tag the instructions ask for first, then names small models tend to use instead.
+    for (const tag of [p, ...(TAG_ALIASES[p] || [])]) {
+      const open = body.indexOf(`<${tag}>`);
+      if (open < 0) continue;
+      const from = open + tag.length + 2;
+      const close = ["content", "new"].includes(p) ? body.lastIndexOf(`</${tag}>`) : body.indexOf(`</${tag}>`, from);
+      if (close < from) continue;
+      args[p] = body.slice(from, close).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+      break;
+    }
   }
   // Small models often skip the inner tags (<tool name="run">node --test</tool>) or use their own
   // (<cmd>, <file>). If none of the expected tags were found, the bare text is the first argument.
@@ -661,15 +674,22 @@ async function runAgent(content) {
       if (!call) break;
       let result;
       if (call.cutOff) {
-        // A model that keeps writing the same too-long step would loop forever; give it one more try.
+        // No </tool>: either the reply really hit its length limit (a long one), or a small model simply
+        // stopped without finishing the step (a short one). They need different advice. Two in a row
+        // and yAI stops, so a model stuck on the same mistake can't loop.
+        const long = text.length > 6000;
         cutOffs++;
         if (cutOffs >= 2) {
-          state.messages[state.messages.length - 1].content = "(my reply was cut off again)";
-          ui.note(`${c.yellow("!")} ${c.ink("yAI's reply was cut off twice: it tried to write more than one reply can hold.")} ${c.dim("Ask for something shorter, or use a bigger model (/model).")}`);
+          state.messages[state.messages.length - 1].content = long ? "(my reply was cut off again)" : "(I didn't finish that step again)";
+          ui.note(`${c.yellow("!")} ${c.ink(long ? "yAI's reply was cut off twice: it tried to write more than one reply can hold." : "yAI twice wrote a step without finishing it.")} ${c.dim(long ? "Ask for something shorter, or use a bigger model (/model)." : "Small models do this; try a bigger one (/model).")}`);
           break;
         }
-        result = { output: `Error: your ${call.name} call was cut off before </tool> because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.` };
-        ui.note(`${c.yellow("!")} ${c.dim("that step was cut off · asking yAI to split it up")}`);
+        result = {
+          output: long
+            ? `Error: your ${call.name} call was cut off before </tool> because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
+            : `Error: your ${call.name} call isn't finished: it never reached </tool>, so nothing happened. Write the whole step again, with every tag opened and closed (for edit_file: <path>, then <old>…</old>, then <new>…</new>), ending with </tool> on its own line.`,
+        };
+        ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);
       } else {
         cutOffs = 0;
         result = await execTool(call);
