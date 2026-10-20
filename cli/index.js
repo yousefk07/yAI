@@ -729,6 +729,14 @@ function rejected(ans) {
   return { output: `The user rejected this action and said: ${ans.feedback}` };
 }
 
+// A reply whose last line says what it's about to do ("Let me read app.js:", "Now I'll write the CSS.") but has no
+// tool call. Questions and finished summaries don't count.
+function announcesStep(text) {
+  const last = String(text).trim().split("\n").filter((l) => l.trim()).pop() || "";
+  if (/\?\s*$/.test(last)) return false;
+  return /:\s*$/.test(last) || /\b(let me|let's|(now|next|first|then),? (i'll|i will|i'm going to|let me))\b/i.test(last);
+}
+
 // Runs a full request: model reply → tool → model reply … until the model answers without a tool.
 async function runAgent(content) {
   pushUser([...state.pendingContext, content].join("\n\n"));
@@ -747,6 +755,7 @@ async function runAgent(content) {
   const failedCommands = new Set();
   const undoStart = state.undo.length;
   let reviewed = false;
+  let nudges = 0; // replies that announced a step but stopped before it
   try {
     // /duo: the partner model's plan goes in with the request.
     if (state.duo && !state.tutor) {
@@ -774,6 +783,14 @@ async function runAgent(content) {
       const call = parseToolCall(text);
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
       if (!call) {
+        // "Now I'll create the CSS file:" and then nothing: the model said what it would do and ended its reply
+        // without the tool call (Qwen3 Coder does this a lot). Push it on, at most twice per request.
+        if (announcesStep(text) && nudges < 2) {
+          nudges++;
+          ui.note(c.dim("· it stopped before the step it described · continuing"));
+          pushUser("Go ahead: make that tool call now (the <tool> block), without repeating what you're about to do.");
+          continue;
+        }
         // /duo: the partner reviews what changed, and anything it finds goes back to the coder once.
         if (state.duo && !reviewed && !state.interrupted) {
           reviewed = true;

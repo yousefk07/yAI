@@ -30,7 +30,7 @@ VOLUMES = {"/root/.cache/huggingface": hf_cache, "/root/.cache/vllm": vllm_cache
 # VLLM_API_KEY: the key the site sends (Authorization: Bearer ...). Create it once with `modal secret create`.
 SECRETS = [modal.Secret.from_name("yai-vllm")]
 PORT = 8000
-IDLE_SECONDS = 60  # how long a GPU stays up after the last request (billed), like RunPod's idle timeout
+IDLE_SECONDS = 300  # how long a GPU stays up after the last request (billed); 60 s meant a cold start after most pauses
 
 
 def serve(model: str, name: str, max_len: int, extra: list[str] | None = None) -> None:
