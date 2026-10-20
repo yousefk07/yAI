@@ -46,6 +46,8 @@ function clipOutput(s, max = MAX_OUTPUT) {
   const head = s.slice(0, Math.floor(max * 0.4)), tail = s.slice(-Math.floor(max * 0.6));
   return `${head}\n\n[… ${s.length - max} characters cut …]\n\n${tail}`;
 }
+// Search results kept per call: enough to find things, small enough not to fill a small model's window.
+const MAX_HITS = 60;
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function* walk(ctx, dir, depth = Infinity, level = 0) {
@@ -151,22 +153,22 @@ const tools = {
         }
         if (isBinary(buf)) continue;
         const lines = buf.toString("utf8").split(/\r?\n/);
-        for (let i = 0; i < lines.length && hits.length < 150; i++) {
+        for (let i = 0; i < lines.length && hits.length < MAX_HITS; i++) {
           if (re.test(lines[i])) {
-            hits.push(`${rel(ctx, abs)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+            hits.push(`${rel(ctx, abs)}:${i + 1}: ${lines[i].trim().slice(0, 160)}`);
             files.add(abs);
           }
         }
-        if (hits.length >= 150) break;
+        if (hits.length >= MAX_HITS) break;
       }
       toolResult(`Found ${plural(hits.length, "match")}`.replace("matchs", "matches") + ` in ${plural(files.size, "file")}`);
-      return hits.length ? hits.join("\n") + (hits.length >= 150 ? "\n(stopped at 150 matches; narrow the search)" : "") : "No matches.";
+      return hits.length ? hits.join("\n") + (hits.length >= MAX_HITS ? `\n(stopped at ${MAX_HITS} matches; narrow the search with a more specific pattern, a <path> or a <glob>)` : "") : "No matches.";
     },
   },
 
   read_file: {
     params: ["path", "offset", "limit"],
-    describe: "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 400).",
+    describe: "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 200).",
     readOnly: true,
     run(ctx, a) {
       const abs = resolve(ctx, a.path);
@@ -179,7 +181,7 @@ const tools = {
       if (isBinary(buf)) throw new ToolError(`${a.path} is a binary file.`);
       const lines = buf.toString("utf8").split(/\r?\n/);
       const offset = Math.max(parseInt(a.offset, 10) || 1, 1);
-      const limit = Math.min(Math.max(parseInt(a.limit, 10) || 400, 1), 2000);
+      const limit = Math.min(Math.max(parseInt(a.limit, 10) || 200, 1), 2000);
       const slice = lines.slice(offset - 1, offset - 1 + limit);
       ctx.readFiles.add(abs);
       toolHeader("Read", rel(ctx, abs) + (offset > 1 || slice.length < lines.length ? `:${offset}-${offset + slice.length - 1}` : ""));
@@ -263,11 +265,37 @@ function showEdit(ctx, plan) {
   return diffBox(rel(ctx, plan.abs), plan.before, plan.after, { created: plan.created, maxLines: plan.created ? 8 : 40 });
 }
 
+// Windows PowerShell 5.1 has no && or ||, and models write them anyway ("cd app && npm test"), so they are turned
+// into its own form: a && b -> a; if ($?) { b }, a || b -> a; if (-not $?) { b }. Quoted text is left alone.
+function psChain(command) {
+  const parts = [];
+  let cur = "", quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if ((ch === "&" || ch === "|") && command[i + 1] === ch) {
+      parts.push(cur.trim(), ch + ch);
+      cur = "";
+      i++;
+    } else cur += ch;
+  }
+  parts.push(cur.trim());
+  if (parts.length === 1) return command;
+  let out = parts[parts.length - 1];
+  for (let i = parts.length - 2; i > 0; i -= 2) out = `${parts[i - 1]}; if (${parts[i] === "&&" ? "$?" : "-not $?"}) { ${out} }`;
+  return out;
+}
+
 // Runs a command, killing the whole process tree on Esc or timeout.
 function runCommand(ctx, command, timeoutSec, signal) {
   return new Promise((resolveRun) => {
     const child = WIN
-      ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8; ${command}`], { cwd: ctx.root, windowsHide: true })
+      ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8; ${psChain(command)}`], { cwd: ctx.root, windowsHide: true })
       : spawn("bash", ["-lc", command], { cwd: ctx.root, detached: true });
     let out = "";
     let killedFor = "";
@@ -359,4 +387,4 @@ async function execRun(ctx, a, signal) {
   return result;
 }
 
-module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine };
+module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine, psChain };

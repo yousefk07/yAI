@@ -24,7 +24,10 @@ const { c, print, spinner } = ui;
 const VERSION = require("../package.json").version || "1.0.0";
 const MODES = ["default", "acceptEdits", "plan"];
 const MAX_STEPS = 50; // tool calls per request before yAI stops to check in
-const TRIM_AT = 250_000; // characters of conversation before old tool output is dropped
+// Share of the model's window at which old tool output is dropped, and at which the conversation is
+// summarized automatically so a task never stops at 100%.
+const TRIM_AT = 0.75;
+const AUTO_COMPACT_AT = 0.9;
 const COMPACT_HINT_AT = 350_000;
 const SAFE_COMMANDS = /^(git (status|diff|log|show|branch)|ls|dir|pwd|cat|type|Get-ChildItem|Get-Content|Get-Location|node (-v|--version|--check)|npm (-v|--version|ls)|where|which)\b/i;
 
@@ -88,6 +91,20 @@ function gitBranch() {
   }
 }
 
+// Folders directly inside the project that are git repositories (for a project folder that holds several).
+let repoCache;
+function nestedRepos() {
+  if (repoCache) return repoCache;
+  repoCache = [];
+  try {
+    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+      if (e.isDirectory() && !e.name.startsWith(".") && fs.existsSync(path.join(root, e.name, ".git"))) repoCache.push(e.name);
+      if (repoCache.length >= 10) break;
+    }
+  } catch {}
+  return repoCache;
+}
+
 // ---------- system prompt ----------
 function projectNotes() {
   for (const name of ["YAI.md", "CLAUDE.md", "AGENTS.md"]) {
@@ -109,7 +126,9 @@ function topLevel() {
 }
 
 function systemPrompt() {
-  const shell = process.platform === "win32" ? "PowerShell on Windows" : `bash on ${os.type()}`;
+  const shell = process.platform === "win32"
+    ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
+    : `bash on ${os.type()}`;
   const toolDocs = Object.entries(T.tools)
     .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
     .join("\n");
@@ -117,7 +136,7 @@ function systemPrompt() {
   return `You are yAI Code, a coding agent working in the user's terminal. You help with software tasks in their project: you read, search and edit files and run commands.
 
 # Environment
-- Project folder: ${root}${branch ? ` (git branch: ${branch})` : ""}
+- Project folder: ${root}${branch ? ` (git branch: ${branch})` : nestedRepos().length ? ` (not a git repository; these folders in it are: ${nestedRepos().join(", ")} — run git there with git -C <folder> ...)` : ""}
 - Shell: ${shell}
 - Date: ${new Date().toDateString()}
 - Permission mode: ${state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command"}
@@ -154,6 +173,9 @@ ${toolDocs}
 
 # How to work
 - Look before you change anything: use list_files, find_files, search and read_file. Never guess what a file contains.
+- Your context window is small. Read big files in parts (<limit> of about 150 lines, where the search points you) and search with a specific pattern or a <glob>, instead of reading whole files.
+- When you describe the project, only state what you saw in files you read; say "probably" for anything you are inferring from names.
+- If you create scratch or debug files to try something out, delete them before you finish.
 - Read a file before editing it. Copy <old> exactly from the read_file output, without the line numbers.
 - Make small, focused edit_file changes; use write_file only for new files or full rewrites. Keep the project's existing style.
 - A reply has a length limit. Write long files in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for the rest.
@@ -191,17 +213,23 @@ function gitStatus() {
   return { branch, modified };
 }
 
-// How full the model's context is: the conversation and instructions against the model's window
-// (24k tokens on the cloud GPU, about 8k for the local models), at roughly 3.6 characters a token.
-const contextChars = () => (/cloud/.test(state.model) ? 24000 : 8192) * 3.6;
+// How full the model's context is: the conversation and instructions against the model's window (the site
+// says how big each one is; 32k for Qwen3 Coder, about 8k for the local models), at roughly 3.6 characters a
+// token. A big window keeps 4k tokens free for the reply itself.
+function contextChars() {
+  const m = state.models.find((x) => x.id === state.model);
+  const tokens = (m && m.context) || (/cloud/.test(state.model) ? 24000 : 8192);
+  return (tokens - (tokens >= 16000 ? 4096 : 0)) * 3.6;
+}
 const usedChars = () => JSON.stringify(state.messages).length + systemPrompt().length;
 function contextPercent() {
   return Math.min(100, Math.round((usedChars() / contextChars()) * 100));
 }
 // How much of a file or a command's output can go back to the model and still leave it room to
 // answer. A small local model can't take a 400-line file whole, so the middle is cut instead.
+// No single result may take more than 30% of the window, so two big reads can't fill it.
 function toolBudget() {
-  return Math.max(2500, Math.min(40000, Math.floor(contextChars() * 0.85 - usedChars())));
+  return Math.max(2500, Math.floor(Math.min(40000, contextChars() * 0.3, contextChars() * 0.85 - usedChars())));
 }
 
 // The line above the prompt: "main ● 2 modified   ctx 23%   approvals: ask        ⇧⇥ plan mode   /undo".
@@ -405,14 +433,15 @@ async function loadModels() {
 }
 
 // ---------- the agent loop ----------
+// When the conversation passes TRIM_AT of the window, old tool output (oldest first, the last few messages
+// kept) becomes a one-line note until it is back near 60%.
 function trimContext() {
-  let size = JSON.stringify(state.messages).length;
-  if (size < TRIM_AT) return;
-  for (let i = 0; i < state.messages.length - 8 && size > TRIM_AT * 0.7; i++) {
+  const limit = contextChars();
+  if (usedChars() < limit * TRIM_AT) return;
+  for (let i = 0; i < state.messages.length - 4 && usedChars() > limit * 0.6; i++) {
     const m = state.messages[i];
-    if (m.role === "user" && m.content.startsWith("<tool_result") && m.content.length > 400) {
-      size -= m.content.length;
-      m.content = m.content.split("\n")[0] + "\n[old tool output removed to save space]\n</tool_result>";
+    if (m.role === "user" && typeof m.content === "string" && m.content.startsWith("<tool_result") && m.content.length > 400) {
+      m.content = m.content.split("\n")[0] + "\n[old tool output removed to save space; read the file again if you need it]\n</tool_result>";
     }
   }
 }
@@ -475,6 +504,14 @@ async function callModel() {
     spinner.start();
   }
   trimContext();
+  // Still nearly full after trimming (long replies, many edits): summarize and carry on with the task.
+  if (usedChars() > contextChars() * AUTO_COMPACT_AT && state.messages.length > 6) {
+    spinner.text("compacting the conversation (it was nearly full)");
+    try {
+      await summarize({ keepRecent: 4, signal: state.abort.signal });
+    } catch {}
+    spinner.text("thinking");
+  }
 
   const write = ui.markdownWriter();
   let text = "", lineBuf = "", inTool = false, heldFence = null;
@@ -993,6 +1030,43 @@ async function chooseModel(arg) {
   ui.note(`${c.green("✓")} ${c.ink("Model: " + m.label)}` + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
 }
 
+// Replaces the conversation with a summary of it (plus the last `keepRecent` messages, so a task in progress
+// carries on). The request has to fit the window too, which a full conversation no longer does, so long tool
+// output is cut down first and, if that isn't enough, the oldest messages after the first request are left out.
+async function summarize({ keepRecent = 0, signal } = {}) {
+  const recent = keepRecent ? state.messages.slice(-keepRecent) : [];
+  const slim = state.messages.slice(0, state.messages.length - recent.length).map((m) =>
+    typeof m.content === "string" && m.content.length > 1500 ? { ...m, content: m.content.slice(0, 700) + "\n[…cut for the summary]" } : m
+  );
+  while (JSON.stringify(slim).length > contextChars() * 0.6 && slim.length > 3) slim.splice(1, 1);
+  let summary = "";
+  await ensureWarm();
+  await api.chat({
+    messages: [
+      ...slim,
+      {
+        role: "user",
+        content:
+          "Summarize our conversation so far so we can continue in a fresh context. Include: what I asked for, decisions made, " +
+          "files you changed and how, the current state, and what's left to do. Be specific with file paths and names. No tool calls.",
+      },
+    ],
+    model: state.model,
+    system: systemPrompt(),
+    conversationId: state.conversationId,
+    signal,
+    onTokens: (n) => spinner.tokens(n),
+    onText: (p) => void (summary += p),
+  });
+  if (!summary.trim()) throw new Error("The model returned an empty summary");
+  state.messages = [
+    { role: "user", content: `This conversation continues from an earlier one. Summary of it:\n\n${summary.replace(/<tool[\s\S]*$/, "").trim()}` },
+    { role: "assistant", content: "Got it. I'll continue from there." },
+    ...recent,
+  ];
+  ctx.readFiles.clear();
+}
+
 async function compact() {
   if (state.messages.length < 2) return print(c.dim("Nothing to compact yet."));
   state.busy = true;
@@ -1001,34 +1075,9 @@ async function compact() {
   syncMute();
   const saved = state.messages;
   try {
-    state.messages = [
-      ...saved,
-      {
-        role: "user",
-        content:
-          "Summarize our conversation so far so we can continue in a fresh context. Include: what I asked for, decisions made, " +
-          "files you changed and how, the current state, and what's left to do. Be specific with file paths and names. No tool calls.",
-      },
-    ];
     spinner.start("Compacting");
-    let summary = "";
-    await ensureWarm();
-    await api.chat({
-      messages: state.messages,
-      model: state.model,
-      system: systemPrompt(),
-      conversationId: state.conversationId,
-      signal: state.abort.signal,
-      onTokens: (n) => spinner.tokens(n),
-      onText: (p) => void (summary += p),
-    });
+    await summarize({ signal: state.abort.signal });
     spinner.stop();
-    if (!summary.trim()) throw new Error("The model returned an empty summary");
-    state.messages = [
-      { role: "user", content: `This conversation continues from an earlier one. Summary of it:\n\n${summary.replace(/<tool[\s\S]*$/, "").trim()}` },
-      { role: "assistant", content: "Got it. I'll continue from there." },
-    ];
-    ctx.readFiles.clear();
     print(c.green("   Compacted the conversation") + c.dim(` (${kTokens(Math.round(JSON.stringify(saved).length / 3.6))} → ${kTokens(Math.round(JSON.stringify(state.messages).length / 3.6))} tokens)`));
   } catch (err) {
     spinner.stop();
