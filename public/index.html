@@ -132,6 +132,7 @@
               <a href="/admin" role="menuitem" class="menu-item" id="adminLink" hidden>Admin</a>
               <a href="/usage" role="menuitem" class="menu-item">Your usage</a>
               <a href="/arena" role="menuitem" class="menu-item">Model arena</a>
+              <button type="button" role="menuitem" class="menu-item menu-danger" id="clearChatsBtn">Clear chat history</button>
               <button type="button" role="menuitem" class="menu-item" id="logoutBtn">Log out</button>
             </div>
           </div>
@@ -579,6 +580,23 @@
     });
     document.addEventListener("click", (e) => { if (!e.target.closest("#account")) $("accountMenu").hidden = true; });
     $("logoutBtn").addEventListener("click", () => { $("accountMenu").hidden = true; signOut(); });
+    // Clear chat history: every saved chat on the account (projects stay).
+    $("clearChatsBtn").addEventListener("click", async () => {
+      $("accountMenu").hidden = true;
+      const n = chatList.length;
+      if (!n) return alert("You don't have any saved chats.");
+      if (!confirm(`Delete all ${n} chat${n === 1 ? "" : "s"}? This can't be undone. Your projects are kept.`)) return;
+      try {
+        const r = await fetch("/api/chats?all=1", { method: "DELETE" });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Error ${r.status}`);
+      } catch (err) {
+        return alert(`Couldn't clear your chats: ${err.message}`);
+      }
+      clearTimeout(remoteTimer); // a save still waiting would bring the open chat back
+      chatList = [];
+      try { localStorage.removeItem(chatKey()); } catch {}
+      startNewChat();
+    });
 
     // ---------- Status / models ----------
     function setStatus(ok, text, title = "") {

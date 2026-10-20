@@ -645,3 +645,6 @@ a.action.download { text-decoration: none; }
 
 /* Sidebar link styled like the yAI Code button */
 a.side-code { text-decoration: none; }
+
+.menu-danger { color: var(--bad); }
+.menu-danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
