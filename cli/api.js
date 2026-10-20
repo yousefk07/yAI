@@ -129,6 +129,13 @@ async function warmup(model, { signal, onProgress }) {
 // One model reply in agent mode. onText gets each piece of text; return false from it to stop early.
 // onStatus gets what the cloud GPU is doing (queued, starting...) until the reply starts.
 async function chat({ messages, model, system, conversationId, signal, onText, onTokens, onStatus }) {
+  // YAI_DEBUG_DIR=<folder>: keep each request (model, system prompt, messages) as JSON, to replay a model's odd reply.
+  if (process.env.YAI_DEBUG_DIR) {
+    try {
+      fs.mkdirSync(process.env.YAI_DEBUG_DIR, { recursive: true });
+      fs.writeFileSync(path.join(process.env.YAI_DEBUG_DIR, `request-${Date.now()}.json`), JSON.stringify({ model, system, messages }, null, 1));
+    } catch {}
+  }
   const res = await request("/api/chat", {
     method: "POST",
     signal,
