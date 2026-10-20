@@ -498,7 +498,11 @@ async function callModel() {
       system: systemPrompt(),
       conversationId: state.conversationId,
       signal: local.signal,
+      onStatus: (status) => {
+        if (!seen) spinner.text(status);
+      },
       onTokens: (n) => {
+        if (!seen) spinner.text("writing");
         seen = n;
         spinner.tokens(n);
       },

@@ -127,7 +127,8 @@ async function warmup(model, { signal, onProgress }) {
 }
 
 // One model reply in agent mode. onText gets each piece of text; return false from it to stop early.
-async function chat({ messages, model, system, conversationId, signal, onText, onTokens }) {
+// onStatus gets what the cloud GPU is doing (queued, starting...) until the reply starts.
+async function chat({ messages, model, system, conversationId, signal, onText, onTokens, onStatus }) {
   const res = await request("/api/chat", {
     method: "POST",
     signal,
@@ -137,6 +138,7 @@ async function chat({ messages, model, system, conversationId, signal, onText, o
   if (!res.ok) throw new Error(await errorOf(res));
   let usage, error;
   await readEvents(res, (ev) => {
+    if (ev.status && onStatus) onStatus(ev.status);
     if (ev.t) onTokens(ev.t);
     if (ev.error) error = ev.error;
     if (ev.done) usage = ev.usage;
