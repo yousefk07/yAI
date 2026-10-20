@@ -7,8 +7,8 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 
 | Model | Where it runs | Speed |
 |---|---|---|
-| **Qwen 3.8 27B** (4-bit AWQ) | RunPod serverless vLLM, 48 GB GPU | ~34 tokens/s |
-| **Qwen3 Coder 30B** (yAI Code only) | RunPod serverless vLLM, 96 GB GPU | not measured yet (only 3B of its 30B parameters work on each token) |
+| **Qwen 3.8 27B** (FP8, reads images) | Modal serverless vLLM, 48 GB L40S | ~34 tokens/s |
+| **Qwen3 Coder 30B** (yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S | not measured yet (only 3B of its 30B parameters work on each token) |
 | Qwen 3.5 4B, Phi 4 Mini, Qwen 3.5 2B (website only) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
 | **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
 | **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
