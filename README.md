@@ -108,6 +108,9 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `MODAL_API_KEY` | The key the Modal chat servers check (the `VLLM_API_KEY` in the `yai-vllm` Modal secret) |
 | `MODAL_CODER_URL` | Modal URL of the coder server (`modal deploy modal/llm.py` prints it); when set, Qwen3 Coder runs on Modal instead of RunPod |
 | `MODAL_MAX_URL` | Modal URL of the Qwen 3.8 27B server; when set, it runs on Modal instead of RunPod |
+| `MODAL_ULTRA_URL` | Modal shared endpoint for yAI Ultra (Kimi K3, billed per token, no cold start) |
+| `MODAL_ULTRA_KEY` | Its proxy token, as `wk-….ws-…` (sent as a Bearer token) |
+| `ULTRA_DAILY_USD` | Optional: how much yAI Ultra each person can use per day (default 2) |
 | `RUNPOD_IMAGE_ENDPOINT_ID` | ComfyUI endpoint for text → image (`workflows/t2i.json`) |
 | `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
 | `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |
