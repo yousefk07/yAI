@@ -8,6 +8,7 @@ const { handleModels, handleChat, handleWarmup, LMSTUDIO_URL } = require("./lib/
 const { handleLogin, handleLogout, handleActivity } = require("./lib/admin");
 const { handleAuth, handleChats } = require("./lib/accounts");
 const { handleImage } = require("./lib/images");
+const { handleShare } = require("./lib/share");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -28,6 +29,8 @@ const ROUTES = {
   "PUT /api/image": handleImage,
   "GET /api/image": handleImage,
   "DELETE /api/image": handleImage,
+  "GET /api/share": handleShare,
+  "POST /api/share": handleShare,
 };
 
 const PUBLIC_DIR = path.join(__dirname, "public");

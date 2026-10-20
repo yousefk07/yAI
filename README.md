@@ -61,6 +61,9 @@ yai
 ```
 
 - `/model` switch model · `/mode` or **shift+tab** cycle ask / accept edits / plan (read-only) · `/clear` · `/compact` · `/init` (writes YAI.md) · `/status` · `/login` · `/logout`
+- `/fix [cmd]` runs the tests and lets yAI fix them until they pass (`/fix watch` reruns them on every save) · `/review` has a second model review your uncommitted changes · `/commit` writes the message and commits
+- `/look [url|file]` screenshots the page (desktop and phone) for a design review by the vision model · `@mockup.png build this` describes an image so the coder can build it · `/showcase` records a demo video of the page (Chrome + ffmpeg)
+- `/duo`: Qwen 3.8 27B plans each request and reviews the change, Qwen3 Coder writes it · `/tutor`: hints and explanations instead of finished solutions · `/share` publishes the session at an unlisted link (`/share?id=…` on the site)
 - `/theme` picks a look (Midnight, Classic Blue, Paper, Amber) · `/undo` reverts yAI's last edit · `/resume` continues the last conversation · `/plan` read-only planning
 - `/image [16:9] [@photo.jpg] prompt` and `/video [16:9] prompt` make images and videos into `yai-media/`
 - The first run in a folder asks whether to trust it; the footer above the prompt shows the git branch, modified files, context used and the approval mode.

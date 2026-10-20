@@ -63,6 +63,18 @@ const relPath = (abs) => T.rel(ctx, abs);
 const modelLabel = (id = state.model) => state.models.find((m) => m.id === id)?.label || id || "no model";
 const kTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
+// /showcase, /look, /duo, /fix, /commit, /review, /share, /tutor (cli/extras.js).
+const X = require("./extras")({
+  state, ctx, root, api, ui, T, project,
+  syncMute: () => syncMute(),
+  runAgent: (text) => runAgent(text),
+  showPrompt: () => showPrompt(),
+  question: (q) => question(q),
+  topLevel: () => topLevel(),
+  modelLabel: () => modelLabel(),
+  title: () => sessionTitle({ messages: state.messages }),
+});
+
 function findModel(q) {
   const n = Number(q);
   if (Number.isInteger(n) && n >= 1 && n <= state.models.length) return state.models[n - 1];
@@ -139,7 +151,7 @@ function systemPrompt() {
 - Project folder: ${root}${branch ? ` (git branch: ${branch})` : nestedRepos().length ? ` (not a git repository; these folders in it are: ${nestedRepos().join(", ")} — run git there with git -C <folder> ...)` : ""}
 - Shell: ${shell}
 - Date: ${new Date().toDateString()}
-- Permission mode: ${state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command"}
+- Permission mode: ${state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command"}
 - Top-level files: ${topLevel() || "(empty folder)"}
 All paths are relative to the project folder. You cannot access anything outside it.
 
@@ -184,7 +196,7 @@ ${toolDocs}
 - If a tool returns an error, fix the cause and try again instead of repeating the same call.
 - Questions get answers, not edits. Don't change files the user didn't ask about.
 - Be brief. Before a tool call, write at most one short sentence. When the task is done, say what you changed in a few sentences, without a tool call.
-- Use Markdown sparingly; the user reads your replies in a terminal.${projectNotes()}`;
+- Use Markdown sparingly; the user reads your replies in a terminal.${state.tutor ? X.TUTOR_PROMPT : ""}${projectNotes()}`;
 }
 
 // ---------- readline, prompt and keys ----------
@@ -240,6 +252,8 @@ function footerLine() {
   if (git) left.push(c.faint(git.branch) + (git.modified ? " " + c.yellow(`● ${git.modified} modified`) : ""));
   left.push(c.faint(`ctx ${contextPercent()}%`));
   left.push(c.faint("approvals: ") + (state.mode === "default" ? c.faint("ask") : c.yellow(MODE_NAMES[state.mode])));
+  if (state.tutor) left.push(c.yellow("tutor"));
+  if (state.duo) left.push(c.accent("duo"));
   const right = [c.faint(state.mode === "plan" ? "⇧⇥ leave plan" : "⇧⇥ plan mode"), c.faint(state.undo.length ? "/undo" : "/help")];
   return ui.footer(left, right);
 }
@@ -652,6 +666,12 @@ async function execTool(call) {
       return { output: "Not allowed: read-only mode. Do not edit files or run commands. Investigate with read-only tools, then describe your plan or answer." };
     }
 
+    if (tool.kind === "edit" && state.tutor) {
+      ui.toolHeader("Edit", call.args.path || "");
+      ui.toolResult("Skipped: tutor mode is on", { color: c.yellow });
+      return { output: "Not allowed in tutor mode: the student writes the code. Point them to the place and give a hint instead." };
+    }
+
     if (tool.kind === "edit") {
       const plan = tool.prepare(ctx, call.args);
       if (plan.before === plan.after) return { output: "No change: the new content is the same as the old." };
@@ -725,7 +745,16 @@ async function runAgent(content) {
   let lastError = "", sameError = 0; // the same tool error repeated back to back
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
+  const undoStart = state.undo.length;
+  let reviewed = false;
   try {
+    // /duo: the partner model's plan goes in with the request.
+    if (state.duo && !state.tutor) {
+      spinner.start("planning");
+      const plan = await X.duoPlan(content);
+      spinner.stop();
+      if (plan) pushUser(plan);
+    }
     for (let step = 0; step < MAX_STEPS; step++) {
       const text = await callModel();
       spinner.stop();
@@ -744,7 +773,18 @@ async function runAgent(content) {
       }
       const call = parseToolCall(text);
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
-      if (!call) break;
+      if (!call) {
+        // /duo: the partner reviews what changed, and anything it finds goes back to the coder once.
+        if (state.duo && !reviewed && !state.interrupted) {
+          reviewed = true;
+          const fixes = await X.duoReview(content, undoStart);
+          if (fixes) {
+            pushUser(fixes);
+            continue;
+          }
+        }
+        break;
+      }
       let result;
       if (call.cutOff) {
         // No </tool>: either the reply really hit its length limit (a long one), or a small model simply
@@ -821,8 +861,9 @@ async function runAgent(content) {
 }
 
 // ---------- @file mentions and !commands ----------
-function expandMentions(text) {
+async function expandMentions(text) {
   const extra = [];
+  const images = [];
   ui.resetSections(); // the attached files sit right under the user's message
   for (const m of text.matchAll(/(^|\s)@("[^"]+"|[^\s]+)/g)) {
     const p = m[2].replace(/^"|"$/g, "").replace(/[.,;:!?)]+$/, "");
@@ -833,6 +874,10 @@ function expandMentions(text) {
       continue;
     }
     if (!fs.existsSync(abs)) continue;
+    if (X.isImage(abs) && fs.statSync(abs).isFile()) {
+      images.push(abs);
+      continue;
+    }
     if (fs.statSync(abs).isDirectory()) {
       const list = [...T.walk(ctx, abs, 2)].slice(0, 200).map(({ entry, level }) => "  ".repeat(level) + entry.name + (entry.isDirectory() ? "/" : ""));
       extra.push(`<folder path="${relPath(abs)}">\n${list.join("\n")}\n</folder>`);
@@ -852,6 +897,8 @@ function expandMentions(text) {
     ui.toolHeader("Read", relPath(abs));
     ui.toolResult(`Read ${lines.length} line${lines.length === 1 ? "" : "s"}`);
   }
+  // Images: a model that can see describes them, since the coder can't ("@mockup.png build this").
+  if (images.length) extra.push(...(await X.describeImages(images)));
   return extra.length ? `${text}\n\n${extra.join("\n\n")}` : text;
 }
 
@@ -886,12 +933,20 @@ const HELP = [
   ["/undo", "Revert the last edit yAI made (not commands)"],
   ["/resume", "Continue the last conversation in this folder"],
   ["/theme [name]", "Midnight · Classic Blue · Paper · Amber"],
+  ["/fix [test command]", "Run the tests and let yAI fix them until they pass · /fix watch reruns on save"],
+  ["/review [focus]", "A second model reviews your uncommitted changes (runs the tests too)"],
+  ["/commit [note]", "Write a commit message for your changes and commit"],
+  ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
+  ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
+  ["/duo", "Two models: Qwen 3.8 27B plans and reviews, the coder writes"],
+  ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
+  ["/share", "Publish this conversation at an unlisted link"],
   ["/image [16:9] [@photo] <prompt>", "Make an image, or edit a photo; saved in yai-media/"],
   ["/video [16:9] <prompt>", "Make a 5-second video with sound; saved in yai-media/"],
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -1178,6 +1233,22 @@ async function command(line) {
       return makeMedia(cmd.slice(1), arg);
     case "/theme":
       return chooseTheme(arg);
+    case "/fix":
+      return X.fix(arg);
+    case "/review":
+      return X.review(arg);
+    case "/commit":
+      return X.commit(arg);
+    case "/look":
+      return X.look(arg);
+    case "/showcase":
+      return X.showcase(arg);
+    case "/duo":
+      return X.toggleDuo(arg);
+    case "/tutor":
+      return X.toggleTutor(arg);
+    case "/share":
+      return X.share();
     case "/undo":
       return undoLast();
     case "/resume":
@@ -1191,7 +1262,7 @@ async function command(line) {
       print(`  Account   ${state.user ? c.green(state.user) : c.red("signed out")} ${c.dim("· " + api.baseUrl())}`);
       print(`  Model     ${modelLabel()}${state.localOffline ? c.yellow(" · PC offline, cloud only") : ""}`);
       print(`  Folder    ${root}`);
-      print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}`);
+      print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}${state.tutor ? " · tutor" : ""}${state.duo ? " · duo" : ""}`);
       print(`  Context   ~${kTokens(tokens)} tokens in ${state.messages.length} messages`);
       print(`  Usage     ↓ ${kTokens(state.usage.out)} tokens generated this session`);
       const allowed = project().allowedCommands;
@@ -1244,7 +1315,7 @@ async function handleInput(input) {
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());
     else {
       if (!state.user) await ensureLogin();
-      await runAgent(expandMentions(text));
+      await runAgent(await expandMentions(text));
     }
   } catch (err) {
     spinner.stop();
@@ -1253,7 +1324,7 @@ async function handleInput(input) {
   while (queue.length && !state.busy) {
     const next = queue.shift();
     ui.userLine(next);
-    await runAgent(expandMentions(next));
+    await runAgent(await expandMentions(next));
   }
   showPrompt();
 }
@@ -1305,7 +1376,7 @@ async function main() {
     await ensureLogin();
     await loadModels();
     if (modelArg) state.model = findModel(modelArg)?.id || state.model;
-    await runAgent(expandMentions(printPrompt));
+    await runAgent(await expandMentions(printPrompt));
     process.exit(0);
   }
 

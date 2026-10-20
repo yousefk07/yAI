@@ -24,6 +24,9 @@
     },
     "api/image.js": {
       "maxDuration": 60
+    },
+    "api/share.js": {
+      "maxDuration": 15
     }
   }
 }

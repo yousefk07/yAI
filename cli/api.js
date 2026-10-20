@@ -166,4 +166,9 @@ async function downloadVideo(id, signal) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo };
+// ---------- /share: publish a session at an unlisted link ----------
+async function share(session) {
+  return json("/api/share", { method: "POST", body: session });
+}
+
+module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share };

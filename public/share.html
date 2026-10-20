@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <title>Shared session · yAI Code</title>
+  <meta name="description" content="A yAI Code session: what was asked, what the agent read, ran and changed." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <style>
+    /* A shared yAI Code session (/share in the terminal): the conversation, each step the agent took, and its diffs.
+       Same palette as the chat (styles.css), written out here because that file lays out the full-screen app. */
+    :root {
+      --bg: #f7f7f5; --surface: #ffffff; --surface-2: #f0efeb; --text: #1b1b18; --text-2: #3d3d38; --muted: #76756e;
+      --faint: #a6a59e; --border: #e4e3de; --ink: #1b1b18; --on-ink: #f7f7f5; --link: #2958c7; --ok: #2e8a4e; --bad: #c2412d;
+      --user-bg: #ecebe6; --code-bg: #f3f2ee; --add-bg: #e6f4ea; --add-fg: #1d5c33; --del-bg: #fbe9e6; --del-fg: #8a2b1d;
+      --sans: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace; --serif: "Instrument Serif", Georgia, serif;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #121211; --surface: #1a1a18; --surface-2: #222220; --text: #ecebe7; --text-2: #cfcec8; --muted: #9c9b94;
+        --faint: #6d6c66; --border: #2a2a27; --ink: #ecebe7; --on-ink: #121211; --link: #8fb0ff; --ok: #5cc27f; --bad: #ff8a73;
+        --user-bg: #242422; --code-bg: #1d1d1b; --add-bg: #17291d; --add-fg: #a8dfb6; --del-bg: #2e1915; --del-fg: #f0b2a7;
+        color-scheme: dark;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--link); }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 32px 16px 80px; }
+    .top { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; text-decoration: none; }
+    .top svg { flex: none; }
+    h1 { margin: 22px 0 6px; font: 400 clamp(30px, 6vw, 44px)/1.1 var(--serif); letter-spacing: -0.01em; }
+    .meta { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .meta span + span::before { content: "·"; margin-right: 14px; color: var(--faint); }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 30px; }
+    .stat { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 4px 12px; font: 12.5px var(--mono); color: var(--text-2); }
+    .user { display: flex; justify-content: flex-end; margin: 26px 0 14px; }
+    .user .bubble { background: var(--user-bg); border-radius: 16px; padding: 10px 16px; max-width: min(620px, 92%); white-space: pre-wrap; word-wrap: break-word; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: -6px 0 14px; }
+    .chip { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 8px; }
+    .say { margin: 10px 0; }
+    .say p { margin: 0 0 10px; }
+    .say pre, .say code { font-family: var(--mono); font-size: 13px; }
+    .say .code { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--code-bg); margin: 0 0 12px; }
+    .say .code-head { display: flex; justify-content: space-between; padding: 6px 12px; font: 12px var(--mono); color: var(--muted); border-bottom: 1px solid var(--border); }
+    .say .code-head button { display: none; }
+    .say .code pre { margin: 0; padding: 10px 12px; overflow-x: auto; }
+    .say :not(pre) > code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+    .step { border: 1px solid var(--border); background: var(--surface); border-radius: 10px; margin: 10px 0; overflow: hidden; }
+    .step-head { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; font: 13px var(--mono); }
+    .step-head .verb { color: var(--muted); flex: none; }
+    .step-head .arg { color: var(--text); overflow-wrap: anywhere; }
+    .step-head .res { margin-left: auto; color: var(--faint); flex: none; font-size: 12px; }
+    .step-head .res.bad { color: var(--bad); }
+    .diff { font: 12.5px/1.55 var(--mono); overflow-x: auto; border-top: 1px solid var(--border); background: var(--code-bg); }
+    .diff div { white-space: pre; padding: 0 12px; }
+    .diff .add { background: var(--add-bg); color: var(--add-fg); }
+    .diff .del { background: var(--del-bg); color: var(--del-fg); }
+    .diff .more { color: var(--faint); }
+    details { border-top: 1px solid var(--border); }
+    summary { cursor: pointer; padding: 6px 12px; font: 12px var(--mono); color: var(--muted); }
+    details pre { margin: 0; padding: 8px 12px 12px; font: 12px/1.5 var(--mono); color: var(--text-2); white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
+    .card { border-left: 3px solid var(--ink); background: var(--surface); border-radius: 0 10px 10px 0; padding: 10px 14px; margin: 12px 0; }
+    .card .label { font: 12px var(--mono); color: var(--muted); margin-bottom: 4px; }
+    .card .body { white-space: pre-wrap; font-size: 14px; color: var(--text-2); }
+    .note { color: var(--muted); font-size: 13.5px; text-align: center; margin: 24px 0; }
+    .end { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13.5px; }
+    .error { margin-top: 80px; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="yai-mark" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="16" fill="var(--ink)" />
+      <path d="M19 17 L32.5 35.5 M45 17 L28 48" fill="none" stroke="var(--on-ink)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" />
+      <circle cx="45.5" cy="45.5" r="4.2" fill="var(--on-ink)" />
+    </symbol>
+  </svg>
+  <main class="wrap" id="app">
+    <a class="top" href="/"><svg width="22" height="22"><use href="#yai-mark" /></svg>yAI Code · shared session</a>
+    <p class="note" id="loading">Loading…</p>
+  </main>
+  <script src="/md.js"></script>
+  <script>
+    // Everything shown here came from a model or a user, so it is escaped (escapeHtml / renderMarkdown from md.js).
+    const $app = document.getElementById("app");
+    const esc = (s) => window.escapeHtml(String(s == null ? "" : s));
+    const tag = (body, name) => {
+      const open = body.indexOf(`<${name}>`);
+      if (open < 0) return undefined;
+      const from = open + name.length + 2;
+      const close = ["content", "new"].includes(name) ? body.lastIndexOf(`</${name}>`) : body.indexOf(`</${name}>`, from);
+      return close < from ? undefined : body.slice(from, close).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+    };
+    const VERBS = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Edit", write_file: "Write", run: "Run" };
+
+    function diffLines(oldText, newText) {
+      const o = (oldText || "").split("\n"), n = (newText || "").split("\n");
+      const rows = [...o.map((l) => `<div class="del">- ${esc(l)}</div>`), ...n.map((l) => `<div class="add">+ ${esc(l)}</div>`)];
+      return `<div class="diff">${rows.join("")}</div>`;
+    }
+    function newFile(content) {
+      const lines = (content || "").split("\n");
+      const shown = lines.slice(0, 80).map((l) => `<div class="add">+ ${esc(l)}</div>`).join("");
+      return `<div class="diff">${shown}${lines.length > 80 ? `<div class="more">… ${lines.length - 80} more lines</div>` : ""}</div>`;
+    }
+    // A tool call from an assistant message: <tool name="edit_file"> <path>…</path> … </tool>
+    function stepHtml(raw) {
+      const m = /<tool\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>([\s\S]*?)(<\/tool>|$)/.exec(raw);
+      if (!m) return "";
+      const name = m[1], body = m[2] + "\n";
+      const arg = tag(body, "path") ?? tag(body, "command") ?? tag(body, "pattern") ?? body.replace(/<\/?[\w-]+>/g, "").trim().split("\n")[0];
+      let detail = "";
+      if (name === "edit_file") detail = diffLines(tag(body, "old"), tag(body, "new"));
+      else if (name === "write_file") detail = newFile(tag(body, "content"));
+      return { name, html: `<div class="step"><div class="step-head"><span class="verb">${esc(VERBS[name] || name)}</span><span class="arg">${esc(arg || "")}</span><span class="res"></span></div>${detail}` };
+    }
+    // Plans and reviews from /duo ride along in user messages.
+    function cards(text) {
+      let html = "";
+      for (const m of text.matchAll(/<(plan|review) from="([^"]*)">\n?([\s\S]*?)<\/\1>/g)) {
+        html += `<div class="card"><div class="label">${m[1] === "plan" ? "Plan" : "Review"} from ${esc(m[2])}</div><div class="body">${esc(m[3].trim())}</div></div>`;
+      }
+      return html;
+    }
+
+    function render(s) {
+      document.title = `${s.title} · yAI Code`;
+      const out = [];
+      let open = null, steps = 0, edits = 0, runs = 0;
+      const closeStep = () => { if (open) { out.push(open + "</div>"); open = null; } };
+      for (const m of s.messages) {
+        const text = m.content || "";
+        if (m.role === "user" && text.startsWith("<tool_result")) {
+          // The result of the step above: a one-line summary on its row, the output folded away.
+          const body = text.replace(/^<tool_result[^>]*>\n?/, "").replace(/\n?<\/tool_result>[\s\S]*$/, "");
+          const failed = /\n\[(exit code [1-9]\d*|command [^\]]+)\]$/.test(body) || /^Error/.test(body);
+          if (open) {
+            const lines = body.trim().split("\n");
+            const summary = failed ? (body.match(/\[(exit code \d+|command [^\]]+)\]$/) || ["", "failed"])[1]
+              : lines.length === 1 && lines[0].length <= 48 ? lines[0] : `${lines.length} lines`;
+            open = open.replace('<span class="res"></span>', `<span class="res${failed ? " bad" : ""}">${esc(summary)}</span>`);
+            if (body.trim()) open += `<details><summary>output</summary><pre>${esc(body.slice(0, 6000))}${body.length > 6000 ? "\n…" : ""}</pre></details>`;
+          }
+          closeStep();
+          out.push(cards(text));
+          continue;
+        }
+        closeStep();
+        if (m.role === "user") {
+          if (text.startsWith("This conversation continues from an earlier one")) { out.push(`<p class="note">· the conversation was summarized here to free up room ·</p>`); continue; }
+          const typed = text.split(/\n\n<(?:file|folder|image|plan|review) /)[0];
+          const files = [...text.matchAll(/<(file|folder|image) path="([^"]+)"/g)].map((x) => x[2]);
+          if (typed.trim()) out.push(`<div class="user"><div class="bubble">${esc(typed.trim())}</div></div>`);
+          if (files.length) out.push(`<div class="chips">${files.map((f) => `<span class="chip">@${esc(f)}</span>`).join("")}</div>`);
+          out.push(cards(text));
+        } else {
+          const at = text.search(/(^|\n)[ \t]*<tool\s+name/);
+          const say = (at < 0 ? text : text.slice(0, at)).trim();
+          if (say && say !== "Got it. I'll continue from there.") out.push(`<div class="say">${window.renderMarkdown(say)}</div>`);
+          if (at >= 0) {
+            const st = stepHtml(text.slice(at));
+            if (st) {
+              steps++;
+              if (st.name === "edit_file" || st.name === "write_file") edits++;
+              if (st.name === "run") runs++;
+              open = st.html;
+            }
+          }
+        }
+      }
+      closeStep();
+      const date = new Date(s.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      $app.innerHTML = `
+        <a class="top" href="/"><svg width="22" height="22"><use href="#yai-mark" /></svg>yAI Code · shared session</a>
+        <h1>${esc(s.title)}</h1>
+        <div class="meta">${[s.project && `in ${s.project}`, s.model, date, s.user && `shared by ${s.user}`].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join("")}</div>
+        <div class="stats"><span class="stat">${steps} steps</span><span class="stat">${edits} file changes</span><span class="stat">${runs} commands</span></div>
+        ${out.join("")}
+        <p class="end">Made with yAI Code, a coding agent in the terminal on self-hosted models. <a href="/">yAI</a></p>`;
+    }
+
+    (async () => {
+      const id = new URLSearchParams(location.search).get("id") || "";
+      try {
+        const r = await fetch(`/api/share?id=${encodeURIComponent(id)}`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Couldn't load this session.");
+        render(data);
+      } catch (err) {
+        document.getElementById("loading").outerHTML = `<p class="error">${esc(err.message)}</p>`;
+      }
+    })();
+  </script>
+</body>
+</html>

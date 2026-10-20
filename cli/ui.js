@@ -410,7 +410,7 @@ function resetSections() {
 }
 
 module.exports = {
-  c, print, spinner, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices,
+  c, print, spinner, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
   welcome, footer, frame, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal,
   get themeKey() { return themeKey; },
 };
