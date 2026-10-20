@@ -602,7 +602,7 @@ async function callModel() {
         }
         // Show long paragraphs as they arrive, wrapped at the terminal width.
         const width = ui.textWidth();
-        while (!inTool && lineBuf.length > width && !/^\s*(<|```)/.test(lineBuf)) {
+        while (!inTool && lineBuf.length > width && !/^\s*(<|```)/.test(lineBuf) && !lineBuf.includes("<|")) {
           const cut = lineBuf.lastIndexOf(" ", width);
           if (cut < width / 2) break;
           emit(lineBuf.slice(0, cut));
