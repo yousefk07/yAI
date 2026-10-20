@@ -560,6 +560,12 @@ async function callModel() {
   let text = "", lineBuf = "", inTool = false, heldFence = null;
   const emit = (line) => {
     if (inTool) return;
+    // Kimi K3's own tool-call markers can start mid-line: show the words before them, hide the rest.
+    const kimi = line.indexOf("<|open|>tools");
+    if (kimi >= 0) {
+      if (line.slice(0, kimi).trim()) write(line.slice(0, kimi).trimEnd());
+      return void ((inTool = true), (heldFence = null));
+    }
     if (/^\s*<tool[\s>]/.test(line)) return void ((inTool = true), (heldFence = null));
     if (heldFence !== null) write(heldFence), (heldFence = null);
     if (/^\s*```[\w-]*\s*$/.test(line)) return void (heldFence = line);
@@ -602,6 +608,7 @@ async function callModel() {
           emit(lineBuf.slice(0, cut));
           lineBuf = lineBuf.slice(cut + 1);
         }
+        if (text.includes("<|close|>tools")) return false; // Kimi K3's tool call is complete
         const ts = text.search(/(^|\n)[ \t]*<tool[\s>]/);
         if (ts >= 0) {
           const after = text.slice(ts);
@@ -624,7 +631,22 @@ async function callModel() {
   }
   if (lineBuf && !state.interrupted) emit(lineBuf.replace(/\r$/, ""));
   if (heldFence !== null && !inTool) write(heldFence);
-  return text;
+  return fromKimi(text);
+}
+
+// Kimi K3 (yAI Ultra) writes tool calls in its own format even when asked for <tool> blocks:
+//   <|open|>tools<|sep|><|open|>call tool="list_files" index="1"<|sep|><|open|>argument key="path" type="string"<|sep|>calculator<|close|>argument<|sep|>…
+// It becomes the usual <tool> block, so parsing, display and the saved conversation work the same way.
+function fromKimi(text) {
+  const start = text.indexOf("<|open|>tools");
+  if (start < 0) return text;
+  const block = text.slice(start);
+  const call = /<\|open\|>call tool="([\w-]+)"[^<]*<\|sep\|>([\s\S]*?)(?:<\|close\|>call|$)/.exec(block);
+  const before = text.slice(0, start).trimEnd();
+  if (!call) return before;
+  const args = [...call[2].matchAll(/<\|open\|>argument key="([\w-]+)"[^<]*<\|sep\|>([\s\S]*?)<\|close\|>argument/g)];
+  const body = args.map(([, key, value]) => `<${key}>\n${value}\n</${key}>`).join("\n");
+  return `${before}\n\n<tool name="${call[1]}">\n${body}\n</tool>`;
 }
 
 // "Apply edit to math.js?" then "[Y] Yes  [A] Yes to All  [N] No  (default is "Y"):", PowerShell-style.
