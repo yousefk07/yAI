@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <title>Your usage · yAI</title>
+  <meta name="description" content="What you've used on yAI today and over the last 30 days, against your daily limits." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <style>
+    /* Each person's usage (Yousef 2026-10-20): today against the daily limits, the last 30 days, and all time.
+       Admins also see everyone. Counters come from /api/hub?op=usage. Same palette as styles.css. */
+    :root {
+      --bg: #f7f7f5; --surface: #ffffff; --surface-2: #f0efeb; --hover: #ebeae5; --text: #1b1b18; --text-2: #3d3d38; --muted: #76756e;
+      --faint: #a6a59e; --border: #e4e3de; --border-strong: #d3d2cb; --ink: #1b1b18; --on-ink: #f7f7f5; --link: #2958c7;
+      --warn: #a8660b; --bad: #c2412d; --grid: #ecebe6;
+      --sans: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace; --serif: "Instrument Serif", Georgia, serif;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #121211; --surface: #1a1a18; --surface-2: #222220; --hover: #2a2a27; --text: #ecebe7; --text-2: #cfcec8; --muted: #9c9b94;
+        --faint: #6d6c66; --border: #2a2a27; --border-strong: #3a3a36; --ink: #ecebe7; --on-ink: #121211; --link: #8fb0ff;
+        --warn: #e8a849; --bad: #ff8a73; --grid: #262624; color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #121211; --surface: #1a1a18; --surface-2: #222220; --hover: #2a2a27; --text: #ecebe7; --text-2: #cfcec8; --muted: #9c9b94;
+      --faint: #6d6c66; --border: #2a2a27; --border-strong: #3a3a36; --ink: #ecebe7; --on-ink: #121211; --link: #8fb0ff;
+      --warn: #e8a849; --bad: #ff8a73; --grid: #262624; color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--link); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 80px; }
+    .back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; text-decoration: none; }
+    .back:hover { color: var(--text); }
+    h1 { margin: 14px 0 2px; font: 400 clamp(32px, 6vw, 46px)/1.1 var(--serif); letter-spacing: -0.01em; }
+    h2 { font: 400 26px/1.2 var(--serif); margin: 30px 0 10px; }
+    .lede { margin: 0 0 18px; color: var(--muted); }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+    .tile { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 12px 14px 14px; }
+    .tile .label { font-size: 12.5px; color: var(--muted); }
+    .tile .value { font: 500 28px/1.2 var(--sans); font-variant-numeric: tabular-nums; margin: 2px 0 8px; }
+    .tile .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+    .meter span { display: block; height: 100%; border-radius: 0 3px 3px 0; background: var(--ink); }
+    .meter.near span { background: var(--warn); }
+    .meter.full span { background: var(--bad); }
+    .tile .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 14px 14px 10px; position: relative; }
+    .chart { width: 100%; height: 200px; display: block; overflow: visible; }
+    .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+    .chart .axis { fill: var(--muted); font: 11px var(--sans); }
+    .chart .barhit { fill: transparent; cursor: default; }
+    .chart .bar { fill: var(--ink); }
+    .chart g:hover .bar { opacity: .75; }
+    .tip { position: absolute; pointer-events: none; padding: 6px 9px; border-radius: 8px; background: var(--ink); color: var(--on-ink); font-size: 12.5px; white-space: nowrap; transform: translate(-50%, -100%); }
+    .tip[hidden] { display: none; }
+    .rows { display: grid; gap: 8px; }
+    .row { display: grid; grid-template-columns: minmax(110px, 200px) 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+    .row .track { height: 10px; }
+    .row .fill { height: 10px; border-radius: 0 4px 4px 0; background: var(--ink); min-width: 3px; }
+    .row .n { font-variant-numeric: tabular-nums; color: var(--text-2); }
+    .totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
+    .totals div { padding: 10px 14px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 0 -1px -1px 0; }
+    .totals dt { font-size: 12.5px; color: var(--muted); }
+    .totals dd { margin: 0; font-weight: 500; font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th { text-align: left; font-size: 11.5px; font-weight: 500; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    td { padding: 9px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.num, td.num { text-align: right; }
+    .scroll { overflow-x: auto; }
+    .muted { color: var(--muted); }
+    .empty { color: var(--faint); font-size: 14px; padding: 8px 0; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 13.5px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Back to yAI</a>
+    <h1>Your usage</h1>
+    <p class="lede" id="lede">Loading</p>
+
+    <div class="tiles" id="tiles"></div>
+
+    <h2>Last 30 days</h2>
+    <div class="card">
+      <svg class="chart" id="chart" role="img" aria-label="Messages per day over the last 30 days"></svg>
+      <div class="tip" id="tip" hidden></div>
+      <details><summary>Show as a table</summary><div class="scroll"><table id="dayTable"></table></div></details>
+    </div>
+
+    <h2>Models you used</h2>
+    <p class="lede">Messages per model over the last 30 days, on the website and in yAI Code.</p>
+    <div class="card"><div class="rows" id="models"></div></div>
+
+    <h2>Since you joined</h2>
+    <dl class="totals" id="totals"></dl>
+
+    <section id="everyone" hidden>
+      <h2>Everyone</h2>
+      <p class="lede">Admins only. Today and the last 30 days for each account, busiest first.</p>
+      <div class="card scroll"><table id="everyoneTable"></table></div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const num = (n) => (n || 0).toLocaleString();
+    const short = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n || 0));
+    const usd = (micros) => `$${((micros || 0) / 1e6).toFixed(2)}`;
+    const msgs = (d) => (d.messages || 0) + (d.codeMessages || 0);
+
+    function untilReset(iso) {
+      const m = Math.max(0, Math.round((new Date(iso) - Date.now()) / 60000));
+      return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+    }
+    function tile(label, used, limit, fmt = num, sub = "") {
+      const share = limit ? Math.min(1, used / limit) : 0;
+      const cls = share >= 1 ? "full" : share >= 0.8 ? "near" : "";
+      return `<div class="tile"><div class="label">${esc(label)}</div>
+        <div class="value">${fmt(used)}${limit != null ? ` <small>of ${fmt(limit)}</small>` : ""}</div>
+        ${limit ? `<div class="meter ${cls}" role="meter" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${used}" aria-label="${esc(label)}"><span style="width:${(share * 100).toFixed(1)}%"></span></div>` : ""}
+        ${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>`;
+    }
+
+    // Messages per day: one series, so no legend; hover (or tap) a day for its numbers.
+    function drawChart(days) {
+      const svg = $("chart"), W = svg.clientWidth || 800, H = 200, padL = 34, padB = 22, padT = 8;
+      const max = Math.max(4, ...days.map(msgs));
+      const step = Math.pow(10, Math.floor(Math.log10(max)));
+      const nice = Math.ceil(max / step) * step;
+      const y = (v) => padT + (H - padT - padB) * (1 - v / nice);
+      const bw = (W - padL) / days.length;
+      let out = "";
+      for (const t of [0, nice / 2, nice]) out += `<line class="gridline" x1="${padL}" x2="${W}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${padL - 6}" y="${y(t) + 4}" text-anchor="end">${short(t)}</text>`;
+      days.forEach((d, i) => {
+        const v = msgs(d), x = padL + i * bw, w = Math.max(2, bw - 2), top = y(v), h = H - padB - top;
+        const r = Math.min(4, w / 2, h);
+        // Rounded at the data end only, square on the baseline.
+        const path = v ? `M${x + 1},${H - padB} V${top + r} q0,-${r} ${r},-${r} H${x + 1 + w - r} q${r},0 ${r},${r} V${H - padB} Z` : "";
+        out += `<g data-i="${i}"><rect class="barhit" x="${x}" y="${padT}" width="${bw}" height="${H - padT - padB}"/>${path ? `<path class="bar" d="${path}"/>` : ""}</g>`;
+        if (i % 7 === days.length % 7 || i === days.length - 1) out += `<text class="axis" x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${i === days.length - 1 ? "Today" : new Date(d.day + "T12:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</text>`;
+      });
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.innerHTML = out;
+      const tip = $("tip");
+      svg.onpointermove = (e) => {
+        const g = e.target.closest("g[data-i]");
+        if (!g) return (tip.hidden = true);
+        const d = days[Number(g.dataset.i)];
+        const box = svg.getBoundingClientRect(), card = svg.parentElement.getBoundingClientRect();
+        const i = Number(g.dataset.i);
+        tip.innerHTML = `<strong>${new Date(d.day + "T12:00:00Z").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</strong> · ${num(msgs(d))} message${msgs(d) === 1 ? "" : "s"}` +
+          (d.codeMessages ? ` (${num(d.codeMessages)} in yAI Code)` : "") + (d.images ? ` · ${d.images} image${d.images === 1 ? "" : "s"}` : "");
+        tip.style.left = `${box.left - card.left + ((padL + (i + 0.5) * bw) / W) * box.width}px`;
+        tip.style.top = `${box.top - card.top + (y(msgs(d)) / H) * box.height - 6}px`;
+        tip.hidden = false;
+      };
+      svg.onpointerleave = () => (tip.hidden = true);
+      $("dayTable").innerHTML = `<thead><tr><th>Day</th><th class="num">Website</th><th class="num">yAI Code</th><th class="num">Images</th><th class="num">Videos</th><th class="num">Searches</th><th class="num">yAI Ultra</th></tr></thead><tbody>` +
+        days.slice().reverse().map((d) => `<tr><td>${d.day}</td><td class="num">${num(d.messages)}</td><td class="num">${num(d.codeMessages)}</td><td class="num">${num(d.images)}</td><td class="num">${num(d.videos)}</td><td class="num">${num(d.searches)}</td><td class="num">${usd(d.ultraMicros)}</td></tr>`).join("") + "</tbody>";
+    }
+
+    function render(data) {
+      const t = data.today, todayRow = data.days[data.days.length - 1] || {};
+      $("lede").textContent = `Signed in as ${data.user}. Daily limits reset at midnight UTC, in ${untilReset(t.resetsAt)}.${t.admin ? " Admin accounts have no image or video limit." : ""}`;
+      $("tiles").innerHTML = [
+        tile("Messages today", msgs(todayRow), null, num, todayRow.codeMessages ? `${num(todayRow.codeMessages)} in yAI Code` : "No daily limit"),
+        tile("yAI Ultra today", Math.round(t.ultra.spentUsd * 1e6), Math.round(t.ultra.limitUsd * 1e6), usd, "Kimi K3, billed per token"),
+        tile("Images today", t.images.used, t.images.limit),
+        tile("Videos today", t.videos.used, t.videos.limit),
+        tile("Web searches today", t.searches.used, t.searches.limit),
+      ].join("");
+      drawChart(data.days);
+      addEventListener("resize", () => drawChart(data.days));
+
+      const perModel = {};
+      for (const d of data.days) for (const [k, v] of Object.entries(d)) if (k.startsWith("m:")) perModel[k.slice(2)] = (perModel[k.slice(2)] || 0) + v;
+      const list = Object.entries(perModel).sort((a, b) => b[1] - a[1]);
+      const top = list[0]?.[1] || 1;
+      $("models").innerHTML = list.length ? list.map(([m, n]) => `<div class="row"><span>${esc(m)}</span><div class="track"><div class="fill" style="width:${(n / top) * 100}%"></div></div><span class="n">${num(n)}</span></div>`).join("")
+        : '<p class="empty">Nothing in the last 30 days yet.</p>';
+
+      const x = data.total;
+      const items = [["Website messages", num(x.messages)], ["yAI Code messages", num(x.codeMessages)], ["Tokens read", short(x.tokensIn)], ["Tokens written", short(x.tokensOut)],
+        ["Images", num(x.images)], ["Videos", num(x.videos)], ["Web searches", num(x.searches)], ["Spent on yAI Ultra", usd(x.ultraMicros)]];
+      $("totals").innerHTML = items.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+      $("totals").insertAdjacentHTML("afterend", '<p class="muted" style="font-size:12.5px">Counting started on 20 October 2026, so earlier use isn\'t included.</p>');
+    }
+
+    async function loadEveryone() {
+      const r = await fetch("/api/hub?op=usage-all", { cache: "no-store" });
+      if (!r.ok) return;
+      const { users } = await r.json();
+      $("everyone").hidden = false;
+      $("everyoneTable").innerHTML = `<thead><tr><th>Account</th><th class="num">Today</th><th class="num">30 days</th><th class="num">yAI Code (30 d)</th><th class="num">Images today</th><th class="num">Videos today</th><th class="num">Searches (30 d)</th><th class="num">Ultra today</th><th class="num">Ultra (30 d)</th></tr></thead><tbody>` +
+        users.map((u) => `<tr><td>${esc(u.username)}</td><td class="num">${num(msgs(u.todayCounts || {}))}</td><td class="num">${num(msgs(u.last30))}</td><td class="num">${num(u.last30.codeMessages)}</td>
+          <td class="num">${u.today.images.used}${u.today.images.limit ? `/${u.today.images.limit}` : ""}</td><td class="num">${u.today.videos.used}${u.today.videos.limit ? `/${u.today.videos.limit}` : ""}</td>
+          <td class="num">${num(u.last30.searches)}</td><td class="num">$${u.today.ultra.spentUsd.toFixed(2)}</td><td class="num">${usd(u.last30.ultraMicros)}</td></tr>`).join("") + "</tbody>";
+    }
+
+    (async () => {
+      const r = await fetch("/api/hub?op=usage", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/"; return; }
+      const data = await r.json();
+      if (!r.ok) { $("lede").textContent = data.error || "Couldn't load your usage."; return; }
+      render(data);
+      if (data.today.admin) loadEveryone();
+    })().catch(() => ($("lede").textContent = "Couldn't load your usage. Try again in a moment."));
+  </script>
+</body>
+</html>

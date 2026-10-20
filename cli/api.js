@@ -173,9 +173,17 @@ async function downloadVideo(id, signal) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+// ---------- web search and /bench results (the site's /api/hub) ----------
+async function search(q) {
+  return json(`/api/hub?op=search&q=${encodeURIComponent(q)}`);
+}
+async function postBench(result) {
+  return json("/api/hub?op=bench", { method: "POST", body: result });
+}
+
 // ---------- /share: publish a session at an unlisted link ----------
 async function share(session) {
   return json("/api/share", { method: "POST", body: session });
 }
 
-module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share };
+module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, postBench };

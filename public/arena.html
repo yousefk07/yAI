@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <title>Model arena · yAI</title>
+  <meta name="description" content="Ask two yAI models the same question without knowing which is which, then vote for the better answer." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css" crossorigin="anonymous" />
+  <style>
+    /* Model arena (Yousef 2026-10-20): the same question to two models shown as A and B, a vote, then the names.
+       Votes feed an Elo leaderboard; yAI Code's /bench results are listed under it. Same palette as styles.css. */
+    :root {
+      --bg: #f7f7f5; --surface: #ffffff; --surface-2: #f0efeb; --hover: #ebeae5; --text: #1b1b18; --text-2: #3d3d38; --muted: #76756e;
+      --faint: #a6a59e; --border: #e4e3de; --border-strong: #d3d2cb; --ink: #1b1b18; --on-ink: #f7f7f5; --link: #2958c7;
+      --ok: #2e8a4e; --bad: #c2412d; --code-bg: #f3f2ee; --focus: rgba(27, 27, 24, 0.14);
+      --sans: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace; --serif: "Instrument Serif", Georgia, serif;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #121211; --surface: #1a1a18; --surface-2: #222220; --hover: #2a2a27; --text: #ecebe7; --text-2: #cfcec8; --muted: #9c9b94;
+        --faint: #6d6c66; --border: #2a2a27; --border-strong: #3a3a36; --ink: #ecebe7; --on-ink: #121211; --link: #8fb0ff;
+        --ok: #5cc27f; --bad: #ff8a73; --code-bg: #1d1d1b; --focus: rgba(236, 235, 231, 0.16);
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #121211; --surface: #1a1a18; --surface-2: #222220; --hover: #2a2a27; --text: #ecebe7; --text-2: #cfcec8; --muted: #9c9b94;
+      --faint: #6d6c66; --border: #2a2a27; --border-strong: #3a3a36; --ink: #ecebe7; --on-ink: #121211; --link: #8fb0ff;
+      --ok: #5cc27f; --bad: #ff8a73; --code-bg: #1d1d1b; color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    a { color: var(--link); }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; }
+    .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; text-decoration: none; }
+    .back:hover { color: var(--text); }
+    h1 { margin: 14px 0 4px; font: 400 clamp(32px, 6vw, 46px)/1.1 var(--serif); letter-spacing: -0.01em; }
+    .lede { margin: 0 0 18px; color: var(--muted); max-width: 640px; }
+    .tabs { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); margin-bottom: 18px; }
+    .tabs button { border: 0; background: none; padding: 6px 14px; border-radius: 7px; font-size: 14px; font-weight: 500; color: var(--muted); }
+    .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .ask { display: flex; gap: 8px; align-items: flex-end; padding: 10px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); }
+    .ask textarea { flex: 1; min-width: 0; border: 0; background: none; resize: none; outline: none; padding: 6px 6px; max-height: 200px; font-size: 15px; line-height: 1.5; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); font-size: 14px; font-weight: 500; white-space: nowrap; }
+    .btn:hover { background: var(--hover); }
+    .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+    .btn.primary:hover { opacity: .88; background: var(--ink); }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .pick { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 2px 0; font-size: 13px; color: var(--muted); }
+    .pick select { height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 0 8px; font-size: 13px; max-width: 200px; }
+    .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .examples button { border: 1px solid var(--border); background: none; border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--text-2); }
+    .examples button:hover { background: var(--hover); }
+    .question { margin: 22px 0 10px; padding: 10px 14px; border-radius: 12px; background: var(--surface-2); white-space: pre-wrap; }
+    .duel { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 760px) { .duel { grid-template-columns: 1fr; } }
+    .side { min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); display: flex; flex-direction: column; }
+    .side.won { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+    .side-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+    .side-head .tag { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--ink); color: var(--on-ink); font-size: 13px; }
+    .side-head .name { font-weight: 500; color: var(--muted); font-size: 13.5px; }
+    .side-head .stat { margin-left: auto; font: 12px var(--mono); color: var(--faint); font-weight: 400; }
+    .answer { padding: 12px 16px 4px; overflow-wrap: anywhere; min-height: 120px; }
+    .answer p { margin: 0 0 12px; }
+    .answer pre { margin: 0; padding: 10px 12px; overflow-x: auto; }
+    .answer .code { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--code-bg); overflow: hidden; }
+    .answer .code-head { display: flex; justify-content: space-between; align-items: center; height: 30px; padding: 0 6px 0 10px; border-bottom: 1px solid var(--border); font: 12px var(--mono); color: var(--muted); }
+    .answer .code-head button { display: none; }
+    .answer code { font: 13px/1.55 var(--mono); }
+    .answer :not(pre) > code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; font-size: .86em; }
+    .answer table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }
+    .answer th, .answer td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+    .answer ul, .answer ol { padding-left: 22px; margin: 0 0 12px; }
+    .answer h1, .answer h2, .answer h3 { font-size: 16px; margin: 14px 0 6px; }
+    .answer .err { color: var(--bad); font-size: 14px; }
+    .wait { color: var(--muted); font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+    .wait::before { content: ""; width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .vote { position: sticky; bottom: 12px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 14px auto 0; padding: 10px; width: fit-content; max-width: 100%;
+      border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 8px 28px rgba(0,0,0,.12); }
+    .vote[hidden] { display: none; }
+    .result { margin: 14px 0 0; text-align: center; color: var(--text-2); }
+    .result strong { color: var(--text); }
+    table.board { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .board th { text-align: left; font-size: 11.5px; font-weight: 500; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .board td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .board td.num, .board th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .board .rank { color: var(--faint); width: 34px; }
+    .board .model { font-weight: 500; }
+    .bar { display: inline-block; vertical-align: middle; height: 8px; border-radius: 0 4px 4px 0; background: var(--ink); margin-right: 8px; }
+    .card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 6px 8px 8px; overflow-x: auto; }
+    h2 { font: 400 26px/1.2 var(--serif); margin: 28px 0 4px; }
+    .note { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; }
+    .empty { color: var(--faint); padding: 18px 10px; font-size: 14px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="/"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Back to yAI</a>
+    </div>
+    <h1>Model arena</h1>
+    <p class="lede">Ask one question and two models answer it side by side, as A and B. Vote for the better answer, then see who was who. Every vote moves the leaderboard.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" aria-selected="true" data-tab="battle">Battle</button>
+      <button type="button" role="tab" aria-selected="false" data-tab="board">Leaderboard</button>
+    </div>
+
+    <section id="battle">
+      <form class="ask" id="askForm">
+        <textarea id="prompt" rows="2" placeholder="Ask both models something" aria-label="Question"></textarea>
+        <button class="btn primary" id="go" type="submit" disabled>Ask both</button>
+      </form>
+      <div class="pick">
+        <span>Models:</span>
+        <select id="pickA" aria-label="Model A"></select>
+        <span>vs</span>
+        <select id="pickB" aria-label="Model B"></select>
+        <span id="pickNote"></span>
+      </div>
+      <div class="examples" id="examples">
+        <button type="button">Explain recursion to a 10-year-old</button>
+        <button type="button">Write a haiku about debugging at 3 AM</button>
+        <button type="button">What's the difference between TCP and UDP? Keep it short.</button>
+        <button type="button">Write a JavaScript function that checks if a string is a palindrome</button>
+      </div>
+      <div id="match" hidden>
+        <div class="question" id="question"></div>
+        <div class="duel">
+          <div class="side" id="sideA"><div class="side-head"><span class="tag">A</span><span class="name"></span><span class="stat"></span></div><div class="answer"></div></div>
+          <div class="side" id="sideB"><div class="side-head"><span class="tag">B</span><span class="name"></span><span class="stat"></span></div><div class="answer"></div></div>
+        </div>
+        <div class="vote" id="vote" hidden>
+          <button class="btn" data-w="a">A is better</button>
+          <button class="btn" data-w="tie">Tie</button>
+          <button class="btn" data-w="b">B is better</button>
+          <button class="btn" data-w="bad">Both are bad</button>
+        </div>
+        <p class="result" id="result" hidden></p>
+      </div>
+    </section>
+
+    <section id="board" hidden>
+      <div class="card">
+        <table class="board">
+          <thead><tr><th>#</th><th>Model</th><th>Rating</th><th class="num">Votes</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Tied</th></tr></thead>
+          <tbody id="boardRows"><tr><td colspan="7" class="empty">Loading</td></tr></tbody>
+        </table>
+      </div>
+      <h2>Coding benchmark</h2>
+      <p class="note">Six small coding tasks with 44 tests, run by yAI Code's <code>/bench</code> command. Each model's best run.</p>
+      <div class="card">
+        <table class="board">
+          <thead><tr><th>#</th><th>Model</th><th>Tests passed</th><th class="num">Tasks solved</th><th class="num">Time</th><th class="num">Run</th></tr></thead>
+          <tbody id="benchRows"><tr><td colspan="6" class="empty">Loading</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
+  <script src="/md.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let models = [];       // web models from /api/models
+    let match = null;      // { a: model, b: model, done: { a, b }, ok: { a, b } }
+
+    // ---------- Tabs ----------
+    document.querySelectorAll("[data-tab]").forEach((t) => t.addEventListener("click", () => {
+      document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x === t)));
+      $("battle").hidden = t.dataset.tab !== "battle";
+      $("board").hidden = t.dataset.tab !== "board";
+      if (t.dataset.tab === "board") loadBoard();
+    }));
+
+    // ---------- Models ----------
+    async function loadModels() {
+      const r = await fetch("/api/models", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/"; return; }
+      const data = await r.json();
+      models = (data.models || []).filter((m) => !m.codeOnly);
+      const opts = '<option value="">Random</option>' + models.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`).join("");
+      $("pickA").innerHTML = $("pickB").innerHTML = opts;
+      $("pickNote").textContent = models.length < 2 ? "Fewer than two models are online right now." : data.localOffline ? "The PC is offline, so only cloud models are in the draw." : "";
+      updateGo();
+    }
+    function draw() {
+      const a = models.find((m) => m.id === $("pickA").value);
+      const b = models.find((m) => m.id === $("pickB").value);
+      const pool = (not) => models.filter((m) => !not.includes(m.id));
+      const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
+      const first = a || pickRandom(pool([b?.id]));
+      const second = b && b.id !== first.id ? b : pickRandom(pool([first.id]));
+      // Shown in random order, so a picked model isn't always on the left.
+      return Math.random() < 0.5 || a || b ? [first, second] : [second, first];
+    }
+    function updateGo() { $("go").disabled = !$("prompt").value.trim() || models.length < 2 || (match && !match.finished); }
+    $("prompt").addEventListener("input", () => {
+      $("prompt").style.height = "auto";
+      $("prompt").style.height = Math.min($("prompt").scrollHeight, 200) + "px";
+      updateGo();
+    });
+    $("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("askForm").requestSubmit(); } });
+    $("examples").addEventListener("click", (e) => {
+      if (e.target.tagName !== "BUTTON") return;
+      $("prompt").value = e.target.textContent;
+      updateGo();
+      $("askForm").requestSubmit();
+    });
+
+    // ---------- A battle ----------
+    // A cloud GPU or a local model may need waking first; /api/warmup reports progress until it's ready.
+    async function warm(model, setText) {
+      const r = await fetch(`/api/warmup?model=${encodeURIComponent(model.id)}`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't start the model");
+      if ((r.headers.get("content-type") || "").includes("json")) {
+        const d = await r.json();
+        if (d.state === "error") throw new Error(d.error);
+        return;
+      }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (const p of parts) {
+          if (!p.startsWith("data:")) continue;
+          const ev = JSON.parse(p.slice(5).trim());
+          if (ev.state === "error" || ev.error) throw new Error(ev.error || "Couldn't start the model");
+          if (ev.state === "waking") setText(`Waking the cloud GPU (${ev.elapsed || 0}s)`);
+          else if (typeof ev.progress === "number" && ev.progress < 1) setText(`Loading ${Math.round(ev.progress * 100)}%`);
+        }
+      }
+    }
+
+    async function run(side, model, question) {
+      const el = $(side === "a" ? "sideA" : "sideB");
+      const box = el.querySelector(".answer"), stat = el.querySelector(".stat");
+      const setWait = (t) => (box.innerHTML = `<span class="wait">${escapeHtml(t)}</span>`);
+      setWait("Starting");
+      const started = performance.now();
+      let text = "", out = 0;
+      try {
+        await warm(model, setWait);
+        setWait("Thinking");
+        const r = await fetch("/api/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: question }], conversationId: `arena-${match.id}-${side}` }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Error ${r.status}`);
+        const reader = r.body.getReader(), dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop();
+          for (const p of parts) {
+            if (!p.startsWith("data: ")) continue;
+            const ev = JSON.parse(p.slice(6));
+            if (ev.error) throw new Error(ev.error);
+            if (ev.content) text += ev.content;
+            if (ev.t) out = ev.t;
+            if (ev.usage?.out) out = ev.usage.out;
+          }
+          const visible = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
+          if (visible) box.innerHTML = renderMarkdown(visible);
+        }
+        if (!text.trim()) throw new Error("No answer came back");
+        stat.textContent = `${((performance.now() - started) / 1000).toFixed(1)}s · ${out} tok`;
+        match.ok[side] = true;
+      } catch (err) {
+        box.innerHTML = `<p class="err">${escapeHtml(err.message)}</p>`;
+      } finally {
+        match.done[side] = true;
+        if (match.done.a && match.done.b) finish();
+      }
+    }
+
+    function finish() {
+      match.finished = true;
+      updateGo();
+      if (match.ok.a && match.ok.b) $("vote").hidden = false;
+      else {
+        reveal();
+        $("result").hidden = false;
+        $("result").textContent = "One of the models didn't answer, so this one can't be voted on. Try again.";
+      }
+    }
+    function reveal() {
+      $("sideA").querySelector(".name").textContent = match.a.label;
+      $("sideB").querySelector(".name").textContent = match.b.label;
+    }
+
+    $("askForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const question = $("prompt").value.trim();
+      if (!question || models.length < 2) return;
+      const [a, b] = draw();
+      match = { id: Date.now().toString(36), a, b, done: {}, ok: {}, finished: false };
+      $("question").textContent = question;
+      $("match").hidden = false;
+      $("vote").hidden = true;
+      $("result").hidden = true;
+      for (const id of ["sideA", "sideB"]) {
+        $(id).classList.remove("won");
+        $(id).querySelector(".name").textContent = "";
+        $(id).querySelector(".stat").textContent = "";
+      }
+      $("prompt").value = "";
+      updateGo();
+      run("a", a, question);
+      run("b", b, question);
+    });
+
+    $("vote").addEventListener("click", async (e) => {
+      const w = e.target.closest("[data-w]")?.dataset.w;
+      if (!w || !match) return;
+      $("vote").hidden = true;
+      const winner = w === "bad" ? "tie" : w;
+      reveal();
+      if (winner !== "tie") $(winner === "a" ? "sideA" : "sideB").classList.add("won");
+      $("result").hidden = false;
+      $("result").textContent = "Saving your vote";
+      try {
+        const r = await fetch("/api/hub?op=vote", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ a: match.a.label, b: match.b.label, winner }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Couldn't save the vote");
+        $("result").innerHTML = `A was <strong>${escapeHtml(match.a.label)}</strong> (now ${d.ratings.a}), B was <strong>${escapeHtml(match.b.label)}</strong> (now ${d.ratings.b}). Ask another question for a new pair.`;
+      } catch (err) {
+        $("result").textContent = `A was ${match.a.label}, B was ${match.b.label}. ${err.message}`;
+      }
+    });
+
+    // ---------- Leaderboard ----------
+    const ago = (iso) => {
+      const d = Math.round((Date.now() - new Date(iso)) / 86400000);
+      return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`;
+    };
+    const fmtSecs = (s) => (s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`);
+    async function loadBoard() {
+      try {
+        const r = await fetch("/api/hub?op=arena", { cache: "no-store" });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        const top = Math.max(...d.board.map((x) => x.rating), 1);
+        const low = Math.min(...d.board.map((x) => x.rating), 1000) - 50;
+        $("boardRows").innerHTML = d.board.length ? d.board.map((x, i) => `
+          <tr title="${x.wins} won, ${x.losses} lost, ${x.ties} tied">
+            <td class="rank">${i + 1}</td><td class="model">${escapeHtml(x.model)}</td>
+            <td><span class="bar" style="width:${Math.max(4, Math.round(((x.rating - low) / (top - low)) * 140))}px"></span>${x.rating}</td>
+            <td class="num">${x.votes}</td><td class="num">${x.wins}</td><td class="num">${x.losses}</td><td class="num">${x.ties}</td>
+          </tr>`).join("") : '<tr><td colspan="7" class="empty">No votes yet. Start a battle.</td></tr>';
+        $("benchRows").innerHTML = d.bench.length ? d.bench.map((x, i) => `
+          <tr title="${escapeHtml(x.tasks.map((t) => `${t.task}: ${t.passed}/${t.total}${t.tampered ? " (changed the test)" : ""}`).join(" · "))}">
+            <td class="rank">${i + 1}</td><td class="model">${escapeHtml(x.label || x.model)}</td>
+            <td><span class="bar" style="width:${Math.max(4, Math.round((x.passed / x.total) * 140))}px"></span>${x.passed}/${x.total}</td>
+            <td class="num">${x.solved}/${x.tasks.length}</td><td class="num">${fmtSecs(x.secs)}</td>
+            <td class="num">${escapeHtml(x.user || "")} · ${ago(x.ts)}</td>
+          </tr>`).join("") : '<tr><td colspan="6" class="empty">No runs yet. Run <code>/bench</code> in yAI Code.</td></tr>';
+      } catch (err) {
+        $("boardRows").innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(err.message || "Couldn't load the leaderboard")}</td></tr>`;
+      }
+    }
+
+    loadModels().catch(() => ($("pickNote").textContent = "Couldn't load the models."));
+    if (location.hash === "#leaderboard") document.querySelector('[data-tab="board"]').click();
+  </script>
+</body>
+</html>

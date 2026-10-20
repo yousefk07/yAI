@@ -9,6 +9,7 @@ const { handleLogin, handleLogout, handleActivity } = require("./lib/admin");
 const { handleAuth, handleChats } = require("./lib/accounts");
 const { handleImage } = require("./lib/images");
 const { handleShare } = require("./lib/share");
+const { handleHub } = require("./lib/hub");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -31,6 +32,10 @@ const ROUTES = {
   "DELETE /api/image": handleImage,
   "GET /api/share": handleShare,
   "POST /api/share": handleShare,
+  "GET /api/hub": handleHub,
+  "PUT /api/hub": handleHub,
+  "POST /api/hub": handleHub,
+  "DELETE /api/hub": handleHub,
 };
 
 const PUBLIC_DIR = path.join(__dirname, "public");

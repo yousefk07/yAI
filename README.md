@@ -23,6 +23,14 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 - **Accounts** with saved chat history and images. yAI is invite-only: everything (chat, cloud models, images, video) needs an account, and people request an access code from the sign-in page to create one
 - **Image and PDF input**: images are downscaled in the browser; PDF text is extracted with pdf.js, and
   scanned PDFs fall back to rendering their pages as images
+- **Search the web**: the Search button looks the question up, reads the top pages and answers with numbered
+  sources ([1], [2]) that link to them
+- **Projects**: files (PDFs, notes, code) and instructions kept together; every chat started in a project gets them
+- **Live previews**: HTML, SVG and JavaScript in an answer run in a sandboxed panel (the answer's CSS and JS blocks included)
+- **Model arena** (`/arena`): one question, two anonymous models side by side, a vote, an Elo leaderboard, and the
+  coding benchmark results from yAI Code's `/bench`
+- **Usage page** (`/usage`): your messages, images, videos, web searches and yAI Ultra spend against the daily
+  limits, the last 30 days and all time; admins also see everyone
 - **Live status**: LM Studio's real model-load progress, and a timer while a cloud GPU wakes up
 - **Token stats** on every answer (tokens, tokens/s, time) and an **admin dashboard** for activity
 - No framework and no npm dependencies: plain HTML, CSS and JavaScript, Node.js serverless functions
@@ -65,6 +73,10 @@ yai
 - `/look [url|file]` screenshots the page (desktop and phone) for a design review by the vision model · `@mockup.png build this` describes an image so the coder can build it · `/showcase` records a demo video of the page (Chrome + ffmpeg)
 - `/duo`: Qwen 3.8 27B plans each request and reviews the change, Qwen3 Coder writes it · `/tutor`: hints and explanations instead of finished solutions · `/share` publishes the session at an unlisted link (`/share?id=…` on the site)
 - `/theme` picks a look (Midnight, Classic Blue, Paper, Amber) · `/undo` reverts yAI's last edit · `/resume` continues the last conversation · `/plan` read-only planning
+- `/bench [model]` runs the coding benchmark (6 tasks, 44 tests, a fresh session and 5 minutes per task) and adds the score to the arena leaderboard
+- **Web**: yAI can `web_search` and `web_fetch` pages (including your own dev server on localhost)
+- **Background tasks**: dev servers and watchers run in the background (`task_output`, `task_stop`); `/tasks` lists them, and they stop when yAI exits
+- **MCP**: `/mcp add <name> <command>` (or a URL) adds a server; project servers in `.mcp.json` (Claude Code's format) start after you OK them; tools that aren't marked read-only ask first
 - `/image [16:9] [@photo.jpg] prompt` and `/video [16:9] prompt` make images and videos into `yai-media/`
 - The first run in a folder asks whether to trust it; the footer above the prompt shows the git branch, modified files, context used and the approval mode.
 - `@file` attaches a file (Tab completes) · `!command` runs a command yourself · **Esc** stops yAI
@@ -111,6 +123,8 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `MODAL_ULTRA_URL` | Modal shared endpoint for yAI Ultra (Kimi K3, billed per token, no cold start) |
 | `MODAL_ULTRA_KEY` | Its proxy token, as `wk-….ws-…` (sent as a Bearer token) |
 | `ULTRA_DAILY_USD` | Optional: how much yAI Ultra each person can use per day (default 2) |
+| `ULTRA_STREAM` | Optional: `0` asks yAI Ultra for whole replies instead of streaming them |
+| `BRAVE_API_KEY` / `TAVILY_API_KEY` | Optional: a search API for "Search the web" and yAI Code's web_search (without one, DuckDuckGo's HTML page is used) |
 | `RUNPOD_IMAGE_ENDPOINT_ID` | ComfyUI endpoint for text → image (`workflows/t2i.json`) |
 | `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
 | `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |

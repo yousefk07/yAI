@@ -4,8 +4,9 @@
 
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const { c, print, toolHeader, toolResult, diffBox, spinner } = require("./ui");
+const { fetchPage } = require("../lib/search");
 
 const IGNORED = new Set([".git", "node_modules", ".next", ".vercel", "dist", "build", "coverage", "__pycache__", ".venv", "venv", ".cache", ".turbo"]);
 const MAX_OUTPUT = 20000; // characters of tool output sent back to the model
@@ -26,7 +27,8 @@ function makeContext(root) {
       else if (!/[*?[\]/]/.test(l)) ignore.add(l);
     }
   } catch {}
-  return { root, readFiles: new Set(), ignore, ignoreExt };
+  // tasks: background commands (run with <background>); webSearch is set by index.js (it goes through the site).
+  return { root, readFiles: new Set(), ignore, ignoreExt, tasks: new Map(), taskSeq: 0, webSearch: null, onTaskDone: null };
 }
 
 const rel = (ctx, abs) => path.relative(ctx.root, abs).split(path.sep).join("/") || ".";
@@ -251,11 +253,139 @@ const tools = {
   },
 
   run: {
-    params: ["command", "timeout"],
-    describe: `Run a shell command in the project folder (${WIN ? "PowerShell" : "bash"}). Optional <timeout> in seconds (default 120, max 600). Don't start servers or watchers that never exit.`,
+    params: ["command", "timeout", "background"],
+    describe:
+      `Run a shell command in the project folder (${WIN ? "PowerShell" : "bash"}). Optional <timeout> in seconds (default 120, max 600). ` +
+      "For servers, watchers and anything else that keeps running, add <background>true</background>: it keeps running while you " +
+      "work, and task_output shows what it has printed.",
     kind: "run",
   },
+
+  // ---------- the web (2026-10-20) ----------
+  web_search: {
+    params: ["query"],
+    describe: "Search the web. Returns titles, links and snippets. Use it for documentation, error messages, library versions and anything recent; then web_fetch the best link.",
+    readOnly: true,
+    async run(ctx, a) {
+      const q = String(a.query || "").trim();
+      if (!q) throw new ToolError("<query> is required.");
+      if (!ctx.webSearch) throw new ToolError("Web search isn't available here.");
+      toolHeader("Web search", q);
+      spinner.start("searching");
+      let results;
+      try {
+        results = await ctx.webSearch(q);
+      } finally {
+        spinner.stop();
+      }
+      toolResult(`Found ${plural(results.length, "result")}`);
+      return results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet || ""}`.trim()).join("\n\n") || "No results.";
+    },
+  },
+  web_fetch: {
+    params: ["url"],
+    describe: "Read a web page as text: documentation, an article, a GitHub file, or the user's own dev server (http://localhost:3000).",
+    readOnly: true,
+    async run(ctx, a) {
+      const url = String(a.url || "").trim();
+      if (!url) throw new ToolError("<url> is required.");
+      toolHeader("Fetch", url);
+      spinner.start("reading");
+      let page;
+      try {
+        page = await fetchPage(/^https?:\/\//i.test(url) ? url : `https://${url}`, { maxChars: Math.min(ctx.budget || 20000, 24000), allowPrivate: true });
+      } catch (err) {
+        throw new ToolError(`Couldn't read ${url}: ${err.message}`);
+      } finally {
+        spinner.stop();
+      }
+      toolResult(`Read ${page.text.length.toLocaleString()} characters${page.title ? ` · ${page.title.slice(0, 60)}` : ""}`);
+      return `${page.title ? page.title + "\n" : ""}${page.url}\n\n${page.text || "(no text on the page)"}`;
+    },
+  },
+
+  // ---------- background commands ----------
+  task_output: {
+    params: ["id"],
+    describe: "What a background command has printed (the last part), and whether it is still running. Without <id>, lists them all.",
+    readOnly: true,
+    run(ctx, a) {
+      if (!a.id) {
+        toolHeader("Tasks", "");
+        toolResult(`${plural(ctx.tasks.size, "background task")}`);
+        return [...ctx.tasks.values()].map((t) => `${t.id}: ${taskStatus(t)} · ${t.command}`).join("\n") || "No background tasks.";
+      }
+      const t = ctx.tasks.get(Number(a.id));
+      if (!t) throw new ToolError(`No background task ${a.id}. Running ones: ${[...ctx.tasks.keys()].join(", ") || "none"}.`);
+      toolHeader("Task output", `${t.id} · ${t.command}`);
+      toolResult(taskStatus(t));
+      return `Task ${t.id} (${t.command}) is ${taskStatus(t)}.\n${clipTail(t.out, Math.min(ctx.budget || 8000, 8000)) || "(no output yet)"}`;
+    },
+  },
+  task_stop: {
+    params: ["id"],
+    describe: "Stop a background command you started.",
+    readOnly: true,
+    run(ctx, a) {
+      const t = ctx.tasks.get(Number(a.id));
+      if (!t) throw new ToolError(`No background task ${a.id}.`);
+      toolHeader("Stop task", `${t.id} · ${t.command}`);
+      stopTask(t);
+      toolResult("stopped");
+      return `Stopped task ${t.id}.`;
+    },
+  },
 };
+
+// ---------- background commands ----------
+const clipTail = (s, n) => (s.length > n ? `… (${s.length - n} earlier characters)\n` + s.slice(-n) : s);
+function taskStatus(t) {
+  const secs = Math.round(((t.endedAt || Date.now()) - t.started) / 1000);
+  const time = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  return t.done ? `${t.stopped ? "stopped" : `exited with code ${t.code}`} after ${time}` : `running for ${time}`;
+}
+function stopTask(t, { sync = false } = {}) {
+  if (t.done) return;
+  t.stopped = true;
+  try {
+    if (WIN) (sync ? spawnSync : spawn)("taskkill", ["/pid", String(t.child.pid), "/T", "/F"], { windowsHide: true });
+    else process.kill(-t.child.pid, "SIGKILL");
+  } catch {}
+}
+function stopAllTasks(ctx) {
+  for (const t of ctx.tasks.values()) stopTask(t, { sync: true });
+}
+// Starts a command that keeps running (a dev server, a watcher). Waits a few seconds so a quick failure or the
+// server's "listening on" line comes back with the result.
+async function startBackground(ctx, command) {
+  const id = ++ctx.taskSeq;
+  const child = WIN
+    ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8; ${psChain(command)}`], { cwd: ctx.root, windowsHide: true })
+    : spawn("bash", ["-lc", command], { cwd: ctx.root, detached: true });
+  const t = { id, command, child, out: "", started: Date.now(), done: false, code: null };
+  const add = (d) => {
+    t.out += d.toString("utf8").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+    if (t.out.length > 300000) t.out = t.out.slice(-150000);
+  };
+  child.stdout.on("data", add);
+  child.stderr.on("data", add);
+  child.on("error", (err) => add(`\n${err.message}`));
+  child.on("close", (code) => {
+    t.done = true;
+    t.code = code;
+    t.endedAt = Date.now();
+    if (ctx.onTaskDone) ctx.onTaskDone(t);
+  });
+  ctx.tasks.set(id, t);
+  spinner.start("starting in the background");
+  for (let waited = 0; waited < 4000 && !t.done; waited += 250) await new Promise((r) => setTimeout(r, 250));
+  spinner.stop();
+  toolResult(t.done ? `exited with code ${t.code}` : `running in the background as task ${id}`, { color: t.done && t.code ? c.red : undefined, summary: t.done ? `exit ${t.code}` : `task ${id}` });
+  const so = clipTail(t.out.trim(), 3000);
+  return t.done
+    ? `The command exited straight away with code ${t.code}.\n${so || "(no output)"}`
+    : `Started as background task ${id}; it keeps running while you work.${so ? ` Output so far:\n${so}` : " No output yet."}\nCheck it with task_output (<id>${id}</id>), stop it with task_stop.`;
+}
 
 // Shows an edit's diff and writes it to disk.
 function applyEdit(ctx, plan) {
@@ -405,4 +535,4 @@ async function execRun(ctx, a, signal) {
   return result;
 }
 
-module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine, psChain };
+module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine, psChain, startBackground, stopTask, stopAllTasks, taskStatus };

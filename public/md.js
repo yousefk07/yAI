@@ -24,6 +24,8 @@ window.renderMarkdown = function renderMarkdown(src) {
     .replace(/```([\w+#.-]*)[^\n]*\n?([\s\S]*?)(```|$)/g, (_, lang, code) =>
       hold(
         `<div class="code"><div class="code-head"><span>${escapeHtml(lang || "code")}</span>` +
+          // Web code gets a live Preview (the chat page runs it in a sandboxed frame).
+          (/^(html?|svg|xml|js|javascript|jsx)$/i.test(lang) ? `<button class="preview-code" type="button" data-lang="${escapeHtml(lang.toLowerCase())}">Preview</button>` : "") +
           `<button class="copy-code" type="button">Copy</button></div>` +
           `<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre></div>`
       ))

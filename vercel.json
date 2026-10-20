@@ -27,6 +27,9 @@
     },
     "api/share.js": {
       "maxDuration": 15
+    },
+    "api/hub.js": {
+      "maxDuration": 30
     }
   }
 }

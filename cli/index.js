@@ -75,6 +75,128 @@ const X = require("./extras")({
   title: () => sessionTitle({ messages: state.messages }),
 });
 
+// /bench: the coding benchmark on any model (cli/bench.js).
+const BENCH = require("./bench")({ state, api, ui, syncMute: () => syncMute(), findModel: (q) => findModel(q), modelLabel: () => modelLabel() });
+
+// MCP servers: their tools join yAI's own (cli/mcp.js).
+const MCP = require("./mcp")({ root, api, T, version: VERSION });
+
+// web_search goes through the site (which may have a search API key), or straight to DuckDuckGo if that fails.
+ctx.webSearch = async (q) => {
+  try {
+    return (await api.search(q)).results || [];
+  } catch (err) {
+    if (err.auth) throw new Error("Not signed in. Run /login.");
+    return require("../lib/search").search(q);
+  }
+};
+// A background command that ends on its own: yAI hears about it with the next message, and so does the user.
+ctx.onTaskDone = (t) => {
+  if (t.stopped) return;
+  state.pendingContext.push(`Background task ${t.id} (${t.command}) ${T.taskStatus(t)}. Its last output:\n${T.clipOutput(t.out.slice(-2000), 2000)}`);
+  if (!state.busy && !state.printMode && rl) {
+    process.stdout.write("\r\x1b[K");
+    ui.note(`${t.code ? c.red("●") : c.green("●")} ${c.ink(`background task ${t.id} ${T.taskStatus(t)}`)} ${c.dim(`· ${ui.middle(t.command, 40)}`)}`);
+    showPrompt();
+  }
+};
+process.on("exit", () => {
+  T.stopAllTasks(ctx);
+  MCP.stopAll();
+});
+
+// Project MCP servers (.mcp.json) run commands from the repository, so the user OKs them once per project.
+async function approveMcp(list) {
+  const known = project().mcpApproved || [];
+  const fresh = list.filter((s) => !known.includes(s.name));
+  if (!fresh.length || state.printMode) return list.map((s) => s.name).filter((n) => known.includes(n));
+  print("");
+  print(` ${c.yellow("?")} ${c.ink("This project lists MCP servers that run on your computer:")}`);
+  for (const s of fresh) print(`   ${c.bold(c.ink(s.name))} ${c.dim(s.cfg.url || [s.cfg.command, ...(s.cfg.args || [])].join(" "))} ${c.dim(`(${s.source})`)}`);
+  const a = ((await question(` ${ui.choices([["Y", "Start them"], ["N", "Not now"]], "Y").trimStart()}`)) || "").trim().toLowerCase();
+  if (a === "" || a === "y" || a === "yes") {
+    project().mcpApproved = [...known, ...fresh.map((s) => s.name)];
+    api.save();
+    return list.map((s) => s.name);
+  }
+  return list.map((s) => s.name).filter((n) => known.includes(n));
+}
+function mcpSummary() {
+  const all = [...MCP.servers.values()];
+  if (!all.length) return null;
+  const ready = all.filter((s) => s.state === "ready");
+  const tools = ready.reduce((n, s) => n + s.tools.length, 0);
+  const failed = all.filter((s) => s.state === "failed").map((s) => s.name);
+  return { text: `${ready.length} server${ready.length === 1 ? "" : "s"} · ${tools} tool${tools === 1 ? "" : "s"}`, failed };
+}
+
+// /mcp                    list servers and their tools
+// /mcp add <name> <command …> | <url>    save a server in ~/.yai/config.json and start it
+// /mcp remove <name>      /mcp restart <name>
+async function mcpCommand(arg) {
+  const [sub, name, ...rest] = arg.split(/\s+/).filter(Boolean);
+  if (sub === "add") {
+    if (!name || !rest.length) return print(c.yellow("Usage: /mcp add <name> <command and args>   or   /mcp add <name> https://server/mcp"));
+    const cfg = /^https?:\/\//.test(rest[0]) ? { url: rest[0] } : { command: rest[0], args: rest.slice(1) };
+    (api.cfg.mcpServers ||= {})[name] = cfg;
+    api.save();
+    spinner.start(`starting ${name}`);
+    MCP.remove(name);
+    const s = await MCP.connect({ name, cfg, source: "you" });
+    spinner.stop();
+    return s.state === "ready"
+      ? ui.note(`${c.green("✓")} ${c.ink(`${name}: ${s.tools.length} tool${s.tools.length === 1 ? "" : "s"}`)} ${c.dim("· saved in " + path.join(api.DIR, "config.json"))}`)
+      : ui.note(`${c.red("✕")} ${c.ink(`${name} didn't start:`)} ${c.dim(s.error)}`);
+  }
+  if (sub === "remove" || sub === "rm") {
+    if (!name) return print(c.yellow("Usage: /mcp remove <name>"));
+    if (api.cfg.mcpServers) delete api.cfg.mcpServers[name];
+    api.save();
+    MCP.remove(name);
+    return ui.note(`${c.yellow("↺")} ${c.ink(`removed ${name}`)}`);
+  }
+  if (sub === "restart") {
+    spinner.start(`restarting ${name}`);
+    const s = await MCP.restart(name);
+    spinner.stop();
+    if (!s) return print(c.yellow(`No MCP server called ${name}.`));
+    return ui.note(s.state === "ready" ? `${c.green("✓")} ${c.ink(`${name}: ${s.tools.length} tools`)}` : `${c.red("✕")} ${c.dim(s.error)}`);
+  }
+  const all = [...MCP.servers.values()];
+  print("");
+  if (!all.length) {
+    print(c.dim("  No MCP servers. Add one with /mcp add <name> <command>, e.g."));
+    print(c.dim("    /mcp add files npx -y @modelcontextprotocol/server-filesystem ."));
+    print(c.dim("  or list them in .mcp.json in the project, the same format as Claude Code."));
+    return;
+  }
+  for (const s of all) {
+    const dot = s.state === "ready" ? c.green("●") : s.state === "failed" ? c.red("●") : c.yellow("●");
+    print(` ${dot} ${c.bold(c.ink(s.name))} ${c.dim(`· ${s.source} · ${s.state === "ready" ? `${s.tools.length} tools` : s.state === "failed" ? s.error : "starting"}`)}`);
+    if (s.state === "ready") print(c.dim(`     ${s.tools.map((t) => t.name).join(", ").slice(0, 400)}`));
+  }
+}
+
+// /tasks: background commands; /tasks stop <n>
+function tasksCommand(arg) {
+  const [sub, id] = arg.split(/\s+/);
+  if (sub === "stop" || sub === "kill") {
+    const t = ctx.tasks.get(Number(id));
+    if (!t) return print(c.yellow(`No background task ${id || ""}.`));
+    T.stopTask(t);
+    return ui.note(`${c.yellow("■")} ${c.ink(`stopped task ${t.id}`)}`);
+  }
+  if (!ctx.tasks.size) return print(c.dim("   No background tasks. yAI starts servers and watchers in the background when it needs them."));
+  print("");
+  for (const t of ctx.tasks.values()) {
+    const dot = t.done ? (t.code && !t.stopped ? c.red("●") : c.faint("●")) : c.green("●");
+    print(` ${dot} ${c.bold(c.ink(String(t.id)))} ${c.ink(ui.middle(t.command, 60))} ${c.dim("· " + T.taskStatus(t))}`);
+    const last = t.out.trim().split("\n").slice(-2).join(" | ");
+    if (last) print(c.dim(`     ${ui.middle(last, ui.columns() - 8)}`));
+  }
+  print(c.dim("\n   /tasks stop <n> stops one"));
+}
+
 function findModel(q) {
   const n = Number(q);
   if (Number.isInteger(n) && n >= 1 && n <= state.models.length) return state.models[n - 1];
@@ -193,6 +315,8 @@ ${toolDocs}
 - A reply has a length limit. Write long files in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for the rest.
 - If the user asks for text (an answer, an essay, an explanation) and doesn't ask for a file, reply with the text itself; don't write a file.
 - After changing code, check it when you can (run the tests, or a quick syntax check such as node --check file.js).
+- When you need documentation, an error message explained, a library's current API or anything recent, use web_search, then web_fetch the best result. Don't guess at APIs you're unsure of.
+- Start dev servers and watchers with run and <background>true</background>, then check them with task_output (or web_fetch http://localhost:<port>). Stop them with task_stop when you're done unless the user wants them running.
 - If a tool returns an error, fix the cause and try again instead of repeating the same call.
 - Questions get answers, not edits. Don't change files the user didn't ask about.
 - Be brief. Before a tool call, write at most one short sentence. When the task is done, say what you changed in a few sentences, without a tool call.
@@ -680,7 +804,43 @@ async function execTool(call) {
   if (!tool) return { output: `Error: unknown tool "${call.name}". Available: ${Object.keys(T.tools).join(", ")}.` };
   spinner.stop();
   try {
-    if (tool.readOnly) return { output: tool.run(ctx, call.args) };
+    if (tool.readOnly) return { output: await tool.run(ctx, call.args) };
+
+    // MCP tools: read-only ones (the server says so) run straight away; others ask first, like commands.
+    if (tool.kind === "mcp") {
+      const shownArgs = Object.entries(call.args || {}).map(([k, v]) => `${k}=${String(v).replace(/\s+/g, " ").slice(0, 40)}`).join(" ");
+      ui.toolHeader(`MCP ${tool.server}`, `${tool.tool}${shownArgs ? " " + shownArgs : ""}`);
+      if (!tool.readOnlyHint) {
+        if (state.mode === "plan" || (state.printMode && !state.allowCommands)) {
+          ui.toolResult("Not allowed here (read-only)", { color: c.yellow });
+          return { output: "Not allowed: read-only mode. Only MCP tools marked read-only can run." };
+        }
+        const allowedMcp = project().mcpAllowed || [];
+        if (!state.printMode && !allowedMcp.includes(call.name)) {
+          ui.cancelRow();
+          const ans = await askPermission(`Use ${c.bold(tool.tool)} from the MCP server ${tool.server}?`, "Always for this tool");
+          if (ans.no) return rejected(ans);
+          if (ans === "always") {
+            project().mcpAllowed = [...allowedMcp, call.name];
+            api.save();
+          }
+          ui.toolHeader(`MCP ${tool.server}`, tool.tool);
+        }
+      }
+      spinner.start("waiting for the tool");
+      let text;
+      try {
+        text = await tool.call(call.args || {});
+      } catch (err) {
+        spinner.stop();
+        ui.toolResult(err.message, { color: c.red, quiet: true });
+        return { output: `Error: the MCP tool failed: ${err.message}` };
+      }
+      spinner.stop();
+      const lines = text.split("\n");
+      ui.toolResult(lines.slice(0, 3).join("\n") + (lines.length > 3 ? `\n… ${lines.length - 3} more lines` : ""), { color: text.startsWith("Error") ? c.red : undefined, quiet: true, summary: `${lines.length} line${lines.length === 1 ? "" : "s"}` });
+      return { output: T.clipOutput(text, ctx.budget) };
+    }
 
     if (state.mode === "plan" || (state.printMode && !state.allowEdits)) {
       ui.toolHeader(tool.kind === "run" ? "Shell" : "Edit", call.args.path || call.args.command || "");
@@ -734,6 +894,7 @@ async function execTool(call) {
       }
       ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", shownCommand);
     }
+    if (String(call.args.background || "").trim() === "true") return { output: await T.startBackground(ctx, command) };
     return { output: await T.execRun(ctx, call.args, state.abort.signal) };
   } catch (err) {
     spinner.stop();
@@ -980,12 +1141,15 @@ const HELP = [
   ["/duo", "Two models: Qwen 3.8 27B plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
+  ["/bench [model]", "Run the 6-task coding benchmark (44 tests) on a model; scores go to the leaderboard"],
+  ["/mcp [add|remove|restart]", "MCP servers and their tools (also read from .mcp.json)"],
+  ["/tasks [stop n]", "Commands yAI left running in the background (dev servers, watchers)"],
   ["/image [16:9] [@photo] <prompt>", "Make an image, or edit a photo; saved in yai-media/"],
   ["/video [16:9] <prompt>", "Make a 5-second video with sound; saved in yai-media/"],
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -1288,6 +1452,12 @@ async function command(line) {
       return X.toggleTutor(arg);
     case "/share":
       return X.share();
+    case "/bench":
+      return BENCH.bench(arg);
+    case "/mcp":
+      return mcpCommand(arg);
+    case "/tasks":
+      return tasksCommand(arg);
     case "/undo":
       return undoLast();
     case "/resume":
@@ -1415,6 +1585,7 @@ async function main() {
     await ensureLogin();
     await loadModels();
     if (modelArg) state.model = findModel(modelArg)?.id || state.model;
+    if (!process.env.YAI_NO_MCP) await MCP.startAll();
     await runAgent(await expandMentions(printPrompt));
     process.exit(0);
   }
@@ -1473,6 +1644,14 @@ async function main() {
     }
   }
 
+  // MCP servers start after the folder is trusted; their tools are ready by the time the first answer needs them.
+  if (!process.env.YAI_NO_MCP && MCP.configured().length) {
+    spinner.start("starting MCP servers");
+    await MCP.startAll({ approve: approveMcp });
+    spinner.stop();
+    const m = mcpSummary();
+    if (m) ui.note(`${m.failed.length ? c.yellow("!") : c.green("✓")} ${c.ink("MCP: " + m.text)}${m.failed.length ? c.dim(` · didn't start: ${m.failed.join(", ")} (/mcp)`) : ""}`);
+  }
   if (resume) resumeSession();
   print("");
   const hint = (cmd, text) => `${c.dim(cmd)} ${c.faint(text)}`;
