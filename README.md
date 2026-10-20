@@ -105,6 +105,9 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B as `qwen3.8-27b-cloud` |
 | `RUNPOD_CODER_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen3 Coder 30B as `qwen3-coder` (yAI Code only; the website lists it greyed out) |
 | `RUNPOD_CODER_CONTEXT` | Optional: the coder endpoint's `MAX_MODEL_LEN` if it isn't 32768, so yAI Code sizes conversations to it |
+| `MODAL_API_KEY` | The key the Modal chat servers check (the `VLLM_API_KEY` in the `yai-vllm` Modal secret) |
+| `MODAL_CODER_URL` | Modal URL of the coder server (`modal deploy modal/llm.py` prints it); when set, Qwen3 Coder runs on Modal instead of RunPod |
+| `MODAL_MAX_URL` | Modal URL of the Qwen 3.8 27B server; when set, it runs on Modal instead of RunPod |
 | `RUNPOD_IMAGE_ENDPOINT_ID` | ComfyUI endpoint for text → image (`workflows/t2i.json`) |
 | `RUNPOD_EDIT_ENDPOINT_ID` | ComfyUI endpoint for photo editing (`workflows/edit.json`) |
 | `RUNPOD_VIDEO_ENDPOINT_ID` | ComfyUI endpoint for text or photo → video (`workflows/video.json`) |
