@@ -648,3 +648,5 @@ a.side-code { text-decoration: none; }
 
 .menu-danger { color: var(--bad); }
 .menu-danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+
+.search-note { display: inline-block; margin: 0 0 10px; padding: 5px 10px; border-radius: 8px; background: var(--surface-2); color: var(--warn); font-size: 13px; }

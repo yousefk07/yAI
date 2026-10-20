@@ -1135,6 +1135,14 @@
               renderSources(el, sources);
               if (!answer) el.querySelector(".content").innerHTML = `<div class="searching">Read ${sources.length} source${sources.length === 1 ? "" : "s"} · writing</div>`;
             }
+            // The search failed or found nothing: say so above the answer instead of failing silently.
+            if (msg.searchNote) {
+              const note = document.createElement("div");
+              note.className = "search-note";
+              note.textContent = msg.searchNote;
+              el.querySelector(".body").prepend(note);
+              if (!answer) el.querySelector(".content").innerHTML = "";
+            }
             if (msg.t) {
               if (!firstTokenAt) firstTokenAt = performance.now();
               stats.out = msg.t;
