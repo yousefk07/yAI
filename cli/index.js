@@ -397,9 +397,10 @@ async function loadModels() {
   const data = await api.models();
   state.models = data.models || [];
   state.localOffline = !!data.localOffline;
-  const saved = api.cfg.model;
+  // A /model pick is remembered; picks saved before Qwen3 Coder became the default are dropped once.
+  const saved = api.cfg.modelPicked === 2 ? api.cfg.model : undefined;
   if (!state.models.some((m) => m.id === state.model)) {
-    state.model = state.models.find((m) => m.id === saved)?.id || state.models.find((m) => /cloud/.test(m.id))?.id || data.default || state.models[0]?.id || "";
+    state.model = state.models.find((m) => m.id === saved)?.id || data.default || state.models.find((m) => /cloud/.test(m.id))?.id || state.models[0]?.id || "";
   }
 }
 
@@ -983,6 +984,7 @@ async function chooseModel(arg) {
   if (!m) return print(c.yellow(`No model matches "${arg}".`));
   state.model = m.id;
   api.cfg.model = m.id;
+  api.cfg.modelPicked = 2;
   api.save();
   ui.note(`${c.green("✓")} ${c.ink("Model: " + m.label)}` + (m.cloud || /cloud/.test(m.id) ? "" : c.dim(" · small local models can struggle with multi-step tool use")));
 }
