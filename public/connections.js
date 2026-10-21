@@ -131,6 +131,8 @@
 
   // Back from a service's consent screen.
   const p = new URLSearchParams(location.search);
+  // GitHub sent the sign-in back to the site's home page (its app's callback is set to the site address): pass it on.
+  if (p.get("code") && p.get("state") && !p.get("connected")) { location.replace(`/api/hub?op=github-callback&${p.toString()}`); return; }
   if (p.get("connections")) { history.replaceState(null, "", "/"); setTimeout(open, 600); } // yAI Code's /connections link
   if (p.get("connected")) {
     const id = p.get("connected"), ok = p.get("result") === "ok";
