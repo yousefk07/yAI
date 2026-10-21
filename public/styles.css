@@ -773,3 +773,14 @@ a.menu-item { text-decoration: none; }
 .mem-add input:focus { border-color: var(--acc); }
 .mem-add .btn-plain { height: 40px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text); font-weight: 500; }
 .mem-add .btn-plain:hover { background: var(--hover); }
+
+/* Live steps while connections run (2026-10-21) */
+.tool-steps { display: flex; flex-direction: column; gap: 6px; }
+.tool-step { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); min-width: 0; }
+.tool-step .ts-icon { flex: none; width: 14px; height: 14px; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.tool-step.running .ts-icon { border: 2px solid var(--border-strong); border-top-color: var(--acc); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.tool-step.done .ts-icon { color: var(--pos, #2e9e5b); }
+.tool-step.failed .ts-icon { color: var(--bad, #d14b3c); }
+.tool-step .ts-label { flex: none; font: 500 11px var(--mono, monospace); padding: 2px 7px; border-radius: 6px; background: var(--acc-soft); color: var(--acc-ink); }
+.tool-step .ts-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-step.running .ts-text { color: var(--text); }

@@ -287,10 +287,11 @@ const tools = {
       if (typeof args === "string") {
         try { args = args.trim() ? JSON.parse(args) : {}; } catch { throw new ToolError('<args> must be a JSON object, e.g. {"place":"Waterloo, ON"}.'); }
       }
-      const summary = Object.values(args).map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" · ").slice(0, 80);
       if (info.write && !(await ctx.approve(name, args))) return "The user said no; it wasn't done.";
-      toolHeader(info.label, `${name.split(".")[1].replace(/_/g, " ")}${summary ? ` · ${summary}` : ""}`);
-      spinner.start(`asking ${info.label}`);
+      // the same plain words as the website's live steps: "Checking the weather in Waterloo, ON"
+      const { describe } = require("../lib/connectors/describe");
+      toolHeader(info.label, describe(name, args));
+      spinner.start(describe(name, args));
       let r;
       try {
         r = await ctx.service(name, args, !!info.write);

@@ -1318,10 +1318,14 @@
               renderSteps(el, steps, false);
             }
             if (msg.memory?.length) { remembered = msg.memory.map((m) => m.text); renderRemembered(el, remembered); }
+            // Live steps (2026-10-21): what yAI is looking up right now (weather, arXiv, the web…), until the answer starts.
+            if (msg.toolSteps && !answer) {
+              el.querySelector(".content").innerHTML = `<div class="tool-steps">${msg.toolSteps.map((s) => `<div class="tool-step ${s.state}"><span class="ts-icon" aria-hidden="true">${s.state === "done" ? "✓" : s.state === "failed" ? "✕" : ""}</span><span class="ts-label">${escapeHtml(s.label)}</span><span class="ts-text">${escapeHtml(s.text)}</span></div>`).join("")}</div>`;
+            }
             if (msg.sources) {
               sources = msg.sources;
               renderSources(el, sources);
-              if (!answer) el.querySelector(".content").innerHTML = `<div class="searching">Read ${sources.length} source${sources.length === 1 ? "" : "s"} · writing</div>`;
+              if (!answer && !el.querySelector(".tool-steps")) el.querySelector(".content").innerHTML = `<div class="searching">Read ${sources.length} source${sources.length === 1 ? "" : "s"} · writing</div>`;
             }
             // The connected tools it used (weather, arXiv, GitHub…), above the answer.
             if (msg.toolsUsed?.length) {

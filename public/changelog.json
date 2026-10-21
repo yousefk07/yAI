@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.113",
+      "date": "2026-10-21",
+      "title": "See what yAI is checking",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Live steps instead of dots",
+          "text": "While yAI looks things up, the reply shows each step as it happens (Checking the weather in Waterloo, ON · Searching arXiv for …), with a tick when each is done."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Plain-words steps",
+          "text": "Connections in yAI Code show the same words while they run, in the spinner and the step row."
+        }
+      ]
+    },
+    {
       "version": "1.0.111",
       "date": "2026-10-21",
       "title": "Fewer connections",
