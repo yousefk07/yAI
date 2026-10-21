@@ -14,6 +14,9 @@
 //    esc pause   d hide changes                       shift+tab asks before changes · model · memory
 //
 // index.js supplies what goes in each part (header, panel, input, keys); ui.js sends printed lines here.
+//
+// Copying (2026-10-21): the app takes the mouse (for the wheel), so the terminal can't select text itself; dragging
+// selects here instead, like Claude Code: the text is highlighted, and copied to the clipboard when you let go.
 
 module.exports = function create({ ui }) {
   const { c } = ui;
@@ -23,6 +26,9 @@ module.exports = function create({ ui }) {
   let live = []; // the working line (and the plan card on a narrow screen)
   let extra = []; // approval cards, /team's board, suggestions: drawn after the conversation
   let on = false, pending = false, centerUpTo = -1;
+  let sel = null; // a drag selection: { a: [row, col], b: [row, col], pane: [firstCol, lastCol], moved }
+  let toast = null, toastTimer = null;
+  let rowInfo = []; // per screen row: { soft: it continues the row above (a wrapped line), pane: [firstCol, lastCol] }
   const parts = { header: () => "", panel: () => null, input: () => ({ text: "", cursor: 0 }), keys: () => "" };
 
   // ---------- ANSI-aware wrapping ----------
@@ -99,18 +105,23 @@ module.exports = function create({ ui }) {
     const panel = cols >= 100 ? parts.panel() : null;
     const pw = panel ? Math.min(40, Math.max(32, Math.floor(cols * 0.28))) : 0;
     const tw = cols - (panel ? pw + 3 : 0) - 2;
-    const body = [];
-    lines.forEach((e) => body.push(...rowsOf(e, tw)));
-    const tail = [...extra, ...live].flatMap((t) => wrap(t, tw));
-    const all = [...body, ...tail];
+    const all = [], soft = [];
+    const push = (rs) => rs.forEach((r, k) => { all.push(r); soft.push(k > 0); });
+    lines.forEach((e) => push(rowsOf(e, tw)));
+    [...extra, ...live].forEach((t) => push(wrap(t, tw)));
     scroll = Math.max(0, Math.min(scroll, Math.max(0, all.length - midH)));
     let view = all.slice(Math.max(0, all.length - midH - scroll), all.length - scroll);
+    let viewSoft = soft.slice(Math.max(0, all.length - midH - scroll), all.length - scroll);
     if (view.length < midH) {
       // the start screen sits in the middle; a conversation sits just above the input
       const gap = midH - view.length;
       const top = centerUpTo >= 0 && lines.length <= centerUpTo ? Math.floor(gap / 2) : gap;
       view = [...Array(top).fill(""), ...view, ...Array(gap - top).fill("")];
+      viewSoft = [...Array(top).fill(false), ...viewSoft, ...Array(gap - top).fill(false)];
     }
+    // where each row's text sits, for selecting: the conversation, the plan panel, or the whole row
+    rowInfo = screen.map(() => ({ soft: false, pane: [1, cols] }));
+    for (let r = 0; r < midH; r++) rowInfo.push({ soft: !!viewSoft[r], pane: [2, tw + 1], panel: panel ? [tw + 5, tw + 4 + pw - 2] : null });
     const panelRows = panel ? panel(pw - 2) : [];
     for (let r = 0; r < midH; r++) {
       let row = " " + fit(view[r] || "", tw) + " ";
@@ -118,7 +129,9 @@ module.exports = function create({ ui }) {
       screen.push(fit(row, cols));
     }
     if (scroll > 0) screen[screen.length - 1] = fit(` ${c.chip(c.dim(` ↓ ${scroll} more lines below · PgDn or the wheel to go back down `))}`, cols);
+    if (toast) screen[screen.length - 1] = fit(` ${c.chip(c.ink(` ${toast} `))}`, cols);
     screen.push(...bottom);
+    while (rowInfo.length < screen.length) rowInfo.push({ soft: false, pane: [1, cols] });
     // the cursor goes where you type
     const caretRow = screen.length - bottom.length + 1 + Math.min(box.length - 1, Math.floor((inp.cursor || 0) / room) - first);
     const caretCol = 1 + 1 + 2 + ((inp.cursor || 0) % room) + 1;
@@ -126,6 +139,11 @@ module.exports = function create({ ui }) {
     // a synchronized update so the terminal shows the whole frame at once.
     const frame = screen.slice(0, rows);
     while (frame.length < rows) frame.push("");
+    for (const [i, s, e] of selSpans()) {
+      if (!frame[i - 1]) continue;
+      const plain = ui.stripAnsi(frame[i - 1]);
+      frame[i - 1] = plain.slice(0, s - 1) + "\x1b[7m" + plain.slice(s - 1, e) + "\x1b[27m" + plain.slice(e);
+    }
     if (shown_.cols !== cols || shown_.rows !== rows) { shown_ = { cols, rows, lines: [] }; out("\x1b[2J"); }
     let w = "";
     frame.forEach((l, i) => {
@@ -138,6 +156,62 @@ module.exports = function create({ ui }) {
     shown_.caret = caret;
   }
   let shown_ = { cols: 0, rows: 0, lines: [] }; // what's on the screen now, row by row
+
+  // ---------- selecting and copying ----------
+  // The pane a column falls in on a row: the conversation, the plan panel, or the whole row.
+  function paneAt(row, col) {
+    const info = rowInfo[row - 1];
+    if (!info) return [1, (process.stdout.columns || 100) - 1];
+    return info.panel && col >= info.panel[0] - 1 ? info.panel : info.pane;
+  }
+  // The selected stretch of each row, as [row, firstCol, lastCol] (1-based, inclusive), kept inside the pane the
+  // drag started in, so a selection in the conversation doesn't pick up the plan panel beside it.
+  function selSpans() {
+    if (!sel || !sel.moved) return [];
+    let [a, b] = [sel.a, sel.b];
+    if (b[0] < a[0] || (b[0] === a[0] && b[1] < a[1])) [a, b] = [b, a];
+    const [p0, p1] = sel.pane;
+    const spans = [];
+    for (let r = a[0]; r <= b[0]; r++) {
+      const s = Math.max(p0, r === a[0] ? a[1] : p0), e = Math.min(p1, r === b[0] ? b[1] : p1);
+      if (e >= s) spans.push([r, s, e]);
+    }
+    return spans;
+  }
+  function selectedText() {
+    const spans = selSpans();
+    let text = "";
+    spans.forEach(([r, s, e], k) => {
+      const plain = ui.stripAnsi(shown_.lines[r - 1] || "");
+      const next = spans[k + 1];
+      const joins = next && rowInfo[next[0] - 1]?.soft; // a wrapped line goes back together
+      const part = plain.slice(s - 1, e);
+      text += joins ? part : part.replace(/\s+$/, "") + (next ? "\n" : "");
+    });
+    return text.replace(/\s+$/, "");
+  }
+  // The clipboard: the system's own copy command, and OSC 52 for terminals that take it (over SSH too).
+  function copy(text) {
+    const { spawnSync, spawn } = require("child_process");
+    const run = (cmd, args, input) => { try { return spawnSync(cmd, args, { input, timeout: 3000, windowsHide: true }).status === 0; } catch { return false; } };
+    if (process.platform === "win32") {
+      // PowerShell keeps any character (clip.exe mangles them); it runs in the background, so the screen doesn't wait
+      try {
+        const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[Console]::InputEncoding=[Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())"], { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] });
+        p.on("error", () => {});
+        p.stdin.end(text, "utf8");
+      } catch {}
+    }
+    else if (process.platform === "darwin") run("pbcopy", [], text);
+    else run("wl-copy", [], text) || run("xclip", ["-selection", "clipboard"], text);
+    out(`\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`);
+  }
+  function showToast(t) {
+    toast = t;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast = null; soon(); }, 1800);
+    soon();
+  }
   const soon = () => { if (on && !pending) { pending = true; setImmediate(render); } };
 
   return {
@@ -147,7 +221,7 @@ module.exports = function create({ ui }) {
       if (on) return;
       on = true;
       // the alternate screen, the mouse wheel (SGR reports), and the window's own colours
-      out("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[2J");
+      out("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[2J");
       process.stdout.on("resize", soon);
       const restore = () => this.exit();
       process.on("exit", restore);
@@ -156,7 +230,7 @@ module.exports = function create({ ui }) {
     exit() {
       if (!on) return;
       on = false;
-      out("\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l");
+      out("\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l");
     },
     add(text) {
       for (const l of String(text).split("\n")) lines.push({ text: l });
@@ -169,7 +243,19 @@ module.exports = function create({ ui }) {
     endStart() { if (centerUpTo >= 0 && lines.length <= centerUpTo + 2) lines.length = 0; centerUpTo = -1; soon(); },
     setLive(l) { live = l || []; soon(); },
     setExtra(l) { extra = l || []; soon(); },
-    scrollBy(n) { scroll = Math.max(0, scroll + n); soon(); },
+    scrollBy(n) { scroll = Math.max(0, scroll + n); sel = null; soon(); },
+    // A mouse report (SGR): the left button down starts a selection, moving with it held extends it, letting go copies.
+    mouse(btn, col, row, release) {
+      if (btn === 0 && !release) { sel = { a: [row, col], b: [row, col], pane: paneAt(row, col), moved: false }; return soon(); }
+      if (btn === 32 && sel) { sel.b = [row, col]; sel.moved = sel.moved || sel.a[0] !== row || sel.a[1] !== col; return soon(); }
+      if (btn === 0 && release && sel) {
+        if (!sel.moved) { sel = null; return soon(); }
+        render(); // the highlight and the text come from the same frame
+        const text = selectedText();
+        if (text) { copy(text); showToast(`Copied ${text.length} character${text.length === 1 ? "" : "s"}`); }
+      }
+    },
+    clearSelection() { if (sel) { sel = null; soon(); } },
     page(dir) { scroll = Math.max(0, scroll + dir * Math.max(3, (process.stdout.rows || 30) - 12)); soon(); },
     toBottom() { scroll = 0; soon(); },
     render: soon,

@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.105",
+      "date": "2026-10-21",
+      "title": "Copy and paste in yAI Code",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Select to copy",
+          "text": "Drag over any text in yAI Code to select it; it is copied when you let go, as in Claude Code. A selection stays inside the conversation or the plan panel, and wrapped lines come back together."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Pasting",
+          "text": "Pasted text no longer sends the prompt at its line breaks. A short line goes in as typed; anything longer shows as [Pasted text #1 +N lines] and the whole text goes to the model."
+        },
+        {
+          "area": "yAI Code",
+          "title": "/team questions stay on screen",
+          "text": "When a team agent asks to run a command, its question no longer flashes and disappears: the live board waits until you answer."
+        }
+      ]
+    },
+    {
       "version": "1.0.104",
       "date": "2026-10-21",
       "title": "Pick your team",

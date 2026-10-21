@@ -52,6 +52,7 @@ const root = path.resolve(process.cwd());
 const ctx = T.makeContext(root);
 const state = {
   pasted: [], // clipboard images pasted this session: [image N] is pasted[N - 1]
+  pastedText: [], // long or multi-line pastes: [Pasted text #N +K lines] is pastedText[N - 1]
   user: null,
   models: [],
   model: "",
@@ -964,21 +965,38 @@ function setupReadline() {
   // While a /command is being typed, ↑↓ move through the suggestions (not the history), tab completes the chosen
   // one, enter runs it and esc closes the list.
   const ttyWrite = rl._ttyWrite.bind(rl);
-  let mouse = null;
+  let mouse = null, paste = null;
   rl._ttyWrite = (s, key = {}) => {
+    // Pasting (bracketed paste, 2026-10-21): the text arrives whole, so its line breaks don't send the prompt. One short
+    // line goes in as typed; anything longer stands in the prompt as [Pasted text #N +K lines], as in Claude Code, and
+    // the full text goes to the model.
+    if (key.name === "paste-start") { paste = ""; state.inMouse = true; return; }
+    if (paste !== null) {
+      if (key.name !== "paste-end") { paste += s || ""; return; }
+      const text = paste.replace(/\r\n?/g, "\n");
+      paste = null;
+      setImmediate(() => (state.inMouse = false));
+      if (!text) return;
+      if (!text.includes("\n") && text.length <= 800) return ttyWrite(text, {});
+      state.pastedText.push(text);
+      const n = text.split("\n").length;
+      return ttyWrite(`[Pasted text #${state.pastedText.length} +${n} line${n === 1 ? "" : "s"}] `, {});
+    }
     // Mouse reports (SGR: ESC [ < button ; x ; y M) arrive as single characters; the wheel scrolls, the rest is dropped.
     if (SCREEN.on) {
       if (key.code === "[<") { mouse = ""; state.inMouse = true; return; }
       if (mouse !== null) {
         if (s === "M" || s === "m") {
-          const btn = Number(mouse.split(";")[0]);
+          const [btn, x, y] = mouse.split(";").map(Number);
           if (btn === 64) SCREEN.scrollBy(3);
           else if (btn === 65) SCREEN.scrollBy(-3);
+          else SCREEN.mouse(btn, x, y, s === "m"); // selecting text to copy
           mouse = null;
           setImmediate(() => (state.inMouse = false));
         } else mouse += s || "";
         return;
       }
+      SCREEN.clearSelection();
       if (key.name === "pageup") return SCREEN.page(1);
       if (key.name === "pagedown") return SCREEN.page(-1);
       if (key.name === "end" && key.ctrl) return SCREEN.toBottom();
@@ -2010,6 +2028,8 @@ async function usageCommand() {
 
 // ---------- @file mentions and !commands ----------
 async function expandMentions(text) {
+  // pasted text goes back in whole where its tag stands
+  text = text.replace(/\[Pasted text #(\d+) \+\d+ lines?\]/g, (m, n) => state.pastedText[Number(n) - 1] ?? m);
   const extra = [];
   const images = [];
   ui.resetSections(); // the attached files sit right under the user's message
@@ -2938,6 +2958,10 @@ async function main() {
 
   ui.setTheme(api.cfg.theme || "dark");
   process.on("exit", () => ui.resetTerminal()); // the terminal gets its own colours back however yai ends
+  if (process.stdout.isTTY) {
+    process.stdout.write("\x1b[?2004h"); // bracketed paste: a paste arrives marked, so its line breaks don't send
+    process.on("exit", () => process.stdout.write("\x1b[?2004l"));
+  }
   setupReadline();
   await ensureLogin();
   try {

@@ -275,12 +275,13 @@ module.exports = function create(d) {
     state.abort = new AbortController();
     d.syncMute();
     const tty = process.stdout.isTTY && !state.stdio;
-    let drawn = 0, tick = 0, wake = () => {}, over = false;
+    let drawn = 0, tick = 0, wake = () => {}, over = false, asking = false;
     d.wake = () => wake();
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
       // mustn't draw it again under the reports
-      if (!tty || over) return;
+      // while an agent's question is open it owns the bottom of the screen; redrawing the board would wipe it
+      if (!tty || over || asking) return;
       const lines = boardLines(agents, tick++);
       if (ui.screen) return ui.screen.setExtra(["", ...lines]); // the full-window app keeps the board at the end
       if (drawn) process.stdout.write(`\x1b[${drawn}A`);
@@ -321,7 +322,6 @@ module.exports = function create(d) {
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => { draw(); report(); }, 120);
-        let asking = false;
         wake = async () => {
           if (over) return;
           next();
@@ -330,10 +330,10 @@ module.exports = function create(d) {
           const a = agents.find((x) => x.asks.length);
           if (!a) return;
           // An agent wants to run something: the board steps aside for the question.
-          asking = true;
           const q = a.asks[0];
           draw();
           drawn = 0;
+          asking = true;
           const i = state.abort.signal.aborted ? -1 : await d.select({ title: `${a.name}: ${q.title}`, detail: q.detail, options: q.options.slice(0, 2).concat("No") });
           a.asks.shift();
           a.send({ type: "answer", id: q.id, choice: i === 2 ? 2 : i });
