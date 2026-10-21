@@ -813,6 +813,16 @@ function parseToolCall(text) {
       break;
     }
   }
+  // DeepSeek (yAI Ultra Flash) sometimes writes the arguments as JSON: <tool name="search">{"pattern": "…"}</tool>.
+  if (tool && !Object.keys(args).length && /^\s*\{[\s\S]*\}\s*$/.test(body)) {
+    try {
+      const obj = JSON.parse(body);
+      for (const p of tool.params) {
+        const key = [p, ...(TAG_ALIASES[p] || [])].find((k) => obj[k] !== undefined);
+        if (key !== undefined) args[p] = typeof obj[key] === "string" ? obj[key] : JSON.stringify(obj[key]);
+      }
+    } catch {}
+  }
   // Small models often skip the inner tags (<tool name="run">node --test</tool>) or use their own
   // (<cmd>, <file>). If none of the expected tags were found, the bare text is the first argument.
   for (const p of tool ? tool.params : []) {
@@ -965,6 +975,9 @@ async function callModel() {
   }
   if (lineBuf && !state.interrupted) emit(lineBuf.replace(/\r$/, ""));
   if (heldFence !== null && !inTool) write(heldFence);
+  if (process.env.YAI_DEBUG_DIR) {
+    try { fs.writeFileSync(path.join(process.env.YAI_DEBUG_DIR, `reply-${Date.now()}.txt`), text); } catch {}
+  }
   return fromDeepSeek(fromKimi(text));
 }
 
@@ -982,8 +995,13 @@ function fromDeepSeek(text) {
   const inv = /<｜DSML｜\s*invoke\s+name="([\w-]+)"[^>]*>([\s\S]*?)(<\/｜DSML｜\s*invoke>|$)/.exec(block);
   if (!inv) return before;
   const params = [...inv[2].matchAll(/<｜DSML｜\s*parameter\s+name="([\w-]+)"[^>]*>([\s\S]*?)<\/｜DSML｜\s*parameter>/g)];
-  const body = params.map(([, key, value]) => `<${key}>\n${value}\n</${key}>`).join("\n");
-  return `${before}\n\n<tool name="${inv[1]}">\n${body}${inv[3] ? "\n</tool>" : ""}`;
+  const body = params.map(([, key, value]) => {
+    const v = /^(content|new|old|new_str|old_str|text)$/.test(key) ? value.replace(/^\r?\n/, "").replace(/\r?\n$/, "") : value.trim();
+    return `<${key}>\n${v}\n</${key}>`;
+  }).join("\n");
+  // No parameter tags: the arguments may be written as JSON inside the invoke.
+  const json = !params.length && /^\s*\{[\s\S]*\}\s*$/.test(inv[2]) ? inv[2].trim() : "";
+  return `${before}\n\n<tool name="${inv[1]}">\n${body || json}${inv[3] ? "\n</tool>" : ""}`;
 }
 
 // Kimi K3 (yAI Ultra) writes tool calls in its own format even when asked for <tool> blocks:
