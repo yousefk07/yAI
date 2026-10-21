@@ -11,6 +11,8 @@
     document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/mobile.css" />');
     const tab = (href, key, label, d) => `<a href="${href}"${(page === "arena" && key === "arena") || (page === "usage" && key === "you") ? ' class="on"' : ""}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg><span>${label}</span></a>`;
     document.body.classList.add("m-page");
+    const vp = document.querySelector('meta[name="viewport"]');
+    if (vp && !/maximum-scale/.test(vp.content)) vp.content += ", maximum-scale=1"; // no pinch or double-tap zoom, like an app
     document.body.insertAdjacentHTML("beforeend", `<nav id="mTabs" aria-label="yAI">${[
       tab("/", "home", "Chats", "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"),
       tab("/?tab=projects", "projects", "Projects", "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"),

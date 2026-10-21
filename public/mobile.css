@@ -238,3 +238,22 @@ body.m-app #mPrevBar { display: flex; gap: 8px; padding: 12px 12px calc(12px + e
 body.m-page .duel { display: flex !important; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
 body.m-page .duel::-webkit-scrollbar { display: none; }
 body.m-page .duel > .card { flex: 0 0 86%; min-width: 0; scroll-snap-align: start; border-radius: 18px; }
+
+/* ---------- App feel: the page itself never moves (2026-10-21) ----------
+   On a phone only the content areas scroll (the chat, the lists, sheets). The document is pinned, so pulling up or
+   down doesn't bounce the whole page or trigger pull-to-refresh, and nothing can push it sideways. Areas that need to
+   scroll sideways (code blocks, tables, chips, sources, arena cards) still do, inside themselves. */
+html:has(> body.m-app), html:has(> body.m-page) { height: 100%; overflow: hidden; overscroll-behavior: none; }
+body.m-app, body.m-page {
+  position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none;
+  touch-action: manipulation; -webkit-text-size-adjust: 100%; -webkit-user-select: none; user-select: none;
+}
+body.m-app :is(input, textarea, [contenteditable], .content, .bubble, pre, code, .cv-text),
+body.m-page :is(input, textarea, .stage) { -webkit-user-select: text; user-select: text; }
+body.m-app #shell, body.m-app #app, body.m-app #mApp { max-width: 100vw; overflow: hidden; }
+body.m-app .scroller, .m-view, .m-sheet, body.m-page .stage, body.m-page .app { overflow-x: hidden; overscroll-behavior: contain; }
+body.m-app .scroller, .m-view, body.m-page .stage { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+body.m-app .messages, body.m-app .msg, body.m-app .body, body.m-app .content { min-width: 0; max-width: 100%; }
+body.m-app .content, body.m-app .bubble, body.m-app .m-row b, body.m-app .cc-text b { overflow-wrap: anywhere; }
+body.m-app :is(.code, .table, .math, .katex-display, .sources ol, .m-chips, .m-files) { max-width: 100%; overscroll-behavior-x: contain; }
+body.m-app :is(img, video, iframe, canvas) { max-width: 100%; }
