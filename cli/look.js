@@ -238,7 +238,7 @@ module.exports = function create({ ui }) {
       return { tag: "risky", fill: "del", explain: "This deletes or overwrites things, and it can't be undone." };
     if (/\b(npm|pnpm|yarn|bun)\s+(i|install|add|update|publish)\b|\bpip3?\s+install\b|\bcurl\b|\bwget\b|invoke-webrequest|\bgit\s+(push|pull|fetch|clone)\b|\bdocker\s+(pull|push)\b/.test(s))
       return { tag: "network", fill: "soft", explain: "This uses the network, and it may change files in the project (packages, lock files)." };
-    if (/\b(test|tests|pytest|jest|vitest|mocha|--test|unittest|go test|cargo test|--check|py_compile|compileall|lint|eslint|tsc\b|mypy|ruff)\b/.test(s) || /^(git (status|diff|log|show|branch)|ls|dir|cat|type|pwd|get-childitem|get-content)\b/.test(s))
+    if (/\b(test|tests|pytest|jest|vitest|mocha|--test|unittest|go test|cargo test|py_compile|compileall|lint|eslint|tsc\b|mypy|ruff)\b/.test(s) || /(^|\s)--(check|test)\b/.test(s) || /^(git (status|diff|log|show|branch)|ls|dir|cat|type|pwd|get-childitem|get-content)\b/.test(s))
       return { tag: "read-only", fill: "chip", explain: "This only reads your code and runs it. It doesn't change files or touch the network." };
     return { tag: "changes files", fill: "soft", explain: "This may change files in the project." };
   }
