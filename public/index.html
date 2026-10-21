@@ -21,6 +21,9 @@
   <link rel="stylesheet" href="/mobile.css" />
 </head>
 <body>
+  <!-- The phone app opens on the logo (2026-10-21, mobile.css/mobile.js); once a session, never on desktop. -->
+  <div id="mSplash" aria-hidden="true"><div class="m-splash-logo"><span>y</span><b>AI</b><i></i></div></div>
+  <script>try { if (sessionStorage.getItem("yaiSplash") || !matchMedia("(max-width: 700px)").matches) document.getElementById("mSplash").remove(); else sessionStorage.setItem("yaiSplash", "1"); } catch (e) {}</script>
   <!-- The mark, drawn once and reused everywhere with <use href="#yai-mark"> -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="yai-mark" viewBox="0 0 64 64">

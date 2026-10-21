@@ -255,3 +255,17 @@ body.m-app .messages, body.m-app .msg, body.m-app .body, body.m-app .content { m
 body.m-app .content, body.m-app .bubble, body.m-app .m-row b, body.m-app .cc-text b { overflow-wrap: anywhere; }
 body.m-app :is(.code, .table, .math, .katex-display, .sources ol, .m-chips, .m-files) { max-width: 100%; overscroll-behavior-x: contain; }
 body.m-app :is(img, video, iframe, canvas) { max-width: 100%; }
+
+/* ---------- Opening: the logo first (2026-10-21) ----------
+   On a phone the app opens on the yAI logo, which settles in while the chats load, then fades into the app. */
+#mSplash { display: none; }
+@media (max-width: 700px) {
+  #mSplash { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; background: var(--bg); transition: opacity 0.35s ease, visibility 0.35s; }
+  #mSplash.out { opacity: 0; visibility: hidden; }
+  .m-splash-logo { display: flex; align-items: flex-end; font-size: 64px; letter-spacing: -0.05em; color: var(--text); line-height: 1; animation: m-splash-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .m-splash-logo span { font-weight: 400; } .m-splash-logo b { font-weight: 700; }
+  .m-splash-logo i { width: 14px; height: 14px; border-radius: 50%; background: var(--acc); margin: 0 0 9px 7px; animation: m-splash-dot 0.5s 0.35s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+  @keyframes m-splash-in { from { opacity: 0; transform: scale(0.92); } }
+  @keyframes m-splash-dot { from { transform: scale(0); } }
+}
+@media (prefers-reduced-motion: reduce) { .m-splash-logo, .m-splash-logo i { animation: none; } }

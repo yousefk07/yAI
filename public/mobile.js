@@ -546,6 +546,16 @@
     else if (k === "logout") $("logoutBtn").click();
   });
 
+  // ---------- the opening logo: shown at least ~1 s, gone once the account is known (or after 3 s) ----------
+  let splashGone = false;
+  const hideSplash = () => {
+    const s = document.getElementById("mSplash");
+    if (splashGone || !s) return;
+    splashGone = true;
+    setTimeout(() => { s.classList.add("out"); setTimeout(() => s.remove(), 400); }, Math.max(0, 1100 - performance.now()));
+  };
+  setTimeout(hideSplash, 3000);
+
   // ---------- keeping the screens in step with the page ----------
   const on = () => PHONE.matches && !!user;
   function sync() {
@@ -570,7 +580,7 @@
       return out;
     };
   };
-  after("updateAccountUI", () => sync());
+  after("updateAccountUI", () => { sync(); hideSplash(); });
   after("renderChatList", () => { if (on() && (view === "home" || view === "project")) render(); renderTop(); });
   after("renderProjects", () => { if (on() && (view === "projects" || view === "project" || view === "home")) render(); renderTop(); });
   after("renderHistory", () => renderTop());

@@ -445,9 +445,17 @@ function choices(list, def) {
 function welcome({ version, rows }) {
   const inner = width() - 3;
   // A narrower window gets a narrower left column, and each row (value + grey note) is cut to fit the box.
-  const leftW = inner >= 90 ? 31 : 24;
-  const logo = `${c.ink("y")}${c.bold(c.ink("AI"))}${c.accent("•")} ${c.dim("Code")}`;
-  const left = ["", logo, c.faint(`v${version}`), c.faint(leftW >= 31 ? "your models, your terminal" : "your terminal"), ""];
+  const leftW = inner >= 100 ? 41 : 24;
+  // The wordmark drawn big in block characters (2026-10-21, like the site's videos): "yAI" two rows tall with the
+  // y's tail below, the purple dot on the baseline and "Code" beside it, then the version and tagline on one line.
+  const left = [
+    "",
+    `${c.ink("█ █")} ${c.bold(c.ink("▄▀▄ █"))}`,
+    `${c.ink("▀▄█")} ${c.bold(c.ink("█▀█ █"))}${c.accent("▄")}  ${c.dim("Code")}`,
+    c.ink("▄▄▀"),
+    c.faint(leftW >= 41 ? `v${version} · your models, your terminal` : `v${version}`),
+    "",
+  ];
   const labelW = 9;
   const total = Math.max(8, inner - leftW - 5 - labelW);
   const right = rows.map(([label, value, extra]) => {

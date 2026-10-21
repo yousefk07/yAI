@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.91",
+      "date": "2026-10-21",
+      "title": "A proper opening",
+      "items": [
+        {
+          "area": "Phone",
+          "title": "Opens on the logo",
+          "text": "The phone app opens on the yAI logo, which settles in while your chats load, then fades into the app."
+        },
+        {
+          "area": "yAI Code",
+          "title": "A bigger start screen",
+          "text": "The start box shows yAI in large letters with the version and tagline on one line, like the videos."
+        }
+      ]
+    },
+    {
       "version": "1.0.90",
       "date": "2026-10-21",
       "title": "Agent teams in yAI Code",
