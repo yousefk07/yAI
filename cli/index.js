@@ -117,6 +117,8 @@ const TEAM = require("./team")({
   select: (o) => select(o),
   checklist: (o) => checklist(o),
   inputLine: () => rl.line,
+  testCounts: (s) => LOOK.testCounts(s),
+  riskOf: (s) => LOOK.riskOf(s),
   topLevel: () => topLevel(),
   modelLabel: () => modelLabel(),
 });

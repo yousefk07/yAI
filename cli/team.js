@@ -12,6 +12,11 @@
 // Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
 // doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
 // After the team, /team log <number or name> prints an agent's whole log.
+//
+// Holding the team to account (2026-10-21, after a run whose tester gave no verdict and whose fixer said "all checks
+// pass" while 47 of 60 tests failed): a checker that ends without a verdict counts as a concern (shown in yellow, and
+// the fixer gets its report); and once the fixer is done, yAI itself re-runs the test commands the team used and
+// shows their real result next to the fixer's verdict.
 
 const path = require("path");
 const readline = require("readline");
@@ -39,6 +44,7 @@ const ROLES = [
   { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
 ];
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
+const TESTISH = /\b(test|tests|pytest|jest|vitest|mocha|unittest|spec)\b|--test\b/i;
 
 module.exports = function create(d) {
   const { state, root, api, ui, X } = d;
@@ -106,7 +112,8 @@ module.exports = function create(d) {
         "Use the project's test setup if it has one; if it has none, use the language's built-in runner (node --test, python -m unittest) without installing anything. Run the tests.",
         "If a test fails because of a bug in the app, leave the bug for the fixer: report the file, the line and what's wrong.",
         CHECKS, "", RULES,
-        "When you're done, end with a short report: the tests you wrote, what passed, and every failure with its file and line.", verdictRule("PASS", "FAIL"),
+        "When you're done, end with a short report: the command you ran, the tests you wrote, what passed, and every failure with its file and line.",
+        verdictRule("PASS", "FAIL") + " The VERDICT line is required: without it your check counts as unfinished.",
       ],
       reviewer: [
         "Your job: review the builders' code as a careful senior engineer would: bugs, wrong logic, missed edge cases (empty input, errors, nulls), missing error handling, duplicated or confusing code.",
@@ -139,17 +146,23 @@ module.exports = function create(d) {
     return [head, "", ...workersLines(all), "", ...body].join("\n");
   }
 
+  // A checker that finished without the VERDICT line it owes.
+  const silent = (x) => x.role && x.role !== "fixer" && x.hasVerdict && x.state === "done" && !x.verdict;
+  // Something the fixer should look at: a bad verdict, a checker that failed, or one that never said.
+  const concern = (x) => x.role && x.role !== "fixer" && (BAD.test(x.verdict || "") || x.state === "failed" || silent(x));
+
   // The fixer (phase 3) gets the reports that found something, and fixes those problems.
   function fixerBrief(task, all) {
-    const found = all.filter((x) => x.role && x.role !== "fixer" && (BAD.test(x.verdict || "") || x.state === "failed"));
+    const found = all.filter(concern);
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
       ...workersLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
-      ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
+      ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
+      "Be exact about checks: in your report, give each command you ran and its last result line (for example \"node --test test/ → 58 passed, 2 failed\"). Never say tests pass unless you ran them and they did. yAI re-runs the tests after you and shows the real result next to your verdict.",
       CHECKS, "", RULES,
-      "When you're done, end with a short report: each problem and what you did about it, file by file, and anything left for the user.",
+      "When you're done, end with a short report: each problem and what you did about it, file by file, the checks you ran with their results, and anything left for the user.",
       verdictRule("FIXED", "PARTLY"),
     ].join("\n");
   }
@@ -259,6 +272,51 @@ module.exports = function create(d) {
     if (a.state === "working" || a.state === "starting") out.push("", ` ${c.accent(SPIN[tick % SPIN.length])} ${c.dim(a.asks.length ? "waiting for you" : a.step)}`);
     return out;
   }
+
+  // The test commands the team ran (plain, read-only ones), newest last; or the project's own npm test script.
+  function testCommands(all) {
+    const seen = new Set();
+    for (const a of all) for (const e of a.log || []) {
+      const cmd = e.k === "step" && e.verb === "Run" ? String(e.arg || "").trim() : "";
+      if (!cmd || !TESTISH.test(cmd) || /[;&|`><]|\$\(/.test(cmd) || d.riskOf(cmd).tag !== "read-only") continue;
+      seen.delete(cmd);
+      seen.add(cmd);
+    }
+    const cmds = [...seen].slice(-3);
+    if (!cmds.length) {
+      try {
+        const pkg = JSON.parse(require("fs").readFileSync(path.join(root, "package.json"), "utf8"));
+        if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) cmds.push("npm test");
+      } catch {}
+    }
+    return cmds;
+  }
+  // Runs each command in the project and keeps its exit code, pass/fail counts and last lines.
+  function runChecks(cmds, signal) {
+    const one = (cmd) => new Promise((resolve) => {
+      let out = "", timedOut = false;
+      const child = spawn(cmd, { cwd: root, shell: true, windowsHide: true, env: { ...process.env, CI: "1", FORCE_COLOR: "0" } });
+      const add = (b) => { out += b; if (out.length > 200000) out = out.slice(-100000); };
+      child.stdout.on("data", add);
+      child.stderr.on("data", add);
+      const kill = () => { try { process.platform === "win32" ? spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"]) : child.kill(); } catch {} };
+      const timer = setTimeout(() => { timedOut = true; kill(); }, 180000);
+      signal?.addEventListener("abort", kill);
+      const done = (code) => {
+        clearTimeout(timer);
+        const clean = out.replace(/\x1b\[[0-9;]*m/g, "");
+        resolve({ cmd, code: timedOut ? -1 : code ?? -1, timedOut, counts: d.testCounts(clean), tail: clean.split(/\r?\n/).filter((l) => l.trim()).slice(-12) });
+      };
+      child.on("error", () => done(-1));
+      child.on("close", done);
+    });
+    return cmds.reduce((p, cmd) => p.then(async (rs) => (signal?.aborted ? rs : [...rs, await one(cmd)])), Promise.resolve([]));
+  }
+  const recheckPill = (rs) => {
+    const bad = rs.filter((r) => r.code !== 0).length;
+    const counts = rs.find((r) => r.counts)?.counts;
+    return bad ? c.red(`tests fail${counts ? ` ${counts.failed}/${counts.passed + counts.failed}` : ""}`) : c.green(`tests pass${counts ? ` ${counts.passed}` : ""}`);
+  };
 
   let lastTeam = null; // the last team's agents, for /team log
   function showLog(arg) {
@@ -398,7 +456,7 @@ module.exports = function create(d) {
         for (const a of waiting) {
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
-          else if (n === 3 && !phase(2).some((x) => BAD.test(x.verdict || "") || x.state === "failed"))
+          else if (n === 3 && !phase(2).some(concern))
             Object.assign(a, { state: "skipped", step: phase(2).length ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           else startAgent(a, task, agents);
         }
@@ -441,6 +499,15 @@ module.exports = function create(d) {
       d.syncMute();
     }
 
+    // 3b. yAI re-runs the team's test commands after the fixer, so its verdict sits next to the real result.
+    const fixer = agents.find((a) => a.role === "fixer" && a.state === "done");
+    if (fixer && !state.interrupted) {
+      const cmds = testCommands(agents);
+      if (cmds.length) {
+        try { fixer.recheck = await X.busy("re-running the tests", (signal) => runChecks(cmds, signal)); } catch {}
+      }
+    }
+
     // 4. The reports: the builders' last lines, then each member's report whole, the fixer last.
     const cost = agents.reduce((s, a) => s + a.cost, 0);
     state.cost.session += cost;
@@ -449,7 +516,9 @@ module.exports = function create(d) {
     const crew = agents.filter((a) => a.role);
     print("");
     ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed${cost ? ` · $${cost.toFixed(3)}` : ""}`)}`);
-    if (crew.length) print(`     ${crew.map((a) => `${c.dim(a.role)} ${a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || c.faint(a.hasVerdict ? "no verdict" : "done")}`).join(c.faint("  ·  "))}`);
+    if (crew.length) print(`     ${crew.map((a) => `${c.dim(a.role)} ${a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || (a.hasVerdict ? c.yellow("no verdict") : c.faint("done"))}${a.recheck ? " " + recheckPill(a.recheck) : ""}`).join(c.faint("  ·  "))}`);
+    const quiet = crew.filter(silent);
+    if (quiet.length) print(`     ${c.yellow("!")} ${c.dim(`${quiet.map((a) => a.role).join(" and ")} finished without a verdict, so ${quiet.length === 1 ? "its check" : "their checks"} may be incomplete${crew.some((a) => a.role === "fixer" && a.state === "done") ? " (the fixer looked at it)" : ""}.`)}`);
     for (const a of [...builders, ...crew]) {
       if (a.state === "skipped") continue;
       print("");
@@ -460,6 +529,15 @@ module.exports = function create(d) {
       const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));
       if (a.role) for (const l of lines.slice(0, 40)) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(w)}`);
       else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
+      if (a.recheck) {
+        print("");
+        print(`     ${c.bold(c.ink("Re-run by yAI"))} ${c.faint("· the tests after the fixer, to check its verdict")}`);
+        for (const r of a.recheck) {
+          print(`     ${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.ink(clip(r.cmd, ui.width() - 40))} ${c.dim(`· ${r.timedOut ? "timed out" : `exit ${r.code}`}${r.counts ? ` · ${r.counts.passed} passed, ${r.counts.failed} failed` : ""}`)}`);
+          if (r.code !== 0) for (const l of r.tail.slice(-6)) print(`         ${c.dim(clip(l, ui.width() - 10))}`);
+        }
+        if (a.verdict === "FIXED" && a.recheck.some((r) => r.code !== 0)) print(`     ${c.red("!")} ${c.ink("The fixer said FIXED, but the tests still fail.")}`);
+      }
     }
     print("");
     print(c.dim(`   Their reports are in this conversation now: ask a follow-up, /review to check the change as a whole, or /team log 1–${agents.length} for an agent's whole log.`));
@@ -468,6 +546,8 @@ module.exports = function create(d) {
       `I ran /team: ${builders.length} builder agent${builders.length === 1 ? "" : "s"} worked on this at the same time${crew.length ? `, then ${crew.map((a) => a.role).join(", ")}` : ""}: "${task}". Their reports:\n\n` +
       agents.filter((a) => a.state !== "skipped").map((a) => `## ${a.name}${a.role ? ` (${a.readOnly ? "read-only " : ""}${a.role})` : ""} (${a.state}${a.verdict ? `, VERDICT: ${a.verdict}` : ""})\nPart: ${a.task}\nFiles changed: ${a.changed.size ? [...a.changed].join(", ") : "none"}\n${(a.text.join("\n").trim() || a.error || "(no report)").slice(-3000)}`).join("\n\n") +
       (skipped.length ? `\n\n(${skipped.map((a) => a.role).join(", ")} didn't run: nothing to fix.)` : "") +
+      (quiet.length ? `\n\n(${quiet.map((a) => a.role).join(", ")} finished without a VERDICT line.)` : "") +
+      (fixer?.recheck ? `\n\n## Tests re-run by yAI after the fixer\n${fixer.recheck.map((r) => `$ ${r.cmd}\nexit ${r.timedOut ? "(timed out)" : r.code}\n${r.tail.join("\n")}`).join("\n\n")}` : "") +
       "\n\nThe files may have changed since you last read them; re-read before editing.",
     );
   }

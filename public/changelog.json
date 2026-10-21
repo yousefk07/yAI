@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.108",
+      "date": "2026-10-21",
+      "title": "A more honest team",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "No verdict is a warning",
+          "text": "In /team, a checker that finishes without its verdict now shows \"no verdict\" in yellow with a warning that its check may be incomplete, and the fixer gets its report to look at."
+        },
+        {
+          "area": "yAI Code",
+          "title": "yAI re-runs the tests after the fixer",
+          "text": "When the fixer is done, yAI runs the test commands the team used (or npm test) itself and shows the real result next to the fixer's verdict, with a warning if it said FIXED but the tests still fail. The fixer is also told to quote each check it ran with its result."
+        }
+      ]
+    },
+    {
       "version": "1.0.107",
       "date": "2026-10-21",
       "title": "Watch a team agent",
