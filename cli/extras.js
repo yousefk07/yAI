@@ -61,8 +61,28 @@ module.exports = function create(d) {
     for (const line of String(text).split("\n")) w(line);
   };
   const relPath = (abs) => T.rel(ctx, abs);
-  // The model that can see images (yAI Q3.8 Max, Qwen 3.8 27B on the cloud GPU), which also plans and reviews in /duo.
-  const visionModel = () => state.models.find((m) => m.vision && /cloud/.test(m.id)) || state.models.find((m) => m.vision);
+  // Models that can see images, best first: yAI Ultra (always running, so no GPU to wake; each look costs a few cents
+  // of the daily allowance), then yAI Q3.8 Max on the cloud GPU, then any other. If one fails (Ultra's daily allowance
+  // used up, say), the next is asked.
+  const visionModels = () => {
+    const v = state.models.filter((m) => m.vision);
+    const rank = (m) => (m.id === "kimi-k3-ultra" ? 0 : /cloud/.test(m.id) ? 1 : 2);
+    return v.sort((a, b) => rank(a) - rank(b));
+  };
+  const visionModel = () => visionModels()[0];
+  // Runs ask(model) with each vision model in turn until one answers; returns { vm, text }.
+  async function withVision(ask, signal) {
+    let lastErr;
+    for (const vm of visionModels()) {
+      try {
+        return { vm, text: await ask(vm) };
+      } catch (err) {
+        if (signal && signal.aborted) throw err;
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("No model that can see images is available right now.");
+  }
   const partnerModel = () => state.models.find((m) => m.id !== state.model && /cloud/.test(m.id) && m.vision);
 
   // One request to a model with no tools (planning, reviewing, describing, commit messages).
@@ -130,8 +150,8 @@ module.exports = function create(d) {
 
   // ---------- /look: a vision model reviews the page ----------
   async function look(arg) {
-    const vm = visionModel();
-    if (!vm) return print(c.yellow("   /look needs a model that can see images (yAI Q3.8 Max), and none is available right now."));
+    if (!visionModel()) return print(c.yellow("   /look needs a model that can see images (yAI Ultra or yAI Q3.8 Max), and none is available right now."));
+    let vm;
     const { where, focus } = splitTarget(arg);
     let t;
     try {
@@ -156,17 +176,21 @@ module.exports = function create(d) {
         const dir = mediaDir();
         fs.writeFileSync(path.join(dir, "look-desktop.jpg"), desktop);
         fs.writeFileSync(path.join(dir, "look-phone.jpg"), phone);
-        spinner.text(`${vm.label} is looking at it`);
-        return oneShot({
-          model: vm.id,
-          system: LOOK_SYSTEM,
-          signal,
-          messages: [{ role: "user", content: [
-            { type: "text", text: `Review this page${focus ? `, focusing on: ${focus}` : ""}. The first screenshot is a desktop window (1280×800), the second a phone (390×844).` },
-            imagePart(desktop),
-            imagePart(phone),
-          ] }],
-        });
+        const seen = await withVision((m) => {
+          spinner.text(`${m.label} is looking at it`);
+          return oneShot({
+            model: m.id,
+            system: LOOK_SYSTEM,
+            signal,
+            messages: [{ role: "user", content: [
+              { type: "text", text: `Review this page${focus ? `, focusing on: ${focus}` : ""}. The first screenshot is a desktop window (1280×800), the second a phone (390×844).` },
+              imagePart(desktop),
+              imagePart(phone),
+            ] }],
+          });
+        }, signal);
+        vm = seen.vm;
+        return seen.text;
       });
       print("");
       print(`   ${c.accent("◆")} ${c.ink(`${vm.label} looked at ${t.label}`)} ${c.dim("· screenshots in yai-media/look-*.jpg")}`);
@@ -196,11 +220,11 @@ module.exports = function create(d) {
       }
       ui.toolHeader("Look", rel);
       try {
-        const text = await busy(`${vm.label} is looking at ${path.basename(rel)}`, (signal) =>
-          oneShot({ model: vm.id, system: DESCRIBE_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: "Describe this image." }, imagePart(buf, IMAGE_TYPES[path.extname(abs).toLowerCase()])] }] })
+        const seen = await busy(`${vm.label} is looking at ${path.basename(rel)}`, (signal) =>
+          withVision((m) => oneShot({ model: m.id, system: DESCRIBE_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: "Describe this image." }, imagePart(buf, IMAGE_TYPES[path.extname(abs).toLowerCase()])] }] }), signal)
         );
-        ui.toolResult(`described by ${vm.label}`);
-        out.push(`<image path="${rel}" described-by="${vm.label}">\n${text}\n</image>`);
+        ui.toolResult(`described by ${seen.vm.label}`);
+        out.push(`<image path="${rel}" described-by="${seen.vm.label}">\n${seen.text}\n</image>`);
       } catch (err) {
         ui.toolResult(err.message, { color: c.yellow });
       }
