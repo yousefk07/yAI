@@ -114,6 +114,7 @@ const TEAM = require("./team")({
   syncMute: () => syncMute(),
   runAgent: (text) => runAgent(text),
   select: (o) => select(o),
+  checklist: (o) => checklist(o),
   topLevel: () => topLevel(),
   modelLabel: () => modelLabel(),
 });
@@ -333,6 +334,58 @@ function select(opts) {
       else if (/^[1-9]$/.test(s || "") && Number(s) <= opts.options.length) { sel = Number(s) - 1; redraw(); done(sel); }
     };
     state.cancelSelect = () => done(-1);
+    process.stdin.on("keypress", onKey);
+  });
+}
+
+// A checklist (2026-10-21, the /team picker): rows to tick, grouped under headings, and a Start row. Resolves to the
+// rows' on/off values (heading rows left out), or null when cancelled.
+async function checklist({ title, note = "", rows, start }) {
+  spinner.stop();
+  const items = rows.filter((r) => r.kind !== "head");
+  if (!process.stdout.isTTY || state.askHook) return items.map((r) => !!r.on);
+  let sel = 0, drawn = [];
+  const draw = () => {
+    const lines = LOOK.checklistLines({ title, note, rows, sel, start: start(items) });
+    if (SCREEN.on) SCREEN.setExtra(["", ...lines]);
+    else {
+      if (drawn.length) process.stdout.write(`\x1b[${drawn.length}A`);
+      for (const l of lines) process.stdout.write("\r\x1b[K" + l + "\n");
+      if (drawn.length > lines.length) process.stdout.write("\x1b[J");
+    }
+    drawn = lines;
+  };
+  const wasMuted = ui.rlOutput.muted;
+  ui.rlOutput.muted = true;
+  state.selecting = true;
+  state.checklistOpen = true;
+  draw();
+  return new Promise((resolve) => {
+    const finish = (r) => {
+      process.stdin.removeListener("keypress", onKey);
+      state.selecting = false;
+      state.checklistOpen = false;
+      state.cancelSelect = null;
+      if (SCREEN.on) SCREEN.setExtra([]);
+      else process.stdout.write(`\x1b[${drawn.length}A\r\x1b[J`);
+      rl.write(null, { ctrl: true, name: "u" });
+      ui.rlOutput.muted = wasMuted;
+      resolve(r);
+    };
+    const onKey = (s, key = {}) => {
+      if (state.inMouse) return;
+      const n = items.length + 1; // the items and the Start row
+      if (key.name === "escape" || (key.ctrl && key.name === "c")) return finish(null);
+      if (key.name === "up") { sel = (sel + n - 1) % n; return draw(); }
+      if (key.name === "down" || key.name === "tab") { sel = (sel + 1) % n; return draw(); }
+      if (key.name === "space" && sel < items.length) { items[sel].on = !items[sel].on; return draw(); }
+      if (/^[1-9]$/.test(s || "") && Number(s) <= items.length) { sel = Number(s) - 1; items[sel].on = !items[sel].on; return draw(); }
+      if (key.name === "return" || key.name === "enter") {
+        if (sel < items.length) { items[sel].on = !items[sel].on; return draw(); }
+        return finish(items.map((r) => !!r.on));
+      }
+    };
+    state.cancelSelect = () => finish(null);
     process.stdin.on("keypress", onKey);
   });
 }
@@ -767,13 +820,13 @@ SCREEN.parts.input = () => {
     return { label: "›", text: state.askHidden ? "•".repeat(text.length) : text, cursor: rl.cursor, placeholder: state.askLabel || "", active: true };
   }
   // a question form or an approval card has the keys; the input stays out of it
-  if (state.formOpen) return { text: "", cursor: 0, placeholder: "Answer above, or choose Chat about this to talk it over", active: false, caret: false };
+  if (state.formOpen || state.checklistOpen) return { text: "", cursor: 0, placeholder: "Answer above, or choose Chat about this to talk it over", active: false, caret: false };
   if (state.busy) return { text, cursor: rl ? rl.cursor : 0, placeholder: state.selecting ? "Or tell me what to do instead" : "Add a note while I work…", hint: "I'll read it after this step", active: false };
   return { text, cursor: rl ? rl.cursor : 0, placeholder: placeholder(), hint: text ? "" : state.phase === "welcome" ? "enter to send" : "", active: true };
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
@@ -1531,9 +1584,10 @@ async function execTool(call) {
       return { output: `The user answered:\n${lines.join("\n")}` };
     }
 
-    // /team's integration checker is read-only, but it may run checks that change nothing (a syntax check, the tests,
-    // a linter) without asking: one plain command, judged read-only by the same rules as the approval cards.
-    if (process.env.YAI_REPORT_ONLY && tool.kind === "run") {
+    // /team's checkers may run checks that change nothing (a syntax check, the tests, a linter) without asking: one
+    // plain command, judged read-only by the same rules as the approval cards. The read-only roles (YAI_REPORT_ONLY)
+    // and the tester, docs writer and fixer (YAI_SAFE_CHECKS) get this.
+    if ((process.env.YAI_REPORT_ONLY || process.env.YAI_SAFE_CHECKS) && tool.kind === "run") {
       const command = String(call.args.command || "").trim();
       if (command && !/[;&|`><]|\$\(/.test(command) && LOOK.riskOf(command).tag === "read-only" && String(call.args.background || "").trim() !== "true") {
         ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command);

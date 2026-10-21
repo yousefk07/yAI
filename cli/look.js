@@ -378,5 +378,33 @@ module.exports = function create({ ui }) {
     return out;
   }
 
-  return { pill, statusRow, headerRow, panelLines, formLines, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
+  // ---------- a checklist (the /team picker) ----------
+  //  Who's on the team?                                    space toggles · enter starts
+  //  Builders, from the lead
+  //  ❯ [x] 1  API Server       server.js, store.js
+  //  After they finish
+  //    [ ] 4  Reviewer         reviews the change like a senior engineer · read-only
+  //    ▸ Start 5 agents
+  function checklistLines({ title, note, rows, sel, start }) {
+    const w = Math.min(W() - 2, 110);
+    const rule = c.line("─".repeat(w));
+    const out = [rule, ui.pad(` ${c.bold(c.ink(title))}`, w - ui.vis(note || "") - 1) + c.faint(note || ""), ""];
+    const labelW = Math.min(18, Math.max(...rows.filter((r) => r.label && r.kind !== "head").map((r) => r.label.length), 6));
+    let k = 0;
+    rows.forEach((r) => {
+      if (r.kind === "head") return out.push(` ${c.faint(r.label)}`);
+      const on = sel === k;
+      const box = r.on ? c.accent("[x]") : c.faint("[ ]");
+      const name = ui.pad(r.on ? c.ink(r.label) : c.dim(r.label), labelW);
+      const desc = c.faint(ui.clip(r.desc || "", Math.max(10, w - labelW - 14)));
+      out.push(` ${on ? c.accent("❯") : " "} ${box} ${c.faint(String(k + 1).padStart(2))}  ${on ? c.bold(name) : name}  ${desc}`);
+      k++;
+    });
+    out.push("");
+    out.push(` ${sel === k ? c.accent("❯") : " "} ${(sel === k ? (s) => c.soft(c.bold(c.accent(s))) : c.ink)(` ▸ ${start} `)}`);
+    out.push("", ` ${c.faint("↑↓ move · space or a number toggles · enter starts · esc cancels")}`);
+    return out;
+  }
+
+  return { pill, statusRow, headerRow, panelLines, formLines, checklistLines, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
 };

@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.104",
+      "date": "2026-10-21",
+      "title": "Pick your team",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Tester, reviewer, security checker, docs writer and fixer in /team",
+          "text": "After the builders finish, the members you picked check the work together: the integration agent (do the pieces fit), a tester (writes and runs tests), a reviewer (bugs and edge cases), a security checker and a docs writer. Each ends with a verdict. If any of them finds a problem, the fixer runs last with their reports, fixes it and re-runs the checks; if nothing is found it is skipped."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Choose who is on the team",
+          "text": "After the lead splits the task, a checklist shows the builders and every role: tick or untick with space or a number, then Start. Your picks are remembered for next time. The verdicts are summed up in one line when the team finishes."
+        }
+      ]
+    },
+    {
       "version": "1.0.101",
       "date": "2026-10-21",
       "title": "yAI searches on its own",

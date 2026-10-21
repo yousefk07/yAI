@@ -4,6 +4,10 @@
 // for it), all at the same time. A live board shows each one's current step, time and cost; commands they want to run
 // still come to you for approval, one at a time. At the end their reports go into this conversation, so you (and
 // yAI) can carry on from there, or check it all with /review.
+//
+// The team (2026-10-21): after the builders, the checkers you picked run together (integration, tester, reviewer,
+// security checker, docs writer), each ending with a VERDICT line; if any of them finds a problem, the fixer runs last
+// with their reports. You pick the members on a checklist after the lead's split; the picks are remembered.
 
 const path = require("path");
 const readline = require("readline");
@@ -19,6 +23,18 @@ const LEAD_SYSTEM =
   "since two agents editing one file would overwrite each other; each task must make sense without waiting for another " +
   "(agree on names, routes and data shapes inside the task text so the pieces fit). If the task is small or can't be split " +
   "without agents stepping on each other, return a single agent. No tool calls.";
+
+// The members who aren't builders. phase 2 runs when the builders finish; phase 3 (the fixer) only if a check found
+// something. readOnly roles run in plan mode and can't edit; the others edit, and all may run checks that change nothing.
+const ROLES = [
+  { key: "integration", phase: 2, readOnly: true, on: true, desc: "checks the pieces fit together (imports, routes, data shapes)" },
+  { key: "tester", phase: 2, on: true, desc: "writes and runs tests for the new work (test files only)" },
+  { key: "reviewer", phase: 2, readOnly: true, on: false, desc: "reviews the code for bugs, edge cases and messy code" },
+  { key: "security", phase: 2, readOnly: true, on: (task) => /server|api|login|auth|password|token|form|upload|database|sql|payment|cookie|session/i.test(task), desc: "looks for security holes (injection, auth, secrets, unsafe input)" },
+  { key: "docs", phase: 2, on: false, verdict: false, desc: "updates the README and docs for what changed" },
+  { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
+];
+const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
 
 module.exports = function create(d) {
   const { state, root, api, ui, X } = d;
@@ -58,36 +74,79 @@ module.exports = function create(d) {
   }
 
   function brief(task, me, all) {
-    const others = all.filter((a) => a !== me);
+    const others = all.filter((a) => a !== me && !a.role);
+    const roles = all.filter((a) => a.role).map((a) => a.role);
     return [
       `You are one of ${all.length} agents working at the same time in this project, as a team. The team's overall task: ${task}`,
       "", `Your part: ${me.task}`,
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
+      ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
       "When you're done, end with a short report: what you changed, file by file, and anything the others or the user still need to do.",
     ].join("\n");
   }
 
-  // The integration (admin) agent's brief: it doesn't build a piece, it checks that the pieces fit together.
-  function integrationBrief(task, all) {
-    const workers = all.filter((a) => !a.integration);
+  const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
+  const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.";
+  const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running.";
+  const verdictRule = (a, b) => `End your report with one last line, exactly "VERDICT: ${a}" or "VERDICT: ${b}".`;
+
+  // The briefs of the members who check the builders' work (phase 2).
+  function roleBrief(a, task, all) {
+    const n = all.filter((x) => !x.role).length;
+    const head = `You are the ${a.role} on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} did the work and ${n === 1 ? "has" : "have"} finished. The team's overall task: ${task}`;
+    const body = {
+      tester: [
+        "Your job: test the builders' work. Write or update tests ONLY in test files (tests/, test/, __tests__/, *.test.*, *.spec.*, test_*.py); don't change the app's code.",
+        "Use the project's test setup if it has one; if it has none, use the language's built-in runner (node --test, python -m unittest) without installing anything. Run the tests.",
+        "If a test fails because of a bug in the app, leave the bug for the fixer: report the file, the line and what's wrong.",
+        CHECKS, "", RULES,
+        "When you're done, end with a short report: the tests you wrote, what passed, and every failure with its file and line.", verdictRule("PASS", "FAIL"),
+      ],
+      reviewer: [
+        "Your job: review the builders' code as a careful senior engineer would: bugs, wrong logic, missed edge cases (empty input, errors, nulls), missing error handling, duplicated or confusing code.",
+        "This is a READ-ONLY review: do not edit any files. Read the files they changed and the code that uses them.", CHECKS, "", RULES,
+        "When you're done, end with a short report: each problem with its file, line, what's wrong and how to fix it, worst first. Mark small style points as nits.",
+        verdictRule("OK", "PROBLEMS") + " Answer PROBLEMS only for things that should be fixed before this ships, not nits.",
+      ],
+      security: [
+        "Your job: check the builders' work for security holes: injection (SQL, shell, path), cross-site scripting, missing login or permission checks, secrets or keys in the code, unsafe handling of user input or uploads, open CORS, and sensitive data in logs.",
+        "This is a READ-ONLY check: do not edit any files. Read the files they changed and the code that uses them.", CHECKS, "", RULES,
+        "When you're done, end with a short report: each hole with its file, line, how it could be abused and how to fix it, worst first.", verdictRule("OK", "PROBLEMS"),
+      ],
+      docs: [
+        "Your job: update the docs for what the builders did: the README (how to run and use the new parts), and any docs/ pages or CHANGELOG the project already keeps. Edit ONLY documentation files (*.md and docs/); don't change code.",
+        "Write for someone new to the project: short, plain and accurate. Read the code to check what you write is true.", "", RULES,
+        "When you're done, end with a short report: which docs you changed and what you added.",
+      ],
+      integration: [
+        "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
+        "(1) every file that is imported or required exists, and every imported name is actually exported;",
+        "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
+        "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
+        "(4) the agents' changes don't contradict each other (two files defining the same thing differently).",
+        "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
+        CHECKS, "", RULES,
+        "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
+        verdictRule("OK", "PROBLEMS"),
+      ],
+    }[a.role];
+    return [head, "", ...workersLines(all), "", ...body].join("\n");
+  }
+
+  // The fixer (phase 3) gets the reports that found something, and fixes those problems.
+  function fixerBrief(task, all) {
+    const found = all.filter((x) => x.role && x.role !== "fixer" && (BAD.test(x.verdict || "") || x.state === "failed"));
     return [
-      `You are the integration (admin) agent on a team of ${workers.length} agents who worked at the same time in this project. They have now finished. The team's overall task: ${task}`,
-      "",
-      "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
-      "(1) every file that is imported or required exists, and every imported name is actually exported;",
-      "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
-      "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
-      "(4) the agents' changes don't contradict each other (two files defining the same thing differently).",
-      "",
-      ...workers.map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`),
-      "",
-      "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
-      "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.",
-      "",
-      "Don't commit, push or change git history, and don't start servers that keep running.",
-      "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
+      `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
+      ...workersLines(all), "",
+      "After them, these checkers found problems. Their reports:", "",
+      ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
+      "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
+      CHECKS, "", RULES,
+      "When you're done, end with a short report: each problem and what you did about it, file by file, and anything left for the user.",
+      verdictRule("FIXED", "PARTLY"),
     ].join("\n");
   }
 
@@ -95,7 +154,7 @@ module.exports = function create(d) {
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.text = []; a.cost = 0; a.asks = [];
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", ...(a.integration && { YAI_REPORT_ONLY: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -105,9 +164,9 @@ module.exports = function create(d) {
       let e;
       try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") {
-        a.send({ type: "mode", mode: a.integration ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
+        a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         if (e.model !== state.model) a.send({ type: "model", id: state.model });
-        a.send({ type: "prompt", text: a.integration ? integrationBrief(task, all) : brief(task, a, all) });
+        a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
       else if (e.type === "status" && e.text) a.step = String(e.text);
       else if (e.type === "step") a.step = `${e.verb} ${e.arg}`.trim();
@@ -119,6 +178,7 @@ module.exports = function create(d) {
       else if (e.type === "done" && a.state === "working") {
         a.cost = e.cost?.session || 0;
         a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
+        a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
         child.stdin.end();
       }
@@ -131,7 +191,15 @@ module.exports = function create(d) {
     });
   }
 
-  const ICON = { done: () => c.green("✓"), failed: () => c.red("✗"), stopped: () => c.yellow("■"), waiting: () => c.faint("○") };
+  // the last "VERDICT: X" an agent wrote
+  const verdictOf = (text) => {
+    const all = [...String(text).matchAll(/VERDICT:?\**\s*\**\s*(OK|PROBLEMS|PASS|FAIL|FIXED|PARTLY)\b/gi)];
+    return all.length ? all[all.length - 1][1].toUpperCase() : "";
+  };
+  const verdictPill = (v) => (!v ? "" : (BAD.test(v) ? c.red : c.green)(v));
+
+  const ICON = { done: () => c.green("✓"), failed: () => c.red("✗"), stopped: () => c.yellow("■"), waiting: () => c.faint("○"), skipped: () => c.faint("–") };
+  const ENDED = ["done", "failed", "stopped", "skipped"];
   function boardLines(agents, tick) {
     const w = ui.width();
     const nameW = Math.max(...agents.map((a) => a.name.length));
@@ -139,7 +207,7 @@ module.exports = function create(d) {
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
       const time = secs((a.ended || Date.now()) - a.started);
       const right = `${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
-      const what = a.state === "done" ? "finished" : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
+      const what = a.state === "done" ? (a.verdict ? `finished · ${a.verdict}` : "finished") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
       const room = Math.max(8, w - nameW - right.length - 11);
       return `   ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
     });
@@ -165,23 +233,43 @@ module.exports = function create(d) {
     } catch (err) {
       return print(c.red(`   ${state.interrupted ? "Stopped." : err.message}`));
     }
-    if (agents.length === 1) {
-      ui.note(`${c.accent("◆")} ${c.ink("This one doesn't split well, so yAI does it on its own.")}`);
-      return d.runAgent(task);
-    }
-    // The admin agent joins the team: it doesn't build a piece, it checks that the pieces fit together (read-only).
-    agents.push({ name: "integration", task: "check that all the agents' work fits together", files: [], integration: true });
+    // 2. You pick the team: the lead's builders, the checkers after them, and the fixer. The picks are remembered.
+    const saved = api.cfg.team?.roles || {};
+    const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task) : r.on }));
     print("");
-    ui.note(`${c.accent("◆")} ${c.ink(`The lead split it into ${agents.length - 1} parts`)} ${c.dim(`· they run at the same time, with ${d.modelLabel()}; then an integration agent checks the pieces fit`)} `);
-    for (const a of agents) {
-      print(`     ${c.accent(a.integration ? "◆" : "•")} ${c.ink(a.name)} ${c.dim("· " + clip(a.task, Math.max(30, ui.width() - a.name.length - 12)))}`);
-      if (a.files.length) print(`       ${c.faint(clip(a.files.join(", "), ui.width() - 10))}`);
-    }
+    ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
+    for (const a of agents) if (a.files.length) print(`     ${c.accent("•")} ${c.ink(a.name)} ${c.faint(clip(a.files.join(", "), Math.max(20, ui.width() - a.name.length - 10)))}`);
     print("");
-    const go = await d.select({ title: `Start ${agents.length} agents?`, note: "edits are made without asking; commands still ask; the integration agent is read-only", options: ["Start", "Cancel"] });
-    if (go !== 0) return print(c.dim("   Cancelled."));
+    const rows = [
+      { kind: "head", label: "Builders · the lead's split, at the same time" },
+      ...agents.map((a) => ({ label: a.name, desc: a.task, on: true })),
+      { kind: "head", label: "After they finish · together" },
+      ...roles.filter((r) => r.phase === 2).map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r })),
+      { kind: "head", label: "If anything is found" },
+      ...roles.filter((r) => r.phase === 3).map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r })),
+    ];
+    const picked = await d.checklist({
+      title: "Who's on the team?", note: "edits are made without asking; other commands still ask", rows,
+      start: (items) => {
+        const b = items.filter((x) => !x.role && x.on).length, n = items.filter((x) => x.on).length;
+        return b ? `Start ${n} agent${n === 1 ? "" : "s"}` : "Pick at least one builder";
+      },
+    });
+    if (!picked) return print(c.dim("   Cancelled."));
+    const items = rows.filter((r) => r.kind !== "head");
+    items.forEach((r, i) => (r.on = picked[i]));
+    api.cfg.team = { ...(api.cfg.team || {}), roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])) };
+    api.save();
+    agents = agents.filter((a, i) => items[i].on);
+    if (!agents.length) return print(c.dim("   No builders picked, so nothing ran."));
+    const members = items.filter((r) => r.role && r.on).map((r) => r.role);
+    if (agents.length === 1 && !members.length) {
+      ui.note(`${c.accent("◆")} ${c.ink("Just one builder, so yAI does it here on its own.")}`);
+      return d.runAgent(agents[0].task === task ? task : `${task}\n\n(Your part: ${agents[0].task})`);
+    }
+    for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly, hasVerdict: r.verdict !== false });
 
-    // 2. They run; the board redraws while they work. Esc stops them all.
+    // 3. They run; the board redraws while they work. Esc stops them all.
     state.busy = true;
     state.interrupted = false;
     state.abort = new AbortController();
@@ -208,23 +296,36 @@ module.exports = function create(d) {
       }
     };
     state.abort.signal.addEventListener("abort", () => {
+      setTimeout(() => d.wake(), 0); // the members still waiting are stopped too
       for (const a of agents) { a.send?.({ type: "stop" }); setTimeout(() => a.child && a.child.exitCode === null && a.child.kill(), 3000); }
     });
     const started = Date.now();
-    // The builders start now; the integration agent waits for them, so it checks finished work, not files half-written.
-    const checker = agents.find((a) => a.integration);
-    agents.forEach((a) => (a.integration ? Object.assign(a, { state: "waiting", step: "starts when the others finish", started: Date.now(), changed: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
+    // The builders start now; the checkers wait for them, so they check finished work, not files half-written; the
+    // fixer waits for the checkers and only runs if one of them found something.
+    const ended = (a) => ENDED.includes(a.state) && !a.asks.length;
+    const phase = (n) => agents.filter((a) => (a.phase || 1) === n);
+    agents.forEach((a) => (a.role ? Object.assign(a, { state: "waiting", step: a.phase === 3 ? "if anything is found" : "after the builders", started: Date.now(), changed: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
+    const next = () => {
+      for (const n of [2, 3]) {
+        const waiting = phase(n).filter((a) => a.state === "waiting");
+        if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
+        for (const a of waiting) {
+          a.started = Date.now();
+          if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
+          else if (n === 3 && !phase(2).some((x) => BAD.test(x.verdict || "") || x.state === "failed"))
+            Object.assign(a, { state: "skipped", step: phase(2).length ? "nothing to fix" : "no checkers ran", ended: Date.now() });
+          else startAgent(a, task, agents);
+        }
+      }
+    };
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => { draw(); report(); }, 120);
         let asking = false;
         wake = async () => {
           if (over) return;
-          if (checker && checker.state === "waiting" && agents.every((a) => a.integration || (["done", "failed", "stopped"].includes(a.state) && !a.asks.length))) {
-            if (state.interrupted) { checker.state = "stopped"; checker.ended = Date.now(); }
-            else startAgent(checker, task, agents);
-          }
-          if (agents.every((a) => ["done", "failed", "stopped"].includes(a.state) && !a.asks.length)) { clearInterval(timer); draw(); over = true; return resolve(); }
+          next();
+          if (agents.every(ended)) { clearInterval(timer); draw(); over = true; return resolve(); }
           if (asking) return;
           const a = agents.find((x) => x.asks.length);
           if (!a) return;
@@ -249,27 +350,33 @@ module.exports = function create(d) {
       d.syncMute();
     }
 
-    // 3. The reports. The integration (admin) agent's verdict comes last, as the team's sign-off.
+    // 4. The reports: the builders' last lines, then each member's report whole, the fixer last.
     const cost = agents.reduce((s, a) => s + a.cost, 0);
     state.cost.session += cost;
     const files = new Set(agents.flatMap((a) => [...a.changed]));
-    const ordered = [...agents.filter((a) => !a.integration), ...agents.filter((a) => a.integration)];
+    const builders = agents.filter((a) => !a.role);
+    const crew = agents.filter((a) => a.role);
     print("");
     ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed${cost ? ` · $${cost.toFixed(3)}` : ""}`)}`);
-    for (const a of ordered) {
+    if (crew.length) print(`     ${crew.map((a) => `${c.dim(a.role)} ${a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || c.faint(a.hasVerdict ? "no verdict" : "done")}`).join(c.faint("  ·  "))}`);
+    for (const a of [...builders, ...crew]) {
+      if (a.state === "skipped") continue;
       print("");
-      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.integration ? c.dim(" (admin)") : ""} ${c.faint(a.integration ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed")}`);
+      const what = a.readOnly ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed";
+      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.verdict ? " " + verdictPill(a.verdict) : ""} ${c.faint(clip(what, Math.max(20, ui.width() - a.name.length - 16)))}`);
       const said = a.text.join("\n").trim() || a.error || "";
-      // a builder's report shows its last lines; the integration agent's verdict is shown whole (up to 40 lines), wrapped
-      const lines = said.split("\n").filter((x) => x.trim());
-      if (a.integration) for (const l of lines.slice(0, 40)) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(w)}`);
+      // a builder's report shows its last lines; the others' reports are shown whole (up to 40 lines), wrapped, without the VERDICT line
+      const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));
+      if (a.role) for (const l of lines.slice(0, 40)) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(w)}`);
       else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
     }
     print("");
     print(c.dim("   Their reports are in this conversation now: ask a follow-up, or /review to check the change as a whole."));
+    const skipped = crew.filter((a) => a.state === "skipped");
     state.pendingContext.push(
-      `I ran /team: ${agents.length - 1} agents worked on this at the same time, plus an integration (admin) agent that checked their work fits together: "${task}". Their reports:\n\n` +
-      ordered.map((a) => `## ${a.name}${a.integration ? " (integration/admin agent, read-only)" : ""} (${a.state})\nPart: ${a.task}\nFiles changed: ${a.changed.size ? [...a.changed].join(", ") : "none"}\n${(a.text.join("\n").trim() || a.error || "(no report)").slice(-3000)}`).join("\n\n") +
+      `I ran /team: ${builders.length} builder agent${builders.length === 1 ? "" : "s"} worked on this at the same time${crew.length ? `, then ${crew.map((a) => a.role).join(", ")}` : ""}: "${task}". Their reports:\n\n` +
+      agents.filter((a) => a.state !== "skipped").map((a) => `## ${a.name}${a.role ? ` (${a.readOnly ? "read-only " : ""}${a.role})` : ""} (${a.state}${a.verdict ? `, VERDICT: ${a.verdict}` : ""})\nPart: ${a.task}\nFiles changed: ${a.changed.size ? [...a.changed].join(", ") : "none"}\n${(a.text.join("\n").trim() || a.error || "(no report)").slice(-3000)}`).join("\n\n") +
+      (skipped.length ? `\n\n(${skipped.map((a) => a.role).join(", ")} didn't run: nothing to fix.)` : "") +
       "\n\nThe files may have changed since you last read them; re-read before editing.",
     );
   }
