@@ -575,6 +575,10 @@ function ruleLine() {
 
 function showPrompt() {
   if (state.printMode) return;
+  if (state.redrawWhenIdle) {
+    state.redrawWhenIdle = false;
+    redrawTranscript();
+  }
   print("");
   print(footerLine());
   print(ruleLine());
@@ -655,6 +659,21 @@ function setupReadline() {
     history = fs.readFileSync(HISTORY_FILE, "utf8").split("\n").filter(Boolean).reverse().slice(0, 300);
   } catch {}
   rl = readline.createInterface({ input: process.stdin, output: ui.rlOutput, terminal: true, history, historySize: 300, completer });
+
+  // Boxes and rules are drawn to the window's width; when it changes, everything is drawn again at the new width
+  // (2026-10-21: a narrower window wrapped every line of the start box). While yAI works, it waits until it's done.
+  let cols = process.stdout.columns, resizeTimer = null;
+  process.stdout.on("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (process.stdout.columns === cols) return;
+      cols = process.stdout.columns;
+      state.redrawWhenIdle = true;
+      if (state.busy || state.asking || state.selecting) return;
+      process.stdout.write("\r\x1b[K");
+      showPrompt();
+    }, 180);
+  });
 
   process.stdin.on("keypress", (s, key) => {
     if (state.selecting) return;
@@ -1079,7 +1098,15 @@ async function execTool(call) {
   if (!tool) return { output: `Error: unknown tool "${call.name}". Available: ${Object.keys(T.tools).join(", ")}.` };
   spinner.stop();
   try {
-    if (tool.readOnly) return { output: await tool.run(ctx, call.args) };
+    if (tool.readOnly) {
+      const doing = { read_file: "reading", list_files: "listing files", find_files: "finding files", search: "searching the files" }[call.name];
+      if (doing) spinner.start(doing);
+      try {
+        return { output: await tool.run(ctx, call.args) };
+      } finally {
+        if (doing) spinner.stop();
+      }
+    }
 
     // MCP tools: read-only ones (the server says so) run straight away; others ask first, like commands.
     if (tool.kind === "mcp") {

@@ -444,13 +444,18 @@ function choices(list, def) {
 // (model, project, context …); under the box the tips and recent sessions are printed by index.js.
 function welcome({ version, rows }) {
   const inner = width() - 3;
-  const leftW = 31;
+  // A narrower window gets a narrower left column, and each row (value + grey note) is cut to fit the box.
+  const leftW = inner >= 90 ? 31 : 24;
   const logo = `${c.ink("y")}${c.bold(c.ink("AI"))}${c.accent("•")} ${c.dim("Code")}`;
-  const left = ["", logo, c.faint(`v${version}`), c.faint("your models, your terminal"), ""];
+  const left = ["", logo, c.faint(`v${version}`), c.faint(leftW >= 31 ? "your models, your terminal" : "your terminal"), ""];
   const labelW = 9;
+  const total = Math.max(8, inner - leftW - 5 - labelW);
   const right = rows.map(([label, value, extra]) => {
-    const room = inner - leftW - 5 - labelW - (extra ? vis(extra) + 1 : 0);
-    return `${c.faint(label.padEnd(labelW))}${c.ink(middle(value, Math.max(10, room)))}${extra ? " " + extra : ""}`;
+    const v = String(value);
+    let e = extra ? stripAnsi(extra) : "";
+    if (e && vis(v) + 1 + e.length > total) e = clip(e, Math.max(0, total - Math.min(vis(v), Math.ceil(total * 0.55)) - 1));
+    if (e.length < 3) e = "";
+    return `${c.faint(label.padEnd(labelW))}${c.ink(middle(v, Math.max(4, total - (e ? e.length + 1 : 0))))}${e ? " " + c.faint(e) : ""}`;
   });
   const n = Math.max(left.length, right.length + 2);
   const top = Math.floor((n - right.length) / 2);
