@@ -472,7 +472,7 @@ function gitStatus() {
 }
 
 // How full the model's context is: the conversation and instructions against the model's window (the site
-// says how big each one is; 32k for Qwen3 Coder, about 8k for the local models), at roughly 3.6 characters a
+// says how big each one is; 32k for yAI 3 Coder, about 8k for the local models), at roughly 3.6 characters a
 // token. A big window keeps 4k tokens free for the reply itself.
 function contextChars() {
   const m = state.models.find((x) => x.id === state.model);
@@ -703,7 +703,7 @@ async function loadModels() {
   const data = await api.models();
   state.models = data.models || [];
   state.localOffline = !!data.localOffline;
-  // A /model pick is remembered; picks saved before Qwen3 Coder became the default are dropped once.
+  // A /model pick is remembered; picks saved before yAI 3 Coder (Qwen3 Coder) became the default are dropped once.
   const saved = api.cfg.modelPicked === 2 ? api.cfg.model : undefined;
   if (!state.models.some((m) => m.id === state.model)) {
     state.model = state.models.find((m) => m.id === saved)?.id || data.default || state.models.find((m) => /cloud/.test(m.id))?.id || state.models[0]?.id || "";
@@ -1099,7 +1099,7 @@ async function runAgent(content) {
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
       if (!call) {
         // "Now I'll create the CSS file:" and then nothing: the model said what it would do and ended its reply
-        // without the tool call (Qwen3 Coder does this a lot). Push it on, at most twice per request.
+        // without the tool call (yAI 3 Coder does this a lot). Push it on, at most twice per request.
         if (announcesStep(text) && nudges < 2) {
           nudges++;
           ui.note(c.dim("· it stopped before the step it described · continuing"));

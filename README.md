@@ -8,8 +8,8 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 | Model | Where it runs | Speed |
 |---|---|---|
 | **Qwen 3.8 27B** (FP8, reads images) | Modal serverless vLLM, 48 GB L40S | ~34 tokens/s |
-| **Qwen3 Coder 30B** (yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S | not measured yet (only 3B of its 30B parameters work on each token) |
-| Qwen 3.5 4B, Phi 4 Mini, Qwen 3.5 2B (website only) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
+| **yAI 3 Coder** (Qwen3 Coder 30B; yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S | not measured yet (only 3B of its 30B parameters work on each token) |
+| yAI Q3.5 (Qwen 3.5 4B Uncensored) and yAI P4 (Phi 4 Mini) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
 | **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
 | **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
 
@@ -59,7 +59,7 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 
 ### yAI Code (terminal agent)
 
-A Claude Code–style agent for the terminal that uses the same models as the site, plus **Qwen3 Coder 30B**, which only yAI Code can use and is its default. yAI Code offers Qwen3 Coder 30B, Qwen 3.8 27B, Qwen 3.5 4B and Phi 4 Mini. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
+A Claude Code–style agent for the terminal that uses the same models as the site, plus **yAI 3 Coder** (Qwen3 Coder 30B), which only yAI Code can use and is its default. yAI Code offers yAI 3 Coder, yAI Ultra, Qwen 3.8 27B Max, yAI Q3.5 and yAI P4. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
 
 ```powershell
 cd path\to\yAI
@@ -71,7 +71,7 @@ yai
 - `/model` switch model · `/mode` or **shift+tab** cycle ask / accept edits / plan (read-only) · `/clear` · `/compact` · `/init` (writes YAI.md) · `/status` · `/login` · `/logout`
 - `/fix [cmd]` runs the tests and lets yAI fix them until they pass (`/fix watch` reruns them on every save) · `/review` has a second model review your uncommitted changes · `/commit` writes the message and commits
 - `/look [url|file]` screenshots the page (desktop and phone) for a design review by the vision model · `@mockup.png build this` describes an image so the coder can build it · `/showcase` records a demo video of the page (Chrome + ffmpeg)
-- `/duo`: Qwen 3.8 27B plans each request and reviews the change, Qwen3 Coder writes it · `/tutor`: hints and explanations instead of finished solutions · `/share` publishes the session at an unlisted link (`/share?id=…` on the site)
+- `/duo`: Qwen 3.8 27B plans each request and reviews the change, yAI 3 Coder writes it · `/tutor`: hints and explanations instead of finished solutions · `/share` publishes the session at an unlisted link (`/share?id=…` on the site)
 - `/theme` picks a look (yAI Dark, the default, and yAI Light from the redesign; Midnight, Classic Blue, Paper, Amber) · `/undo` reverts yAI's last edit · `/resume` continues the last conversation · `/plan` read-only planning
 - `/bench [model]` runs the coding benchmark (6 tasks, 44 tests, a fresh session and 5 minutes per task) and adds the score to the arena leaderboard
 - **Web**: yAI can `web_search` and `web_fetch` pages (including your own dev server on localhost)
@@ -115,10 +115,10 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `LMSTUDIO_URL`, `BRIDGE_TOKEN` | Tunnel URL + `/v1`, and the shared secret for the bridge |
 | `RUNPOD_API_KEY` | RunPod API key for the cloud endpoints |
 | `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B as `qwen3.8-27b-cloud` |
-| `RUNPOD_CODER_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen3 Coder 30B as `qwen3-coder` (yAI Code only; the website lists it greyed out) |
+| `RUNPOD_CODER_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen3 Coder 30B (shown as yAI 3 Coder) as `qwen3-coder` (yAI Code only; the website lists it greyed out) |
 | `RUNPOD_CODER_CONTEXT` | Optional: the coder endpoint's `MAX_MODEL_LEN` if it isn't 32768, so yAI Code sizes conversations to it |
 | `MODAL_API_KEY` | The key the Modal chat servers check (the `VLLM_API_KEY` in the `yai-vllm` Modal secret) |
-| `MODAL_CODER_URL` | Modal URL of the coder server (`modal deploy modal/llm.py` prints it); when set, Qwen3 Coder runs on Modal instead of RunPod |
+| `MODAL_CODER_URL` | Modal URL of the coder server (`modal deploy modal/llm.py` prints it); when set, yAI 3 Coder runs on Modal instead of RunPod |
 | `MODAL_MAX_URL` | Modal URL of the Qwen 3.8 27B server; when set, it runs on Modal instead of RunPod |
 | `MODAL_ULTRA_URL` | Modal shared endpoint for yAI Ultra (Kimi K3, billed per token, no cold start) |
 | `MODAL_ULTRA_KEY` | Its proxy token, as `wk-….ws-…` (sent as a Bearer token) |

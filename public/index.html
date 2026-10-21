@@ -662,7 +662,7 @@
         if (!data.models.length) { setStatus(false, "No model loaded"); return true; }
         const current = modelSel.value;
         modelSel.innerHTML = "";
-        // Every visit starts on the default model (Qwen 3.5 4B); a switch lasts until the page is closed.
+        // Every visit starts on the default model (yAI Q3.5); a switch lasts until the page is closed.
         const preferred = current || data.default;
         for (const m of data.models) {
           // Code-only models are listed so people know they exist, but can't be picked here.
