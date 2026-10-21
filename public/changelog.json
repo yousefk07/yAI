@@ -1,21 +1,77 @@
 {
   "releases": [
     {
+      "version": "1.0.77",
+      "date": "2026-10-21",
+      "title": "yAI Ultra Flash",
+      "items": [
+        {
+          "area": "Models",
+          "title": "yAI Ultra Flash",
+          "text": "DeepSeek V4.1 Flash: fast, reads images, no GPU to wake, and about a tenth of yAI Ultra's price per word. It shares yAI Ultra's daily allowance, so the same dollars go about ten times further."
+        }
+      ]
+    },
+    {
       "version": "1.0.73",
       "date": "2026-10-20",
       "title": "Voice, canvas, study and more",
       "items": [
-        { "area": "Chat", "title": "Voice mode", "text": "Speak instead of typing with the mic, press Listen under any answer, or start a hands-free voice chat. Natural voices when the site has them, your browser's voice otherwise." },
-        { "area": "Chat", "title": "Canvas", "text": "Long writing and code open in an editor beside the chat. Edit by hand, select a part and ask yAI to change it, step through versions, and run HTML, JavaScript and Python live." },
-        { "area": "Chat", "title": "Search your chats", "text": "Ctrl K (⌘K on a Mac) searches every chat's messages, and jumps to the exact message. New chat moved to Ctrl Shift O." },
-        { "area": "Study", "title": "Study mode", "text": "A tutor that gives hints and asks questions instead of handing over answers (Tools > Study mode), plus a Study page with flashcards (spaced repetition) and practice quizzes made from your notes, PDFs or chats." },
-        { "area": "Chat", "title": "Calendar and email", "text": "Connect Google to ask about your week and your inbox. yAI suggests Gmail drafts and calendar events; nothing is saved until you press the button." },
-        { "area": "Images", "title": "Better image editing", "text": "An Edit button on every image yAI makes, one-tap ideas (remove the background, watercolor, winter...), and a before/after slider." },
-        { "area": "App", "title": "Install yAI as an app", "text": "Account menu > Install the app (or Add to Home Screen on an iPhone). It opens full screen with its own icon." },
-        { "area": "Developers", "title": "Public API keys", "text": "Call yAI's models from your own code with an OpenAI-style API at /v1, under your own daily limits. Keys are on the API keys page." },
-        { "area": "yAI Code", "title": "VS Code extension, /resume, plan approval", "text": "yAI Code in a VS Code side panel with changes shown as diffs; /resume picks any earlier session; plan mode ends with a plan you approve." },
-        { "area": "yAI Code", "title": "Live cost, /compact, image to code, run from your phone", "text": "The status line shows what yAI Ultra has cost this session and today; /compact takes a focus; /clone rebuilds a page from a screenshot; yai remote takes tasks from your phone." },
-        { "area": "Admins", "title": "People and limits", "text": "Admins see everyone's use, change each person's daily limits, pause accounts, and get automatic flags for unusual use." }
+        {
+          "area": "Chat",
+          "title": "Voice mode",
+          "text": "Speak instead of typing with the mic, press Listen under any answer, or start a hands-free voice chat. Natural voices when the site has them, your browser's voice otherwise."
+        },
+        {
+          "area": "Chat",
+          "title": "Canvas",
+          "text": "Long writing and code open in an editor beside the chat. Edit by hand, select a part and ask yAI to change it, step through versions, and run HTML, JavaScript and Python live."
+        },
+        {
+          "area": "Chat",
+          "title": "Search your chats",
+          "text": "Ctrl K (⌘K on a Mac) searches every chat's messages, and jumps to the exact message. New chat moved to Ctrl Shift O."
+        },
+        {
+          "area": "Study",
+          "title": "Study mode",
+          "text": "A tutor that gives hints and asks questions instead of handing over answers (Tools > Study mode), plus a Study page with flashcards (spaced repetition) and practice quizzes made from your notes, PDFs or chats."
+        },
+        {
+          "area": "Chat",
+          "title": "Calendar and email",
+          "text": "Connect Google to ask about your week and your inbox. yAI suggests Gmail drafts and calendar events; nothing is saved until you press the button."
+        },
+        {
+          "area": "Images",
+          "title": "Better image editing",
+          "text": "An Edit button on every image yAI makes, one-tap ideas (remove the background, watercolor, winter...), and a before/after slider."
+        },
+        {
+          "area": "App",
+          "title": "Install yAI as an app",
+          "text": "Account menu > Install the app (or Add to Home Screen on an iPhone). It opens full screen with its own icon."
+        },
+        {
+          "area": "Developers",
+          "title": "Public API keys",
+          "text": "Call yAI's models from your own code with an OpenAI-style API at /v1, under your own daily limits. Keys are on the API keys page."
+        },
+        {
+          "area": "yAI Code",
+          "title": "VS Code extension, /resume, plan approval",
+          "text": "yAI Code in a VS Code side panel with changes shown as diffs; /resume picks any earlier session; plan mode ends with a plan you approve."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Live cost, /compact, image to code, run from your phone",
+          "text": "The status line shows what yAI Ultra has cost this session and today; /compact takes a focus; /clone rebuilds a page from a screenshot; yai remote takes tasks from your phone."
+        },
+        {
+          "area": "Admins",
+          "title": "People and limits",
+          "text": "Admins see everyone's use, change each person's daily limits, pause accounts, and get automatic flags for unusual use."
+        }
       ]
     },
     {
@@ -23,10 +79,26 @@
       "date": "2026-10-20",
       "title": "Data analysis, deep research and memory",
       "items": [
-        { "area": "Chat", "title": "Data analysis", "text": "Attach a CSV, Excel or JSON file; Python runs in your browser and the charts show in the chat." },
-        { "area": "Chat", "title": "Deep research", "text": "Several rounds of searching and reading, then a report with sources." },
-        { "area": "Chat", "title": "Memory", "text": "yAI remembers lasting facts you tell it; edit them in Account > Memory." },
-        { "area": "yAI Code", "title": "Paste screenshots and /usage", "text": "Alt+V pastes a screenshot into the prompt; /usage shows today's limits." }
+        {
+          "area": "Chat",
+          "title": "Data analysis",
+          "text": "Attach a CSV, Excel or JSON file; Python runs in your browser and the charts show in the chat."
+        },
+        {
+          "area": "Chat",
+          "title": "Deep research",
+          "text": "Several rounds of searching and reading, then a report with sources."
+        },
+        {
+          "area": "Chat",
+          "title": "Memory",
+          "text": "yAI remembers lasting facts you tell it; edit them in Account > Memory."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Paste screenshots and /usage",
+          "text": "Alt+V pastes a screenshot into the prompt; /usage shows today's limits."
+        }
       ]
     },
     {
@@ -34,9 +106,21 @@
       "date": "2026-10-20",
       "title": "The redesign",
       "items": [
-        { "area": "Website", "title": "A new look", "text": "New colours and type, a sidebar that folds into a rail, and new arena and usage pages." },
-        { "area": "yAI Code", "title": "yAI Code redesign", "text": "Dark and light themes, a start screen, step rows, diffs and arrow-key approvals." },
-        { "area": "Models", "title": "New model names", "text": "yAI Ultra, yAI Q3.8 Max, yAI 3 Coder, yAI Q3.5 and yAI P4." }
+        {
+          "area": "Website",
+          "title": "A new look",
+          "text": "New colours and type, a sidebar that folds into a rail, and new arena and usage pages."
+        },
+        {
+          "area": "yAI Code",
+          "title": "yAI Code redesign",
+          "text": "Dark and light themes, a start screen, step rows, diffs and arrow-key approvals."
+        },
+        {
+          "area": "Models",
+          "title": "New model names",
+          "text": "yAI Ultra, yAI Q3.8 Max, yAI 3 Coder, yAI Q3.5 and yAI P4."
+        }
       ]
     },
     {
@@ -44,10 +128,26 @@
       "date": "2026-10-20",
       "title": "Search with sources, Projects, previews",
       "items": [
-        { "area": "Chat", "title": "Search the web", "text": "Answers with numbered sources." },
-        { "area": "Chat", "title": "Projects", "text": "Files and instructions shared by every chat in a project." },
-        { "area": "Chat", "title": "Live previews", "text": "Run the HTML and JavaScript yAI writes, right in the chat." },
-        { "area": "Website", "title": "Model arena and usage page", "text": "Compare models blind, and see what you've used." }
+        {
+          "area": "Chat",
+          "title": "Search the web",
+          "text": "Answers with numbered sources."
+        },
+        {
+          "area": "Chat",
+          "title": "Projects",
+          "text": "Files and instructions shared by every chat in a project."
+        },
+        {
+          "area": "Chat",
+          "title": "Live previews",
+          "text": "Run the HTML and JavaScript yAI writes, right in the chat."
+        },
+        {
+          "area": "Website",
+          "title": "Model arena and usage page",
+          "text": "Compare models blind, and see what you've used."
+        }
       ]
     }
   ]

@@ -339,7 +339,7 @@ function showHelp() {
 const padVis = (s, n) => s + " ".repeat(Math.max(0, n - ui.stripAnsi(s).length));
 
 // ---------- /model: a table to pick from ----------
-const SPEED = { "kimi-k3-ultra": "~48 tok/s", "qwen3.8-27b-cloud": "~34 tok/s", "qwen3-coder-30b-cloud": "~60 tok/s" };
+const SPEED = { "kimi-k3-ultra": "~48 tok/s", "deepseek-v4.1-flash": "fast", "qwen3.8-27b-cloud": "~34 tok/s", "qwen3-coder-30b-cloud": "~60 tok/s" };
 async function modelPicker() {
   let ultraLeft = "";
   try {
@@ -350,7 +350,7 @@ async function modelPicker() {
   const rowOf = (m) => {
     const where = m.price || m.id === "kimi-k3-ultra" ? "hosted" : m.cloud || /cloud/.test(m.id) ? "cloud GPU" : "your PC";
     const ctx = m.context ? `${Math.round(m.context / 1000)}k` : "8k";
-    const cost = m.id === "kimi-k3-ultra" ? ultraLeft || "daily limit" : "free";
+    const cost = m.price ? ultraLeft || "daily limit" : "free";
     const name = ui.middle(m.label, W.name - (m.id === state.model ? 10 : 1)) + (m.id === state.model ? " (current)" : "");
     return `${name.padEnd(W.name)}${where.padEnd(W.where)}${ctx.padEnd(W.ctx)}${(SPEED[m.id] || (where === "your PC" ? "~120 tok/s" : "—")).padEnd(W.speed)}${cost}`;
   };
@@ -1493,7 +1493,7 @@ async function chooseTheme(arg) {
 function welcomeRows() {
   const git = gitStatus();
   const cur = state.models.find((m) => m.id === state.model);
-  const where = !cur ? "" : cur.id === "kimi-k3-ultra" ? "hosted" : cur.cloud || /cloud/.test(cur.id) ? "cloud GPU" : "your PC";
+  const where = !cur ? "" : cur.price ? "hosted" : cur.cloud || /cloud/.test(cur.id) ? "cloud GPU" : "your PC";
   const rows = [["model", modelLabel(), cur ? c.faint(`· ${where} · ${Math.round((cur.context || 8192) / 1000)}k context`) : ""]];
   rows.push(["project", shortPath(root), git ? c.faint(`· ${git.branch}${git.modified ? ` · ${git.modified} modified` : ""}`) : ""]);
   const notes = ["YAI.md", "CLAUDE.md", "AGENTS.md"].find((n) => fs.existsSync(path.join(root, n)));

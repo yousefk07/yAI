@@ -159,6 +159,8 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `MODAL_MAX_URL` | Modal URL of the Qwen 3.8 27B server; when set, it runs on Modal instead of RunPod |
 | `MODAL_ULTRA_URL` | Modal shared endpoint for yAI Ultra (Kimi K3, billed per token, no cold start) |
 | `MODAL_ULTRA_KEY` | Its proxy token, as `wk-….ws-…` (sent as a Bearer token) |
+| `MODAL_FLASH_URL` | Modal shared endpoint for yAI Ultra Flash (DeepSeek V4.1 Flash, billed per token, shares yAI Ultra's daily allowance) |
+| `MODAL_FLASH_KEY` | Optional: its proxy token, if not the same as `MODAL_ULTRA_KEY` |
 | `ULTRA_DAILY_USD` | Optional: how much yAI Ultra each person can use per day (default 2) |
 | `ULTRA_STREAM` | Optional: `0` asks yAI Ultra for whole replies instead of streaming them |
 | `BRAVE_API_KEY` / `TAVILY_API_KEY` | Optional: a search API for "Search the web" and yAI Code's web_search (without one, DuckDuckGo's HTML page is used) |
