@@ -1531,6 +1531,16 @@ async function execTool(call) {
       return { output: `The user answered:\n${lines.join("\n")}` };
     }
 
+    // /team's integration checker is read-only, but it may run checks that change nothing (a syntax check, the tests,
+    // a linter) without asking: one plain command, judged read-only by the same rules as the approval cards.
+    if (process.env.YAI_REPORT_ONLY && tool.kind === "run") {
+      const command = String(call.args.command || "").trim();
+      if (command && !/[;&|`><]|\$\(/.test(command) && LOOK.riskOf(command).tag === "read-only" && String(call.args.background || "").trim() !== "true") {
+        ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command);
+        return { output: await T.execRun(ctx, call.args, state.abort.signal) };
+      }
+    }
+
     if (state.mode === "plan" || (state.printMode && !state.allowEdits)) {
       ui.toolHeader(tool.kind === "run" ? "Shell" : "Edit", call.args.path || call.args.command || "");
       ui.toolResult(state.printMode ? "Not allowed here (read-only)" : "Skipped: plan mode is on", { color: c.yellow });

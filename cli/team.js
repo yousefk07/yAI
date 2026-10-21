@@ -24,6 +24,15 @@ module.exports = function create(d) {
   const { state, root, api, ui, X } = d;
   const { c, print, spinner } = ui;
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  const wrapText = (s, n) => {
+    const out = [];
+    let line = "";
+    for (const w of String(s).split(/\s+/)) {
+      if (line && (line + " " + w).length > n) { out.push(line); line = w; } else line = line ? line + " " + w : w;
+    }
+    if (line) out.push(line);
+    return out;
+  };
   const secs = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, "0")}s`);
 
   function projectFiles() {
@@ -75,6 +84,7 @@ module.exports = function create(d) {
       ...workers.map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`),
       "",
       "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
+      "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.",
       "",
       "Don't commit, push or change git history, and don't start servers that keep running.",
       "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
@@ -250,7 +260,10 @@ module.exports = function create(d) {
       print("");
       print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.integration ? c.dim(" (admin)") : ""} ${c.faint(a.integration ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed")}`);
       const said = a.text.join("\n").trim() || a.error || "";
-      for (const l of said.split("\n").filter((x) => x.trim()).slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
+      // a builder's report shows its last lines; the integration agent's verdict is shown whole (up to 40 lines), wrapped
+      const lines = said.split("\n").filter((x) => x.trim());
+      if (a.integration) for (const l of lines.slice(0, 40)) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(w)}`);
+      else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
     }
     print("");
     print(c.dim("   Their reports are in this conversation now: ask a follow-up, or /review to check the change as a whole."));
