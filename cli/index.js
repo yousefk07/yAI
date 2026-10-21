@@ -35,6 +35,7 @@ const SAFE_COMMANDS = /^(git (status|diff|log|show|branch)|ls|dir|pwd|cat|type|G
 const root = path.resolve(process.cwd());
 const ctx = T.makeContext(root);
 const state = {
+  pasted: [], // clipboard images pasted this session: [image N] is pasted[N - 1]
   user: null,
   models: [],
   model: "",
@@ -287,12 +288,12 @@ function select(opts) {
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
   ["Session", [["/clear", "start a new conversation"], ["/resume", "continue the last one here"], ["/compact", "summarise to free context"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
-  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"]]],
+  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
   ["Look & make", [["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
   ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"]]],
   ["Account", [["/login", "sign in to yAI"], ["/logout", "sign out"], ["/theme", "colours"], ["/config url", "use another yAI site"], ["/exit", "quit"]]],
-  ["Keys", [["@", "mention a file or folder"], ["!", "run a shell command"], ["shift+tab", "cycle the approval mode"], ["esc", "interrupt yAI"]]],
+  ["Keys", [["@", "mention a file or folder"], ["!", "run a shell command"], ["alt+v", "paste a screenshot"], ["shift+tab", "cycle the approval mode"], ["esc", "interrupt yAI"]]],
 ];
 function showHelp() {
   const inner = ui.width() - 3;
@@ -637,6 +638,8 @@ function setupReadline() {
         state.interrupted = true;
         state.abort.abort();
       }
+    } else if (key.name === "v" && (key.ctrl || key.meta) && !state.busy && !state.asking) {
+      pasteImage();
     } else if (key.name === "tab" && key.shift && !state.busy && !state.asking) {
       setMode(MODES[(MODES.indexOf(state.mode) + 1) % MODES.length]);
     }
@@ -1216,6 +1219,94 @@ async function runAgent(content) {
   }
 }
 
+// ---------- Pasted screenshots (2026-10-20): Ctrl+V / Alt+V / /paste put the clipboard image in the prompt ----------
+// The image is saved under ~/.yai/clipboard and stands in the prompt as [image N]; on send, a model that can see
+// (yAI Ultra first) describes it, like an @image mention.
+const CLIP_DIR = path.join(os.homedir(), ".yai", "clipboard");
+function clipboardImage() {
+  fs.mkdirSync(CLIP_DIR, { recursive: true });
+  const out = path.join(CLIP_DIR, `paste-${Date.now()}.png`);
+  const run = (cmd, args, opts = {}) => require("child_process").spawnSync(cmd, args, { timeout: 8000, windowsHide: true, ...opts });
+  if (process.platform === "win32") {
+    const ps = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $i=[System.Windows.Forms.Clipboard]::GetImage(); if ($i) { $i.Save('${out.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png); 'ok' }`;
+    run("powershell.exe", ["-NoProfile", "-STA", "-Command", ps]);
+  } else if (process.platform === "darwin") {
+    run("osascript", ["-e", `set f to open for access POSIX file "${out}" with write permission`, "-e", "try", "-e", "write (the clipboard as «class PNGf») to f", "-e", "end try", "-e", "close access f"]);
+  } else {
+    const r = run("wl-paste", ["--type", "image/png"], { maxBuffer: 40e6 });
+    const buf = r.status === 0 && r.stdout?.length ? r.stdout : run("xclip", ["-selection", "clipboard", "-t", "image/png", "-o"], { maxBuffer: 40e6 }).stdout;
+    if (buf?.length) fs.writeFileSync(out, buf);
+  }
+  try {
+    if (fs.statSync(out).size > 0) return out;
+    fs.unlinkSync(out);
+  } catch {}
+  return null;
+}
+function pasteImage({ fromCommand = false } = {}) {
+  const file = clipboardImage();
+  if (!file) {
+    if (fromCommand) return print(c.yellow("   There's no image on the clipboard. Copy a screenshot first (Win+Shift+S on Windows), then Alt+V."));
+    process.stdout.write(`\r\x1b[K${c.faint("   no image on the clipboard")}\n`);
+    return rl.prompt(true);
+  }
+  state.pasted.push(file);
+  const token = `[image ${state.pasted.length}] `;
+  if (fromCommand) {
+    // /paste: the token goes into the next prompt, ready to type the question after it.
+    print(`   ${c.accent("▣")} ${c.ink(`image ${state.pasted.length}`)} ${c.dim("pasted · ask about it after the tag")}`);
+    return setImmediate(() => rl.write(token));
+  }
+  rl.write(token);
+}
+
+// ---------- /usage: today against the limits, the last 30 days (the website's usage page, in the terminal) ----------
+async function usageCommand() {
+  let u;
+  try {
+    const r = await fetch(`${api.baseUrl()}/api/hub?op=usage`, { headers: { Cookie: api.cfg.cookie || "", "User-Agent": "yai-code/1.0" } });
+    u = await r.json();
+    if (!r.ok) throw new Error(u.error || `error ${r.status}`);
+  } catch (err) {
+    return print(c.yellow(`   Couldn't load your usage: ${err.message}`));
+  }
+  const t = u.today;
+  const day = u.days[u.days.length - 1] || {};
+  const month = {};
+  for (const d of u.days) for (const [k, v] of Object.entries(d)) if (k !== "day") month[k] = (month[k] || 0) + v;
+  const num = (n) => Number(n || 0).toLocaleString("en-US");
+  const short = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n || 0));
+  const inner = Math.min(ui.width() - 3, 96);
+  const barW = Math.max(10, Math.min(28, inner - 52));
+  const bar = (used, limit) => {
+    if (!limit) return c.faint("no limit");
+    const f = Math.min(1, used / limit);
+    const n = Math.round(f * barW);
+    const fill = f >= 0.8 ? c.accent : c.ink;
+    return fill("█".repeat(n)) + c.line("░".repeat(barW - n));
+  };
+  const row = (label, value, used, limit, note) =>
+    ` ${c.dim(label.padEnd(16))}${c.bold(c.ink(value.padEnd(16)))}${bar(used, limit)}  ${c.faint(note || "")}`;
+  const hrs = Math.max(0, Math.round((new Date(t.resetsAt) - Date.now()) / 3600000));
+  const msgs = (d) => (d.messages || 0) + (d.codeMessages || 0);
+  const rows = [
+    ` ${c.bold(c.ink("Your usage"))} ${c.dim(`· ${u.user}${t.admin ? " · admin, no media limits" : ""}`)}${" ".repeat(Math.max(2, inner - 40 - u.user.length))}${c.faint(`resets in ${hrs} h`)}`,
+    "",
+    row("Messages", num(msgs(day)), 0, 0, day.codeMessages ? `${num(day.codeMessages)} in yAI Code` : ""),
+    row("yAI Ultra", `$${t.ultra.spentUsd.toFixed(2)} of $${t.ultra.limitUsd}`, t.ultra.spentUsd, t.ultra.limitUsd, `$${Math.max(0, t.ultra.limitUsd - t.ultra.spentUsd).toFixed(2)} left`),
+    row("Images", t.images.limit ? `${t.images.used} of ${t.images.limit}` : String(t.images.used), t.images.used, t.images.limit),
+    row("Videos", t.videos.limit ? `${t.videos.used} of ${t.videos.limit}` : String(t.videos.used), t.videos.used, t.videos.limit),
+    row("Web searches", `${t.searches.used} of ${t.searches.limit}`, t.searches.used, t.searches.limit),
+    "",
+    ` ${c.faint("Last 30 days")}  ${c.ink(num(msgs(month)))} ${c.dim("messages")}  ${c.ink(short((month.tokensIn || 0) + (month.tokensOut || 0)))} ${c.dim("tokens")}  ${c.ink(num(month.images))} ${c.dim("images")}  ${c.ink(num(month.searches))} ${c.dim("searches")}  ${c.ink(`$${((month.ultraMicros || 0) / 1e6).toFixed(2)}`)} ${c.dim("on Ultra")}`,
+  ];
+  const models = Object.entries(month).filter(([k]) => k.startsWith("m:")).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  if (models.length) rows.push(` ${c.faint("Models")}        ${models.map(([k, v]) => `${c.ink(k.slice(2))} ${c.dim(num(v))}`).join(c.faint("  ·  "))}`);
+  rows.push("", ` ${c.faint("Full history: ")}${c.dim(api.baseUrl() + "/usage")}`);
+  print("");
+  ui.frame(rows, { indent: 1, inner });
+}
+
 // ---------- @file mentions and !commands ----------
 async function expandMentions(text) {
   const extra = [];
@@ -1253,6 +1344,10 @@ async function expandMentions(text) {
     ui.toolHeader("Read", relPath(abs));
     ui.toolResult(`Read ${lines.length} line${lines.length === 1 ? "" : "s"}`);
   }
+  for (const m of text.matchAll(/\[image (\d+)\]/g)) {
+    const file = state.pasted[Number(m[1]) - 1];
+    if (file && fs.existsSync(file) && !images.includes(file)) images.push(file);
+  }
   // Images: a model that can see describes them, since the coder can't ("@mockup.png build this").
   if (images.length) extra.push(...(await X.describeImages(images)));
   return extra.length ? `${text}\n\n${extra.join("\n\n")}` : text;
@@ -1284,6 +1379,8 @@ const HELP = [
   ["/compact", "Summarize the conversation to free up context"],
   ["/init", "Write a YAI.md with notes about this project"],
   ["/status", "Account, model, folder and usage"],
+  ["/usage", "Today's use against the limits (Ultra $, images, videos, searches) and the last 30 days"],
+  ["/paste", "Paste the clipboard image into the prompt as [image N] (or Alt+V / Ctrl+V)"],
   ["/login, /logout", "Sign in or out of your yAI account"],
   ["/plan", "Think first: read-only planning mode"],
   ["/undo", "Revert the last edit yAI made (not commands)"],
@@ -1306,7 +1403,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -1662,6 +1759,10 @@ async function command(line) {
       return mcpCommand(arg);
     case "/web":
       return webCommand(arg);
+    case "/usage":
+      return usageCommand();
+    case "/paste":
+      return pasteImage({ fromCommand: true });
     case "/tasks":
       return tasksCommand(arg);
     case "/undo":

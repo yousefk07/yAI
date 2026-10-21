@@ -25,6 +25,13 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
   scanned PDFs fall back to rendering their pages as images
 - **Search the web**: the Search button looks the question up, reads the top pages and answers with numbered
   sources ([1], [2]) that link to them
+- **Deep research**: the Research button plans 3–4 searches, reads ~15 sources over two rounds (the second fills gaps)
+  and yAI Ultra writes a report with numbered citations; the steps show while it works
+- **Data analysis**: attach a CSV, TSV, Excel or JSON file and ask about it. It loads into pandas in your browser
+  (Pyodide, nothing uploaded), the model writes Python, it runs there, and charts and output show under the answer
+  before the model explains them. Python blocks also get a Run button
+- **Memory**: yAI saves lasting facts you mention (your course, your stack) and uses them in later chats; see, add,
+  delete or turn it off under account menu → Memory
 - **Projects**: files (PDFs, notes, code) and instructions kept together; every chat started in a project gets them
 - **Live previews**: HTML, SVG and JavaScript in an answer run in a sandboxed panel (the answer's CSS and JS blocks included)
 - **Model arena** (`/arena`): one question, two anonymous models side by side, a vote, an Elo leaderboard, and the
@@ -75,6 +82,8 @@ yai
 - `/theme` picks a look (yAI Dark, the default, and yAI Light from the redesign; Midnight, Classic Blue, Paper, Amber) and redraws the conversation in it · `/undo` reverts yAI's last edit · `/resume` continues the last conversation · `/plan` read-only planning
 - `/bench [model]` runs the coding benchmark (6 tasks, 44 tests, a fresh session and 5 minutes per task) and adds the score to the arena leaderboard
 - **Web**: yAI can `web_search` and `web_fetch` pages (including your own dev server on localhost) · `/web <question>` searches and answers from the results with [n] sources
+- **Screenshots**: Alt+V (or Ctrl+V, or `/paste`) puts the clipboard image in the prompt as `[image N]`; yAI Ultra looks at it
+- **Usage**: `/usage` shows today against the limits (Ultra $, images, videos, searches) and the last 30 days
 - **Background tasks**: dev servers and watchers run in the background (`task_output`, `task_stop`); `/tasks` lists them, and they stop when yAI exits
 - **MCP**: `/mcp add <name> <command>` (or a URL) adds a server; project servers in `.mcp.json` (Claude Code's format) start after you OK them; tools that aren't marked read-only ask first
 - `/image [16:9] [@photo.jpg] prompt` and `/video [16:9] prompt` make images and videos into `yai-media/`
