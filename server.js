@@ -36,6 +36,9 @@ const ROUTES = {
   "PUT /api/hub": handleHub,
   "POST /api/hub": handleHub,
   "DELETE /api/hub": handleHub,
+  // the public API (vercel.json rewrites these to /api/chat and /api/models)
+  "POST /v1/chat/completions": require("./api/chat"),
+  "GET /v1/models": require("./api/models"),
 };
 
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -45,6 +48,11 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".mp4": "video/mp4",
+  ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
 };
 
 function serveStatic(req, res) {

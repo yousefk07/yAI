@@ -29,7 +29,49 @@
       "maxDuration": 15
     },
     "api/hub.js": {
-      "maxDuration": 30
+      "maxDuration": 120
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/v1/chat/completions",
+      "destination": "/api/chat"
+    },
+    {
+      "source": "/v1/models",
+      "destination": "/api/models"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/v1/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Authorization, Content-Type"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
+    }
+  ]
 }
