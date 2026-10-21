@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.109",
+      "date": "2026-10-21",
+      "title": "Previews that work",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Live previews no longer stop at \"Script error\"",
+          "text": "Code that saves data (localStorage) or uses cookies now runs in the preview, the way it does when opened in the browser. Errors from scripts loaded from the big CDNs show the real message and line instead of \"Script error.\"."
+        }
+      ]
+    },
+    {
       "version": "1.0.108",
       "date": "2026-10-21",
       "title": "A more honest team",

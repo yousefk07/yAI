@@ -1814,8 +1814,15 @@
     // ---------- Live previews of web code in answers ----------
     // HTML (with the answer's CSS and JS blocks added), SVG, or plain JavaScript runs in a sandboxed frame:
     // no same-origin access, so it can't reach this site, its cookies or the account. console output is shown in the frame.
-    const CONSOLE_SHIM = `<script>(function(){var box;function show(kind,args){if(!box){box=document.createElement("pre");box.style.cssText="position:fixed;left:0;right:0;bottom:0;max-height:45%;overflow:auto;margin:0;padding:8px 12px;font:12px/1.5 ui-monospace,Consolas,monospace;background:#151514;color:#e8e7e2;border-top:1px solid #333;z-index:2147483647;white-space:pre-wrap";}if(!box.isConnected&&document.body)document.body.appendChild(box);var line=document.createElement("div");if(kind==="error")line.style.color="#ff8f7d";if(kind==="warn")line.style.color="#f2c46d";line.textContent=Array.prototype.map.call(args,function(a){if(a instanceof Error)return a.message;try{return typeof a==="object"?JSON.stringify(a):String(a)}catch(e){return String(a)}}).join(" ");box.appendChild(line);}["log","info","warn","error"].forEach(function(k){var o=console[k];console[k]=function(){show(k,arguments);o.apply(console,arguments)}});addEventListener("error",function(e){show("error",[e.message])});addEventListener("DOMContentLoaded",function(){if(box&&!box.isConnected)document.body.appendChild(box)})})()<\/script>`;
+    const CONSOLE_SHIM = `<script>(function(){function mem(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}});try{document.cookie}catch(e){var jar={};try{Object.defineProperty(document,"cookie",{get:function(){return Object.keys(jar).map(function(k){return k+"="+jar[k]}).join("; ")},set:function(v){var p=String(v).split(";")[0],i=p.indexOf("=");if(i>0)jar[p.slice(0,i).trim()]=p.slice(i+1)},configurable:true})}catch(e2){}}})();(function(){var box;function show(kind,args){if(!box){box=document.createElement("pre");box.style.cssText="position:fixed;left:0;right:0;bottom:0;max-height:45%;overflow:auto;margin:0;padding:8px 12px;font:12px/1.5 ui-monospace,Consolas,monospace;background:#151514;color:#e8e7e2;border-top:1px solid #333;z-index:2147483647;white-space:pre-wrap";}if(!box.isConnected&&document.body)document.body.appendChild(box);var line=document.createElement("div");if(kind==="error")line.style.color="#ff8f7d";if(kind==="warn")line.style.color="#f2c46d";line.textContent=Array.prototype.map.call(args,function(a){if(a instanceof Error)return a.message;try{return typeof a==="object"?JSON.stringify(a):String(a)}catch(e){return String(a)}}).join(" ");box.appendChild(line);}["log","info","warn","error"].forEach(function(k){var o=console[k];console[k]=function(){show(k,arguments);o.apply(console,arguments)}});addEventListener("error",function(e){if(!e.message)return;if(/^Script error\.?$/.test(e.message)&&!e.lineno)return show("warn",["An outside script hit an error, and the browser hides its details here. If the page looks wrong, Open in browser shows the real error."]);show("error",[e.message+(e.lineno?" (line "+e.lineno+")":"")])});addEventListener("unhandledrejection",function(e){var r=e.reason;show("error",["Unhandled promise rejection: "+(r&&r.message||r)])});addEventListener("DOMContentLoaded",function(){if(box&&!box.isConnected)document.body.appendChild(box)})})()<\/script>`;
     const safeScript = (code) => code.replace(/<\/script/gi, "<\\/script");
+    // PREP-START
+    // Scripts from the big CDNs load with crossorigin="anonymous" (they all send CORS headers), so their errors show
+    // what went wrong instead of the browser's bare "Script error.".
+    function prepPreview(doc) {
+      return doc.replace(/<script\b(?![^>]*\bcrossorigin)([^>]*\bsrc\s*=\s*["']https:\/\/(?:cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|esm\.sh|cdn\.skypack\.dev|cdn\.tailwindcss\.com|code\.jquery\.com)\/[^>]*)>/gi, '<script crossorigin="anonymous"$1>');
+    }
+    // PREP-END
     function previewDoc(btn) {
       const lang = btn.dataset.lang;
       const code = btn.closest(".code").querySelector("code").textContent;
@@ -1848,7 +1855,8 @@
       $("previewFrame").src = previewUrl || "about:blank";
     }
     function openPreview(btn) {
-      const { doc, note } = previewDoc(btn);
+      const { doc: raw, note } = previewDoc(btn);
+      const doc = prepPreview(raw);
       previewSrc = doc;
       $("previewNote").textContent = note;
       showPreview(doc);
