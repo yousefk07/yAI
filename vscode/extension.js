@@ -90,14 +90,33 @@ class ChatView {
     view.webview.html = `<!doctype html><html><head><meta charset="utf-8">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
       <link rel="stylesheet" href="${css}"></head><body>
-      <div id="bar"><select id="model" title="Model"></select><select id="mode" title="Approvals">
-        <option value="default">Ask before edits</option><option value="acceptEdits">Auto-approve edits</option><option value="plan">Plan (read-only)</option></select>
-        <span id="cost"></span></div>
-      <div id="log" role="log" aria-live="polite"></div>
+      <header id="bar">
+        <select id="model" title="Model"></select>
+        <div id="modes" class="seg" role="group" aria-label="Approvals">
+          <button type="button" data-mode="default" title="Ask before each edit and command">Ask</button>
+          <button type="button" data-mode="acceptEdits" title="Apply edits without asking (commands still ask)">Auto</button>
+          <button type="button" data-mode="plan" title="Read-only: investigate and propose a plan">Plan</button>
+        </div>
+        <span id="cost" title="yAI Ultra: this session, and today against your daily allowance"></span>
+      </header>
+      <div id="ctxWrap"><div id="ctx"></div></div>
+      <main id="log" role="log" aria-live="polite"><div id="empty">
+        <div class="mark">y<i></i></div>
+        <h2>yAI Code</h2>
+        <p id="who">Starting…</p>
+        <div class="suggests">
+          <button type="button" class="suggest" data-text="Explain how this project is put together">Explain this project</button>
+          <button type="button" class="suggest" data-text="Find bugs in the code I changed recently and fix them">Find and fix bugs</button>
+          <button type="button" class="suggest" data-text="/review">Review my changes</button>
+        </div>
+        <p class="tip">Edits open as diffs to approve · @file mentions a file · / for commands</p>
+      </div></main>
       <div id="ask" hidden></div>
-      <div id="status"></div>
-      <form id="form"><textarea id="input" rows="3" placeholder="Ask yAI Code to change your project…  (@file to mention, / for commands)"></textarea>
-        <div class="row"><span class="hint">Enter to send · Shift+Enter new line</span><button type="button" id="stop" hidden>Stop</button><button type="submit" id="send">Send</button></div></form>
+      <div id="status" hidden><span class="dots"><i></i><i></i><i></i></span><span id="statusText"></span></div>
+      <footer id="composer">
+        <textarea id="input" rows="1" placeholder="Ask yAI Code…"></textarea>
+        <button type="button" id="send" title="Send (Enter)"></button>
+      </footer>
       <script nonce="${nonce}" src="${js}"></script></body></html>`;
     view.webview.onDidReceiveMessage((m) => {
       if (m.type === "prompt") { if (!proc) start(); send({ type: m.text.startsWith("/") ? "command" : "prompt", text: m.text }); }
@@ -106,6 +125,7 @@ class ChatView {
       else if (m.type === "mode") send({ type: "mode", mode: m.mode });
       else if (m.type === "model") send({ type: "model", id: m.id });
       else if (m.type === "restart") start();
+      else if (m.type === "viewDiff" && pendingAsk) showDiff(pendingAsk);
       else if (m.type === "openFile") {
         const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
         if (folder) vscode.window.showTextDocument(vscode.Uri.joinPath(folder, m.path)).then(undefined, () => {});

@@ -2102,6 +2102,7 @@ async function stdioMode() {
     return true;
   };
   ui.spinner.hook = (s) => send(s ? { type: "status", ...s } : { type: "status", text: null });
+  ui.setSink(send); // the panel draws yAI's words, steps and diffs itself
   ui.setTheme(process.env.YAI_THEME || api.cfg.theme || "dark", { paint: false }); // VS Code says light or dark
   const answers = new Map();
   state.askHook = ({ title, detail, options, edit }) => {

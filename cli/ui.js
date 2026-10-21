@@ -168,6 +168,7 @@ const spinner = {
   },
   // A short note after the token count, e.g. "~$0.004" while yAI Ultra writes.
   extra(s) {
+    if (spinner.hook) spinner.hook({ extra: s });
     if (spin) spin.extra = s;
   },
   tokens(n) {
@@ -203,7 +204,13 @@ function section(kind) {
   last = kind;
 }
 let output = false; // the last line was a step's output (the │ gutter), not a step row
+// The VS Code panel (yai --stdio) draws its own chat: with a sink set, yAI's words, steps, diffs and notes go to it
+// as events instead of being drawn as terminal text. Anything else printed still arrives, as plain "out" text.
+let sink = null;
+const setSink = (fn) => (sink = fn);
+
 function rawPrint(text) {
+  if (sink) return sink({ type: "out", text: String(text) + "\n" });
   output = /^ {5}/.test(stripAnsi(text));
   if (spin) process.stdout.write("\r\x1b[K");
   process.stdout.write(text + "\n");
@@ -238,6 +245,10 @@ function inline(s) {
 // to one and trailing blank lines are dropped.
 function markdownWriter() {
   let inCode = false, first = true, blank = false;
+  if (sink) {
+    sink({ type: "text-start" });
+    return (line) => sink({ type: "text", line: String(line) });
+  }
   return (line) => {
     if (!inCode && !line.trim()) return void (blank = !first);
     if (blank) rawPrint("");
@@ -265,6 +276,7 @@ const textWidth = () => Math.max(36, width() - 4);
 
 // The user's message, on the panel background: "› fix the billing tests".
 function userLine(text) {
+  if (sink) return sink({ type: "user", text: String(text) });
   const lines = String(text).split("\n");
   const first = clip(lines[0], width() - 6) + (lines.length > 1 ? c.faint(`  (+${lines.length - 1} lines)`) : "");
   rawPrint(c.panel(pad(` ${c.user("›")} ${c.ink(first)}`, width())));
@@ -295,6 +307,7 @@ function flushRow() {
 
 // The row is held back until its result is known, so the result, the ✓ / ✕ and the time sit on it.
 function toolHeader(name, arg) {
+  if (sink) return sink({ type: "step", verb: VERB[name] || String(name).charAt(0).toUpperCase() + String(name).slice(1), arg: String(arg || "") });
   flushRow();
   if (last === "step" && output) rawPrint(""); // a step that showed output gets room after it
   section("step");
@@ -303,6 +316,7 @@ function toolHeader(name, arg) {
 }
 // Drops the waiting row (used before asking to run a command, which shows the command instead).
 function cancelRow() {
+  if (sink) return sink({ type: "step-cancel" });
   const p = pending;
   pending = null;
   return p;
@@ -311,6 +325,7 @@ function cancelRow() {
 // │ gutter, cut to the terminal width. `summary` puts a short label on the row as well, and `quiet`
 // keeps the lines under it dim even when the row is red (a failed command shows ✕, not a red wall).
 function toolResult(text, { color: col, summary, quiet } = {}) {
+  if (sink) return sink({ type: "step-result", text: stripAnsi(String(text || "")), summary: summary ? stripAnsi(summary) : "", tone: col === c.red ? "error" : col === c.yellow ? "warn" : "" });
   const lines = text ? String(text).split("\n") : [];
   if (pending && summary === undefined && lines.length === 1 && vis(lines[0]) < 60) {
     const p = pending;
@@ -327,6 +342,7 @@ function toolResult(text, { color: col, summary, quiet } = {}) {
 }
 // A short note under a step, at the step's indent: "   ✓ applied · 1 file changed".
 function note(text) {
+  if (sink) return sink({ type: "note", text: stripAnsi(String(text)) });
   print("   " + text);
   if (last) last = "step";
 }
@@ -368,6 +384,20 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
   const ops = lineDiff(splitLines(before), splitLines(after));
   let added = 0, removed = 0;
   for (const o of ops) o.t === "+" ? added++ : o.t === "-" ? removed++ : 0;
+  if (sink) {
+    // The changed lines with three lines around them, as [kind, line number, text] (kind: " ", "+", "-", "…").
+    const keep = ops.map((o, i) => ops.slice(Math.max(0, i - 3), i + 4).some((x) => x.t !== " "));
+    const lines = [];
+    let gap = false;
+    ops.forEach((o, i) => {
+      if (!keep[i]) return void (gap = true);
+      if (gap && lines.length) lines.push(["…", "", ""]);
+      gap = false;
+      if (lines.length < 200) lines.push([o.t, o.t === "-" ? o.an : o.bn, o.text]);
+    });
+    sink({ type: "diff", path: title, created, added, removed, lines });
+    return { added, removed };
+  }
   const show = ops.map(() => false);
   ops.forEach((o, i) => {
     if (o.t !== " ") for (let k = Math.max(0, i - 3); k <= Math.min(ops.length - 1, i + 3); k++) show[k] = true;
@@ -475,7 +505,7 @@ function resetSections() {
 }
 
 module.exports = {
-  c, print, spinner, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
+  c, print, spinner, setSink, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
   welcome, footer, frame, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };
