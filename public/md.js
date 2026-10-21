@@ -25,8 +25,8 @@ window.renderMarkdown = function renderMarkdown(src) {
       hold(
         `<div class="code"><div class="code-head"><span>${escapeHtml(lang || "code")}</span>` +
           // Web code gets a live Preview (the chat page runs it in a sandboxed frame).
-          (/^(html?|svg|xml|js|javascript|jsx)$/i.test(lang) ? `<button class="preview-code" type="button" data-lang="${escapeHtml(lang.toLowerCase())}">Preview</button>` : "") +
-          `<button class="copy-code" type="button">Copy</button></div>` +
+          (/^(html?|svg|xml|js|javascript|jsx)$/i.test(lang) ? `<button class="preview-code" type="button" data-lang="${escapeHtml(lang.toLowerCase())}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5l13 7.5-13 7.5z"/></svg><span>Preview</span></button>` : "") +
+          `<button class="copy-code" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>Copy</span></button></div>` +
           `<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre></div>`
       ))
     .replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${escapeHtml(code)}</code>`))
