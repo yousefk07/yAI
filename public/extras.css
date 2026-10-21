@@ -35,6 +35,7 @@
 .switch.on { background: var(--acc); }
 .switch.on i { transform: translateX(14px); }
 .tool-pills { display: contents; }
+#researchMode { display: none !important; } /* deep research lives in the Tools menu */
 .tool-pill svg { width: 15px; height: 15px; }
 
 /* ---------- Voice: mic, voice chat, Listen ---------- */

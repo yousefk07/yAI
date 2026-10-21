@@ -20,17 +20,21 @@
     study: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5"/></svg>',
     canvas: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M13 4v16M16 9h2M16 13h2"/></svg>',
     google: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+    research: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h4"/></svg>',
     voice: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>',
   };
   function renderTools() {
     const v = window.yaiVoice?.config() || { voices: [] };
     const sw = (on) => `<span class="switch${on ? " on" : ""}" aria-hidden="true"><i></i></span>`;
+    const inChat = mode === "chat";
     $("toolsMenu").innerHTML = `
+      ${inChat ? `<button type="button" class="tool-item" data-tool="research" role="menuitemcheckbox" aria-checked="${researchOn}">${I.research}<span><b>Deep research</b><small>Several rounds of searching and reading, then a report with sources</small></span>${sw(researchOn)}</button>` : ""}
       <button type="button" class="tool-item" data-tool="study" role="menuitemcheckbox" aria-checked="${studyOn}">${I.study}<span><b>Study mode</b><small>A tutor: hints and questions instead of answers</small></span>${sw(studyOn)}</button>
       <button type="button" class="tool-item" data-tool="canvas" role="menuitemcheckbox" aria-checked="${yaiCanvas.toolOn()}">${I.canvas}<span><b>Canvas</b><small>Writing and code open in an editor beside the chat</small></span>${sw(yaiCanvas.toolOn())}</button>
       <button type="button" class="tool-item" data-tool="google" role="menuitemcheckbox" aria-checked="${googleOn && google.connected}">${I.google}<span><b>Calendar and email</b><small>${google.connected ? `Reads ${escapeHtml(google.email || "your Google account")}; drafts need your OK` : google.configured ? "Connect Google to use it" : "Not set up on this site yet"}</small></span>${google.connected ? sw(googleOn) : google.configured ? '<span class="tool-link">Connect</span>' : ""}</button>
       ${v.voices.length ? `<div class="tool-voice">${I.voice}<span><b>Voice</b><small>For Listen and voice chat</small></span><select id="voicePick" aria-label="Voice">${v.voices.map((x) => `<option value="${escapeHtml(x.id)}"${x.id === yaiVoice.voiceId() ? " selected" : ""}>${escapeHtml(x.name)}</option>`).join("")}</select><button type="button" class="btn-ghost" id="voiceTry">Try</button></div>` : ""}`;
     $("toolPills").innerHTML = [
+      researchOn && mode === "chat" && `<button type="button" class="mode-btn tool-pill" data-off="research" aria-pressed="true" title="Turn off deep research">${I.research}<span>Research</span></button>`,
       studyOn && `<button type="button" class="mode-btn tool-pill" data-off="study" aria-pressed="true" title="Turn off study mode">${I.study}<span>Study</span></button>`,
       yaiCanvas.toolOn() && `<button type="button" class="mode-btn tool-pill" data-off="canvas" aria-pressed="true" title="Turn off canvas">${I.canvas}<span>Canvas</span></button>`,
       googleOn && google.connected && `<button type="button" class="mode-btn tool-pill" data-off="google" aria-pressed="true" title="Turn off calendar and email">${I.google}<span>Google</span></button>`,
@@ -38,6 +42,7 @@
     $("toolsBtn").classList.toggle("has-on", !!$("toolPills").innerHTML);
   }
   function setTool(name, on) {
+    if (name === "research") { if (researchOn !== on) $("researchMode").click(); }
     if (name === "study") { studyOn = on; store.set("studyMode", on); }
     if (name === "canvas") yaiCanvas.setTool(on);
     if (name === "google") {
@@ -204,7 +209,9 @@
     autosize();
     input.focus();
   });
-  window.yaiAfterMode = updateIdeas;
+  window.yaiAfterMode = () => { updateIdeas(); renderTools(); };
+  $("webMode").addEventListener("click", () => setTimeout(renderTools));
+  $("researchMode").addEventListener("click", () => setTimeout(renderTools));
   window.yaiAfterTray = updateIdeas;
   // An Edit button on each made image (the image becomes the photo to change), and before/after on an edit.
   window.yaiAfterMedia = (el, m) => {
