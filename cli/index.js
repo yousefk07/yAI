@@ -116,6 +116,7 @@ const TEAM = require("./team")({
   runAgent: (text) => runAgent(text),
   select: (o) => select(o),
   checklist: (o) => checklist(o),
+  inputLine: () => rl.line,
   topLevel: () => topLevel(),
   modelLabel: () => modelLabel(),
 });
@@ -827,7 +828,7 @@ SCREEN.parts.input = () => {
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
@@ -1001,6 +1002,7 @@ function setupReadline() {
       if (key.name === "pagedown") return SCREEN.page(-1);
       if (key.name === "end" && key.ctrl) return SCREEN.toBottom();
     }
+    if (state.keyHook && !state.selecting && state.keyHook(s, key)) return;
     const list = !state.busy && !state.selecting && !state.asking ? suggestions() : null;
     if (list && list.length) {
       const setLine = (t) => { rl.line = t; rl.cursor = t.length; rl._refreshLine(); };
@@ -1049,7 +1051,7 @@ function setupReadline() {
         state.escAnswer = true;
         rl.write(null, { ctrl: true, name: "u" });
         rl.write("\n");
-      } else if (state.busy && state.abort) {
+      } else if (state.busy && state.abort && !state.teamView) {
         state.interrupted = true;
         state.abort.abort();
       }

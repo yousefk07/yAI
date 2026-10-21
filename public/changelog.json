@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.107",
+      "date": "2026-10-21",
+      "title": "Watch a team agent",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Open any agent in /team",
+          "text": "While a team works, press an agent's number on the board, or click its row, to watch it live: what it says, each step and its result, and its file edits as coloured diffs. Esc goes back to the board (Esc on the board still stops the team)."
+        },
+        {
+          "area": "yAI Code",
+          "title": "/team log",
+          "text": "After a team finishes, /team log 2 (or /team log tester) prints that agent's whole log into the conversation."
+        }
+      ]
+    },
+    {
       "version": "1.0.105",
       "date": "2026-10-21",
       "title": "Copy and paste in yAI Code",

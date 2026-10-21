@@ -28,6 +28,7 @@ module.exports = function create({ ui }) {
   let on = false, pending = false, centerUpTo = -1;
   let sel = null; // a drag selection: { a: [row, col], b: [row, col], pane: [firstCol, lastCol], moved }
   let toast = null, toastTimer = null;
+  let clickHandler = null; // a click (no drag) on a row: /team opens the agent on that row
   let rowInfo = []; // per screen row: { soft: it continues the row above (a wrapped line), pane: [firstCol, lastCol] }
   const parts = { header: () => "", panel: () => null, input: () => ({ text: "", cursor: 0 }), keys: () => "" };
 
@@ -249,13 +250,19 @@ module.exports = function create({ ui }) {
       if (btn === 0 && !release) { sel = { a: [row, col], b: [row, col], pane: paneAt(row, col), moved: false }; return soon(); }
       if (btn === 32 && sel) { sel.b = [row, col]; sel.moved = sel.moved || sel.a[0] !== row || sel.a[1] !== col; return soon(); }
       if (btn === 0 && release && sel) {
-        if (!sel.moved) { sel = null; return soon(); }
+        if (!sel.moved) {
+          sel = null;
+          soon();
+          if (clickHandler) clickHandler(ui.stripAnsi(shown_.lines[row - 1] || ""), row, col);
+          return;
+        }
         render(); // the highlight and the text come from the same frame
         const text = selectedText();
         if (text) { copy(text); showToast(`Copied ${text.length} character${text.length === 1 ? "" : "s"}`); }
       }
     },
     clearSelection() { if (sel) { sel = null; soon(); } },
+    onClick(fn) { clickHandler = fn || null; },
     page(dir) { scroll = Math.max(0, scroll + dir * Math.max(3, (process.stdout.rows || 30) - 12)); soon(); },
     toBottom() { scroll = 0; soon(); },
     render: soon,

@@ -8,6 +8,10 @@
 // The team (2026-10-21): after the builders, the checkers you picked run together (integration, tester, reviewer,
 // security checker, docs writer), each ending with a VERDICT line; if any of them finds a problem, the fixer runs last
 // with their reports. You pick the members on a checklist after the lead's split; the picks are remembered.
+//
+// Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
+// doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
+// After the team, /team log <number or name> prints an agent's whole log.
 
 const path = require("path");
 const readline = require("readline");
@@ -153,6 +157,8 @@ module.exports = function create(d) {
   // ---------- running the agents ----------
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.text = []; a.cost = 0; a.asks = [];
+    a.log = [{ k: "brief", text: a.task }];
+    const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
@@ -169,12 +175,15 @@ module.exports = function create(d) {
         a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
       else if (e.type === "status" && e.text) a.step = String(e.text);
-      else if (e.type === "step") a.step = `${e.verb} ${e.arg}`.trim();
-      else if (e.type === "diff" && e.path) a.changed.add(e.path);
-      else if (e.type === "text-start") a.text = [];
-      else if (e.type === "text") a.text.push(e.line);
-      else if (e.type === "ask") a.asks.push(e), d.wake();
-      else if (e.type === "error") { a.error = e.message; if (a.state !== "working") a.state = "failed"; }
+      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); log({ k: "step", verb: e.verb, arg: e.arg }); }
+      else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
+      else if (e.type === "diff" && e.path) { a.changed.add(e.path); log({ k: "diff", ...e }); }
+      else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
+      else if (e.type === "text") { a.text.push(e.line); log({ k: "text", line: e.line }); }
+      else if (e.type === "note" && e.text) log({ k: "note", text: e.text });
+      else if (e.type === "out" && String(e.text).trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n")) log({ k: "out", line: l });
+      else if (e.type === "ask") { a.asks.push(e); log({ k: "ask", text: e.title, detail: e.detail }); d.wake(); }
+      else if (e.type === "error") { a.error = e.message; log({ k: "error", text: e.message }); if (a.state !== "working") a.state = "failed"; }
       else if (e.type === "done" && a.state === "working") {
         a.cost = e.cost?.session || 0;
         a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
@@ -203,17 +212,66 @@ module.exports = function create(d) {
   function boardLines(agents, tick) {
     const w = ui.width();
     const nameW = Math.max(...agents.map((a) => a.name.length));
-    return agents.map((a) => {
+    return agents.map((a, i) => {
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
       const time = secs((a.ended || Date.now()) - a.started);
       const right = `${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
       const what = a.state === "done" ? (a.verdict ? `finished · ${a.verdict}` : "finished") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
-      const room = Math.max(8, w - nameW - right.length - 11);
-      return `   ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
+      const room = Math.max(8, w - nameW - right.length - 12);
+      // the number opens the agent (press it, or click the row)
+      return ` ${c.faint(String(i + 1).padStart(2))} ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
     });
   }
 
+  // One agent's log as lines: what it said, its steps and their results, and its edits as diffs.
+  function logLines(a, all, tick = 0) {
+    const w = ui.width();
+    const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
+    const n = all.indexOf(a) + 1;
+    const time = a.started ? secs((a.ended || Date.now()) - a.started) : "";
+    const out = [
+      ` ${icon} ${c.bold(c.ink(a.name))} ${c.faint(`#${n}`)}  ${c.dim([a.state === "working" ? a.step : a.state, a.verdict, a.changed?.size ? `${a.changed.size} file${a.changed.size === 1 ? "" : "s"}` : "", time, a.cost ? `$${a.cost.toFixed(3)}` : ""].filter(Boolean).join(" · "))}`,
+      ` ${c.accent("‹")} ${c.faint("back to the team (esc)")}`,
+      c.line(" " + "─".repeat(Math.max(10, w - 2))),
+    ];
+    if (!a.log) return [...out, `   ${c.dim(a.state === "skipped" ? `It didn't run: ${a.step}.` : `It hasn't started yet: it starts ${a.step}.`)}`];
+    const TONE = { error: c.red, warn: c.yellow };
+    for (const e of a.log) {
+      if (e.k === "brief") out.push(`   ${c.faint("Its part:")} ${c.dim(clip(e.text, w - 14))}`, "");
+      else if (e.k === "gap") { if (out[out.length - 1] !== "") out.push(""); }
+      else if (e.k === "text") for (const l of e.line.trim() ? wrapText(e.line, w - 4) : [""]) out.push(`   ${c.ink(l)}`);
+      else if (e.k === "step") out.push(` ${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(clip(String(e.arg || ""), w - e.verb.length - 6))}`);
+      else if (e.k === "result") { const t = String(e.text).split("\n").find((x) => x.trim()) || ""; if (t) out.push(`   ${c.faint("└")} ${(TONE[e.tone] || c.dim)(clip(t, w - 6))}`); }
+      else if (e.k === "diff") {
+        out.push(` ${c.accent("•")} ${c.bold(c.ink(e.created ? "Create" : "Edit"))} ${c.ink(e.path)} ${c.green(`+${e.added}`)} ${c.red(`−${e.removed}`)}`);
+        const lines = e.lines || [];
+        for (const [kind, num, text] of lines.slice(0, 40)) {
+          const body = `${String(num || "").padStart(4)} ${kind === "…" ? "…" : kind} ${clip(String(text).replace(/\t/g, "  "), w - 12)}`;
+          out.push(`     ${kind === "+" ? c.green(body) : kind === "-" ? c.red(body) : c.faint(body)}`);
+        }
+        if (lines.length > 40) out.push(`     ${c.faint(`… ${lines.length - 40} more lines`)}`);
+      }
+      else if (e.k === "note") out.push(`   ${c.dim(clip(e.text, w - 4))}`);
+      else if (e.k === "out") out.push(`   ${clip(e.line, w + 40)}`);
+      else if (e.k === "ask") out.push(` ${c.yellow("?")} ${c.ink(e.text)} ${c.dim(clip(String(e.detail || "").replace(/\s+/g, " "), w - e.text.length - 6))}`);
+      else if (e.k === "error") out.push(` ${c.red("✗")} ${c.red(clip(e.text, w - 4))}`);
+    }
+    if (a.state === "working" || a.state === "starting") out.push("", ` ${c.accent(SPIN[tick % SPIN.length])} ${c.dim(a.asks.length ? "waiting for you" : a.step)}`);
+    return out;
+  }
+
+  let lastTeam = null; // the last team's agents, for /team log
+  function showLog(arg) {
+    if (!lastTeam) return print(c.yellow("   No team has run yet in this session."));
+    const q = arg.trim().toLowerCase();
+    const a = /^\d+$/.test(q) ? lastTeam[Number(q) - 1] : lastTeam.find((x) => x.name.toLowerCase() === q) || lastTeam.find((x) => x.name.toLowerCase().includes(q));
+    if (!a) return print(c.yellow(`   Which agent? ${lastTeam.map((x, i) => `${i + 1} ${x.name}`).join(" · ")}`));
+    print("");
+    for (const l of logLines(a, lastTeam).filter((l, i) => i !== 1)) print(l);
+  }
+
   async function team(arg) {
+    if (/^log\b/i.test(arg.trim())) return showLog(arg.trim().slice(3));
     let max = MAX_AGENTS;
     const m = /^([2-4])\s+([\s\S]+)$/.exec(arg.trim());
     if (m) { max = Number(m[1]); arg = m[2]; }
@@ -276,16 +334,20 @@ module.exports = function create(d) {
     d.syncMute();
     const tty = process.stdout.isTTY && !state.stdio;
     let drawn = 0, tick = 0, wake = () => {}, over = false, asking = false;
+    let viewing = null; // the agent you're watching, or null for the board
     d.wake = () => wake();
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
       // mustn't draw it again under the reports
       // while an agent's question is open it owns the bottom of the screen; redrawing the board would wipe it
       if (!tty || over || asking) return;
-      const lines = boardLines(agents, tick++);
+      let lines = viewing ? logLines(viewing, agents, tick++) : [...boardLines(agents, tick++), "", `   ${c.faint(`press 1–${agents.length}${ui.screen ? " or click an agent" : ""} to watch it`)}`];
       if (ui.screen) return ui.screen.setExtra(["", ...lines]); // the full-window app keeps the board at the end
+      // the scrolling terminal redraws in place, so an agent's view shows its latest lines
+      if (viewing) lines = [...lines.slice(0, 3), ...lines.slice(3).slice(-Math.max(5, (process.stdout.rows || 30) - 8))];
       if (drawn) process.stdout.write(`\x1b[${drawn}A`);
       for (const l of lines) process.stdout.write("\r\x1b[K" + l + "\n");
+      if (drawn > lines.length) process.stdout.write("\x1b[J");
       drawn = lines.length;
     };
     const lastSeen = new Map();
@@ -299,6 +361,29 @@ module.exports = function create(d) {
     state.abort.signal.addEventListener("abort", () => {
       setTimeout(() => d.wake(), 0); // the members still waiting are stopped too
       for (const a of agents) { a.send?.({ type: "stop" }); setTimeout(() => a.child && a.child.exitCode === null && a.child.kill(), 3000); }
+    });
+    const open = (a) => {
+      viewing = a;
+      if (a) state.teamView = true;
+      else setImmediate(() => (state.teamView = !!viewing)); // the esc that closed it mustn't also stop the team
+      if (ui.screen && !a) ui.screen.toBottom();
+      draw();
+      ui.screen?.render();
+    };
+    state.keyHook = (s, key) => {
+      if (over) return false;
+      if (viewing && (key.name === "escape" || key.name === "left")) { open(null); return true; }
+      if (/^[1-9]$/.test(s || "") && !d.inputLine() && Number(s) <= agents.length) { open(agents[Number(s) - 1]); return true; }
+      return false;
+    };
+    state.teamKeys = () => viewing
+      ? [["esc", "back to the team"], [`1–${agents.length}`, "another agent"], ["PgUp", "scroll back"]]
+      : [[`1–${agents.length}`, "watch an agent"], ...(ui.screen ? [["click", "an agent"]] : []), ["esc", "stop them all"]];
+    ui.screen?.onClick((row) => {
+      if (over) return;
+      if (viewing) { if (/back to the team/.test(row)) open(null); return; }
+      const a = agents.find((x) => new RegExp(`^\\s*\\d+\\s\\S\\s${x.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s`).test(row));
+      if (a) open(a);
     });
     const started = Date.now();
     // The builders start now; the checkers wait for them, so they check finished work, not files half-written; the
@@ -344,7 +429,13 @@ module.exports = function create(d) {
       });
     } finally {
       // the full-window app: the board's last state goes into the conversation, where it stays
-      if (ui.screen) { ui.screen.setExtra([]); for (const l of boardLines(agents, 0)) print(l); }
+      state.keyHook = null;
+      state.teamKeys = null;
+      state.teamView = false;
+      ui.screen?.onClick(null);
+      viewing = null;
+      lastTeam = agents;
+      if (ui.screen) { ui.screen.setExtra([]); ui.screen.toBottom(); for (const l of boardLines(agents, 0)) print(l); }
       state.busy = false;
       state.abort = null;
       d.syncMute();
@@ -371,7 +462,7 @@ module.exports = function create(d) {
       else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
     }
     print("");
-    print(c.dim("   Their reports are in this conversation now: ask a follow-up, or /review to check the change as a whole."));
+    print(c.dim(`   Their reports are in this conversation now: ask a follow-up, /review to check the change as a whole, or /team log 1–${agents.length} for an agent's whole log.`));
     const skipped = crew.filter((a) => a.state === "skipped");
     state.pendingContext.push(
       `I ran /team: ${builders.length} builder agent${builders.length === 1 ? "" : "s"} worked on this at the same time${crew.length ? `, then ${crew.map((a) => a.role).join(", ")}` : ""}: "${task}". Their reports:\n\n` +
