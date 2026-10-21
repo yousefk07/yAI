@@ -947,7 +947,9 @@ async function callModel() {
           lineBuf = lineBuf.slice(cut + 1);
         }
         if (text.includes("<|close|>tools")) return false; // Kimi K3's tool call is complete
-        if (DSML_END.test(text)) return false; // DeepSeek's tool call is complete
+        // DeepSeek's tool call is complete (it may close its own markup with </tool>, or yAI's with its own closer)
+        const ds = text.search(DS_MARK);
+        if (ds >= 0 && CALL_END.test(text.slice(ds))) return false;
         const ts = text.search(/(^|\n)[ \t]*<tool[\s>]/);
         if (ts >= 0) {
           const after = text.slice(ts);
@@ -985,23 +987,47 @@ async function callModel() {
 //   <｜DSML｜ calls><｜DSML｜ invoke name="write_file"><｜DSML｜ parameter name="path" string="true">snake.html</｜DSML｜ parameter>…
 //   </｜DSML｜ invoke></｜DSML｜ calls>
 // It becomes the usual <tool> block. A call cut off before </…invoke> is left without </tool>, so it counts as cut off.
+// In practice it mixes its markup with yAI's (seen 2026-10-21 in real replies): a DSML invoke holding <path>…</path>
+// tags, <｜DSML｜ parameter name="path"> closed by </path>, a <tool name="run"> holding <parameter name="command"> and
+// closed by </｜DSML｜ invoke>, a DSML invoke closed by </tool>. So any opener and any closer are accepted.
 const DSML_START = /<｜DSML｜\s*(?:function_)?calls>|<｜DSML｜\s*invoke\b/;
-const DSML_END = /<\/｜DSML｜\s*(?:(?:function_)?calls|invoke)>/;
+const DS_MARK = /<｜DSML｜|<parameter\s+name=/;
+const CALL_END = /<\/｜DSML｜\s*(?:invoke|(?:function_)?calls)>|<\/tool>/;
 function fromDeepSeek(text) {
-  const m = DSML_START.exec(text);
-  if (!m) return text;
-  const before = text.slice(0, m.index).trimEnd();
-  const block = text.slice(m.index);
-  const inv = /<｜DSML｜\s*invoke\s+name="([\w-]+)"[^>]*>([\s\S]*?)(<\/｜DSML｜\s*invoke>|$)/.exec(block);
-  if (!inv) return before;
-  const params = [...inv[2].matchAll(/<｜DSML｜\s*parameter\s+name="([\w-]+)"[^>]*>([\s\S]*?)<\/｜DSML｜\s*parameter>/g)];
-  const body = params.map(([, key, value]) => {
-    const v = /^(content|new|old|new_str|old_str|text)$/.test(key) ? value.replace(/^\r?\n/, "").replace(/\r?\n$/, "") : value.trim();
-    return `<${key}>\n${v}\n</${key}>`;
-  }).join("\n");
-  // No parameter tags: the arguments may be written as JSON inside the invoke.
-  const json = !params.length && /^\s*\{[\s\S]*\}\s*$/.test(inv[2]) ? inv[2].trim() : "";
-  return `${before}\n\n<tool name="${inv[1]}">\n${body || json}${inv[3] ? "\n</tool>" : ""}`;
+  if (!DS_MARK.test(text)) return text;
+  const head = /<｜DSML｜\s*invoke\s+name="([\w-]+)"[^>]*>|(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>/.exec(text);
+  const calls = text.search(/<｜DSML｜\s*(?:function_)?calls>/);
+  if (!head) return calls >= 0 ? text.slice(0, calls).trimEnd() : text;
+  const name = head[1] || head[3];
+  const headAt = head.index + (head[2] || "").length;
+  const before = text.slice(0, calls >= 0 && calls < headAt ? calls : headAt).trimEnd();
+  let body = text.slice(head.index + head[0].length);
+  const end = CALL_END.exec(body);
+  if (end) body = body.slice(0, end.index);
+  // Arguments: <｜DSML｜ parameter name="k">, <parameter name="k"> or <k>, each closed by any of their closers.
+  const OPEN = /<｜DSML｜\s*parameter\s+name="([\w-]+)"[^>]*>|<parameter\s+name="([\w-]+)"[^>]*>|<([a-z_][\w-]*)>/g;
+  const args = [];
+  let m, cut = false;
+  while ((m = OPEN.exec(body))) {
+    const key = m[1] || m[2] || m[3];
+    const from = OPEN.lastIndex;
+    let stop = -1, len = 0;
+    for (const c of ["</｜DSML｜ parameter>", "</｜DSML｜parameter>", "</parameter>", `</${key}>`]) {
+      const i = body.indexOf(c, from);
+      if (i >= 0 && (stop < 0 || i < stop)) { stop = i; len = c.length; }
+    }
+    if (stop < 0) {
+      if (!end) { cut = true; break; } // the reply ended inside this argument
+      stop = body.length;
+    }
+    const raw = body.slice(from, stop);
+    const v = /^(content|new|old|new_str|old_str|text)$/.test(key) ? raw.replace(/^\r?\n/, "").replace(/\r?\n$/, "") : raw.trim();
+    args.push(`<${key}>\n${v}\n</${key}>`);
+    OPEN.lastIndex = stop + len;
+  }
+  // No argument tags: the arguments may be written as JSON inside the call.
+  const json = !args.length && /^\s*\{[\s\S]*\}\s*$/.test(body) ? body.trim() : "";
+  return `${before}\n\n<tool name="${name}">\n${args.join("\n") || json}${end && !cut ? "\n</tool>" : ""}`;
 }
 
 // Kimi K3 (yAI Ultra) writes tool calls in its own format even when asked for <tool> blocks:
