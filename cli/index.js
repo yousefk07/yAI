@@ -1083,7 +1083,17 @@ function parseToolCall(text) {
   const rest = text.slice(head.index + head[0].length);
   let end = rest.search(/\n[ \t]*<\/tool>/);
   if (end < 0) end = rest.lastIndexOf("</tool>");
-  if (end < 0) return { name, cutOff: true };
+  // yAI Ultra Flash sometimes ends its reply exactly where </tool> would go (2026-10-21: two read_file calls in a
+  // row were sent back as "not finished"). If every argument it opened is closed and the reply ends on a closing
+  // tag, the call is whole; a reply really cut off ends inside an open tag.
+  let unclosed = false;
+  if (end < 0) {
+    const t = rest.trimEnd();
+    const opened = [...t.matchAll(/<([a-z_][\w-]*)>/g)].map((m) => m[1]);
+    if (!opened.length || !/<\/[a-z_][\w-]*>$/.test(t) || !opened.every((tag) => t.includes(`</${tag}>`))) return { name, cutOff: true };
+    end = t.length;
+    unclosed = true;
+  }
   const body = rest.slice(0, end) + "\n";
   const tool = T.tools[name];
   const args = {};
@@ -1124,6 +1134,7 @@ function parseToolCall(text) {
     const unquoted = /^(["'])[\s\S]*\1$/.test(bare) && !bare.slice(1, -1).includes(bare[0]) ? bare.slice(1, -1) : bare;
     if (unquoted && !unquoted.includes("\n")) args[first] = unquoted;
   }
+  if (unclosed) return { name, args, raw: text.trimEnd() + "\n</tool>" };
   const endTag = text.indexOf("</tool>", head.index + head[0].length + end);
   return { name, args, raw: text.slice(0, endTag >= 0 ? endTag + 7 : text.length) };
 }
@@ -1579,6 +1590,7 @@ async function runAgent(content) {
   if (process.stdout.isTTY && !state.stdio) ui.setLive(() => (panelOpen() ? [] : LOOK.planLines(state.plan, { files: state.task.files })));
   let reviewed = false;
   let nudges = 0; // replies that announced a step but stopped before it
+  let emptyRetried = false; // an empty reply gets one quiet retry
   let planReady = false; // plan mode finished with a plan: ask to go ahead
   try {
     // /duo: the partner model's plan goes in with the request.
@@ -1599,6 +1611,13 @@ async function runAgent(content) {
       // An empty reply usually means the conversation no longer fits the model; say so instead of
       // ending silently.
       if (!text.trim()) {
+        // the shared endpoint sometimes sends back nothing once; one quiet retry before giving up (2026-10-21)
+        if (!emptyRetried && contextPercent() < 85) {
+          emptyRetried = true;
+          ui.note(c.dim("· the model sent back nothing · asking again"));
+          step--;
+          continue;
+        }
         state.messages.push({ role: "assistant", content: "(no reply)" });
         const full = contextPercent() >= 85;
         ui.note(`${c.yellow("!")} ${c.ink("No reply from the model.")} ${c.dim(full ? "The conversation is too long for it: /compact, /clear, or a bigger model with /model." : "Try again, or pick another model with /model.")}`);
