@@ -329,5 +329,52 @@ module.exports = function create({ ui }) {
     return out;
   }
 
-  return { pill, statusRow, headerRow, panelLines, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
+  // ---------- the question form (the ask_user tool) ----------
+  //  ← ☒ Address  ☐ Role  ☐ Since  ✓ Submit →
+  //  Role: a fixed list or free text?
+  //  ❯ 1. Fixed list
+  //       Physician, Nurse injector, Clinic owner
+  //    2. Free text
+  //    3. Type something.
+  //  ───────────────
+  //    4. Chat about this
+  //  Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+  function formLines({ questions, tab, sel, answers, typing, draft }) {
+    const w = Math.min(W() - 2, 110);
+    const rule = c.line("─".repeat(w));
+    const tabs = questions.map((q, i) => {
+      const box = answers[i] ? "☒" : "☐";
+      const t = ` ${box} ${q.header} `;
+      return i === tab ? c.soft(c.bold(c.accent(t))) : answers[i] ? c.ink(t) : c.dim(t);
+    });
+    const submit = tab === questions.length ? c.soft(c.bold(c.accent(" ✓ Submit "))) : c.ink(" ✓ Submit ");
+    const out = [rule, ` ${c.faint("←")} ${[...tabs, submit].join(" ")} ${c.faint("→")}`, ""];
+    if (tab < questions.length) {
+      const q = questions[tab];
+      for (const l of wrap(q.question, w - 2)) out.push(` ${c.bold(c.ink(l))}`);
+      out.push("");
+      const n = q.options.length;
+      q.options.forEach((o, i) => {
+        const on = i === sel;
+        const picked = answers[tab] && answers[tab].label === o.label;
+        out.push(` ${on ? c.accent("❯") : " "} ${(on ? (s) => c.bold(c.accent(s)) : c.ink)(`${i + 1}. ${o.label}`)}${picked ? " " + c.green("✓") : ""}`);
+        if (o.description) for (const l of wrap(o.description, w - 8)) out.push(`      ${c.dim(l)}`);
+      });
+      const own = sel === n;
+      const text = typing ? c.ink(draft) + c.accent("▏") : answers[tab] && answers[tab].own ? c.ink(answers[tab].label) + " " + c.green("✓") : c.dim("Type something.");
+      out.push(` ${own ? c.accent("❯") : " "} ${(own ? (s) => c.bold(c.accent(s)) : c.ink)(`${n + 1}.`)} ${text}`);
+      out.push(rule);
+      const chat = sel === n + 1;
+      out.push(` ${chat ? c.accent("❯") : " "} ${(chat ? (s) => c.bold(c.accent(s)) : c.ink)(`${n + 2}. Chat about this`)}`);
+    } else {
+      out.push(` ${c.bold(c.ink("Review your answers"))}`, "");
+      questions.forEach((q, i) => out.push(`   ${c.faint(ui.pad(q.header, 14))} ${answers[i] ? c.ink(answers[i].label) : c.yellow("not answered")}`));
+      out.push("");
+      ["Submit answers", "Cancel"].forEach((l, i) => out.push(` ${sel === i ? c.accent("❯") : " "} ${(sel === i ? (s) => c.bold(c.accent(s)) : c.ink)(`${i + 1}. ${l}`)}`));
+    }
+    out.push("", ` ${c.faint(typing ? "Enter to keep it · Esc to stop typing" : "Enter to select · Tab/Arrow keys to navigate · Esc to cancel")}`);
+    return out;
+  }
+
+  return { pill, statusRow, headerRow, panelLines, formLines, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
 };

@@ -337,6 +337,90 @@ function select(opts) {
   });
 }
 
+// The question form (ask_user, 2026-10-21): a tab for each question and one to submit, numbered options, "Type
+// something" for an answer of your own and "Chat about this" to talk it over. Resolves to { answers } or { chat } or {}.
+async function askForm(questions) {
+  spinner.stop();
+  // VS Code and the phone: one question at a time
+  if (state.askHook || !process.stdout.isTTY) {
+    const answers = [];
+    for (const q of questions) {
+      const i = state.askHook ? await state.askHook({ title: q.question, detail: q.options.map((o) => o.description ? `${o.label}: ${o.description}` : o.label).join(" · "), options: q.options.map((o) => o.label) }) : 0;
+      if (i < 0) return {};
+      answers.push(q.options[i] || q.options[0]);
+    }
+    return { answers };
+  }
+  const n = questions.length;
+  let tab = 0, sel = 0, typing = false, draft = "", drawn = [];
+  const answers = [];
+  const draw = () => {
+    const lines = LOOK.formLines({ questions, tab, sel, answers, typing, draft });
+    if (SCREEN.on) SCREEN.setExtra(["", ...lines]);
+    else {
+      if (drawn.length) process.stdout.write(`\x1b[${drawn.length}A`);
+      for (const l of lines) process.stdout.write("\r\x1b[K" + l + "\n");
+      if (drawn.length > lines.length) process.stdout.write("\x1b[J");
+    }
+    drawn = lines;
+  };
+  const wasMuted = ui.rlOutput.muted;
+  ui.rlOutput.muted = true;
+  state.selecting = true;
+  state.formOpen = true;
+  draw();
+  return new Promise((resolve) => {
+    const finish = (r) => {
+      process.stdin.removeListener("keypress", onKey);
+      state.selecting = false;
+      state.formOpen = false;
+      state.cancelSelect = null;
+      if (SCREEN.on) SCREEN.setExtra([]);
+      else process.stdout.write(`\x1b[${drawn.length}A\r\x1b[J`);
+      rl.write(null, { ctrl: true, name: "u" });
+      ui.rlOutput.muted = wasMuted;
+      resolve(r);
+    };
+    const options = () => (tab < n ? questions[tab].options.length + 2 : 2); // + "Type something" and "Chat about this"
+    const go = (t) => {
+      tab = Math.max(0, Math.min(n, t));
+      const a = answers[tab];
+      sel = tab < n && a ? (a.own ? questions[tab].options.length : Math.max(0, questions[tab].options.findIndex((o) => o.label === a.label))) : 0;
+      draw();
+    };
+    const choose = () => {
+      if (tab === n) return sel === 0 ? finish({ answers }) : finish({});
+      const q = questions[tab];
+      if (sel < q.options.length) { answers[tab] = q.options[sel]; return go(tab + 1); }
+      if (sel === q.options.length) { typing = true; draft = answers[tab] && answers[tab].own ? answers[tab].label : ""; return draw(); }
+      return finish({ chat: true });
+    };
+    const onKey = (s, key = {}) => {
+      if (state.inMouse) return;
+      if (typing) {
+        if (key.name === "return" || key.name === "enter") {
+          typing = false;
+          if (draft.trim()) { answers[tab] = { label: draft.trim(), own: true }; return go(tab + 1); }
+          return draw();
+        }
+        if (key.name === "escape") { typing = false; return draw(); }
+        if (key.name === "backspace") draft = draft.slice(0, -1);
+        else if (s && !key.ctrl && !key.meta && s.length === 1 && s >= " ") draft += s;
+        return draw();
+      }
+      if (key.name === "escape" || (key.ctrl && key.name === "c")) return finish({});
+      if (key.name === "right" || (key.name === "tab" && !key.shift)) return go(tab + 1);
+      if (key.name === "left" || (key.name === "tab" && key.shift)) return go(tab - 1);
+      if (key.name === "up") { sel = (sel + options() - 1) % options(); return draw(); }
+      if (key.name === "down") { sel = (sel + 1) % options(); return draw(); }
+      if (key.name === "return" || key.name === "enter") return choose();
+      if (/^[1-9]$/.test(s || "") && Number(s) <= options()) { sel = Number(s) - 1; draw(); return choose(); }
+    };
+    state.cancelSelect = () => finish({});
+    process.stdin.on("keypress", onKey);
+  });
+}
+
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
   ["Session", [["/clear", "start a new conversation"], ["/resume", "pick an earlier conversation"], ["/compact", "summarise (/compact <focus>)"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
@@ -524,6 +608,7 @@ ${toolDocs}
 - Start dev servers and watchers with run and <background>true</background>, then check them with task_output (or web_fetch http://localhost:<port>). Stop them with task_stop when you're done unless the user wants them running.
 - If a tool returns an error, fix the cause and try again instead of repeating the same call.
 - Questions get answers, not edits. Don't change files the user didn't ask about.
+- When the request leaves real choices open that change what you'd build and the code can't tell you (a fixed list or free text? which page?), ask with ask_user before you start: up to 4 short questions with 2 to 4 options each. Don't ask about things you can decide yourself.
 - Be brief. Before a tool call, write at most one short sentence. When the task is done, say what you changed in a few sentences, without a tool call.
 - Use Markdown sparingly; the user reads your replies in a terminal.${LOOK.PLAN_RULES}${state.tutor ? X.TUTOR_PROMPT : ""}${projectNotes()}`;
 }
@@ -649,12 +734,14 @@ SCREEN.parts.input = () => {
   if (state.asking) {
     return { label: "›", text: state.askHidden ? "•".repeat(text.length) : text, cursor: rl.cursor, placeholder: state.askLabel || "", active: true };
   }
+  // a question form or an approval card has the keys; the input stays out of it
+  if (state.formOpen) return { text: "", cursor: 0, placeholder: "Answer above, or choose Chat about this to talk it over", active: false, caret: false };
   if (state.busy) return { text, cursor: rl ? rl.cursor : 0, placeholder: state.selecting ? "Or tell me what to do instead" : "Add a note while I work…", hint: "I'll read it after this step", active: false };
   return { text, cursor: rl ? rl.cursor : 0, placeholder: placeholder(), hint: text ? "" : state.phase === "welcome" ? "enter to send" : "", active: true };
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const keys = list ? LOOK.KEYS.commands : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
@@ -1347,6 +1434,35 @@ async function execTool(call) {
       const lines = text.split("\n");
       ui.toolResult(lines.slice(0, 3).join("\n") + (lines.length > 3 ? `\n… ${lines.length - 3} more lines` : ""), { color: text.startsWith("Error") ? c.red : undefined, quiet: true, summary: `${lines.length} line${lines.length === 1 ? "" : "s"}` });
       return { output: T.clipOutput(text, ctx.budget) };
+    }
+
+    // ask_user: a small form of questions; the answers go back to the model.
+    if (tool.kind === "ask") {
+      let questions;
+      try {
+        const raw = String(call.args.questions || "").trim().replace(/^```\w*\n?|```$/g, "");
+        questions = (JSON.parse(raw) || []).slice(0, 4).map((q, i) => ({
+          header: ui.clip(String(q.header || `Question ${i + 1}`), 18),
+          question: String(q.question || q.header || ""),
+          options: (Array.isArray(q.options) ? q.options : []).slice(0, 6).map((o) => (typeof o === "string" ? { label: o } : { label: String(o.label || ""), description: String(o.description || "") })).filter((o) => o.label),
+        })).filter((q) => q.question && q.options.length);
+      } catch {
+        throw new T.ToolError('<questions> must be JSON: [{"header":"…","question":"…","options":[{"label":"…","description":"…"}]}]');
+      }
+      if (!questions.length) throw new T.ToolError("Give at least one question with options.");
+      if (state.printMode) return { output: "No one is here to answer. Decide yourself, and say what you assumed." };
+      const res = await askForm(questions);
+      if (res.chat) {
+        ui.note(c.dim("the questions are set aside · tell yAI what you think"));
+        return { output: "The user wants to talk this over before answering. Stop here and wait for their message.", stop: true };
+      }
+      if (!res.answers) {
+        ui.note(`${c.yellow("■")} ${c.dim("questions dismissed")}`);
+        return { output: "The user dismissed the questions. Stop and wait for their next message.", stop: true };
+      }
+      const lines = questions.map((q, i) => `- ${q.header}: ${res.answers[i] ? res.answers[i].label : "(no answer)"}`);
+      ui.note(`${c.green("✓")} ${c.dim("answered · " + questions.map((q, i) => `${q.header}: ${res.answers[i] ? res.answers[i].label : "—"}`).join(" · "))}`);
+      return { output: `The user answered:\n${lines.join("\n")}` };
     }
 
     if (state.mode === "plan" || (state.printMode && !state.allowEdits)) {

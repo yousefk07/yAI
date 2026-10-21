@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.96",
+      "date": "2026-10-21",
+      "title": "yAI Code asks before it guesses",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Questions in a small form",
+          "text": "When a task has real choices the code can't answer (a fixed list or free text? one field or several?), yAI asks up to four questions in a form: a tab for each, numbered options with a line under each, Type something for your own answer, and Chat about this to talk it over. The Submit tab shows your answers before they go."
+        }
+      ]
+    },
+    {
       "version": "1.0.95",
       "date": "2026-10-21",
       "title": "yAI Code fills the window",

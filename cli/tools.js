@@ -262,6 +262,16 @@ const tools = {
   },
 
   // ---------- the web (2026-10-20) ----------
+  // A small form of questions (2026-10-21): tabs for each question and Submit, numbered options with a line under each,
+  // "Type something" for an answer of the user's own, and "Chat about this". index.js draws it (askForm).
+  ask_user: {
+    params: ["questions"],
+    describe:
+      'Ask the user 1 to 4 multiple-choice questions in a small form, when their answer changes what you build and the code can\'t tell you. ' +
+      '<questions> is JSON: [{"header":"Role","question":"Role: a fixed list or free text?","options":[{"label":"Fixed list","description":"Physician, Nurse injector, Clinic owner"},{"label":"Free text","description":"The rep types it"}]}]. ' +
+      "header is one or two words; 2 to 4 options each, with a short description. The user can also type their own answer. Their answers come back as the result.",
+    kind: "ask",
+  },
   web_search: {
     params: ["query"],
     describe: "Search the web. Returns titles, links and snippets. Use it for documentation, error messages, library versions and anything recent; then web_fetch the best link.",
