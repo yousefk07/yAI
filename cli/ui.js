@@ -1,9 +1,10 @@
 "use strict";
-// Terminal output in the look of the "PowerShell Agent Prototypes" design: a violet ◆ for yAI's
-// words, a blue › for yours, ✓ / ✕ steps with timings on the right, diffs in a box on soft green and
-// red backgrounds, PowerShell-style [Y] / [A] / [N] choices and a status footer above the prompt.
-// Four themes from the design (/theme): Midnight, Classic Blue, Paper and Amber. Colours are 24-bit;
-// with NO_COLOR or no terminal everything is plain text.
+// Terminal output in the look of the 2026-10-20 "yAI Code" design (Claude Design), the same type, neutrals and
+// purple accent as the web app: a purple ● for yAI's words, your messages on a soft band behind a purple ›,
+// "• Read  file  142 lines" step rows, numbered diffs on soft green and red, arrow-key choice boxes for approvals
+// and /model, and a status line over the prompt. Themes (/theme): yAI Dark (default) and yAI Light from the design,
+// plus the older Midnight, Classic Blue, Paper and Amber. Colours are 24-bit; with NO_COLOR or no terminal
+// everything is plain text.
 
 const { Writable } = require("stream");
 
@@ -16,6 +17,19 @@ const ROUND = { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│" }
 const SQUARE = { tl: "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│" };
 const DOUBLE = { tl: "╔", tr: "╗", bl: "╚", br: "╝", h: "═", v: "║" };
 const THEMES = {
+  // The design's dark and light terminals: bg = its panel, panel = its message band, accent = its purple ink.
+  dark: {
+    name: "yAI Dark", note: "the yAI design: warm near-black, purple accent", box: ROUND,
+    bg: "#1b1b1a", panel: "#282826", fg: "#ecebe7", dim: "#a4a39d", faint: "#7a7974", line: "#383834",
+    accent: "#c3aeff", user: "#c3aeff", warn: "#e0a64a", ok: "#47aa62", err: "#f69b94",
+    addbg: "#15301b", addfg: "#83d494", delbg: "#3e1e1c", delfg: "#f69b94", code: "#c3aeff", soft: "#31254d", chip: "#252523",
+  },
+  light: {
+    name: "yAI Light", note: "the yAI design: warm off-white, purple accent", box: ROUND,
+    bg: "#ffffff", panel: "#ecebe7", fg: "#1c1c1a", dim: "#5c5c57", faint: "#86857f", line: "#d6d5d0",
+    accent: "#693abb", user: "#693abb", warn: "#a8660b", ok: "#2e8a4e", err: "#a83634",
+    addbg: "#dcf7e1", addfg: "#09672e", delbg: "#ffe7e4", delfg: "#a83634", code: "#693abb", soft: "#f0eaff", chip: "#efeeea",
+  },
   midnight: {
     name: "Midnight", note: "neutral dark, violet accent, soft rounded panels", box: ROUND,
     bg: "#101217", panel: "#181b22", fg: "#d9dce2", dim: "#8a909b", faint: "#535863", line: "#2b303a",
@@ -41,8 +55,10 @@ const THEMES = {
     addbg: "#352816", addfg: "#ffe2b0", delbg: "#2f1a10", delfg: "#ff9d7a", code: "#ffe2b0",
   },
 };
-let theme = THEMES.midnight;
-let themeKey = "midnight";
+// Older themes: the choice band and chips use their panel colour.
+for (const t of Object.values(THEMES)) { t.soft ||= t.panel; t.chip ||= t.panel; }
+let theme = THEMES.dark;
+let themeKey = "dark";
 
 const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(";");
 const fg = (key) => (s) => (color ? `\x1b[38;2;${rgb(theme[key])}m${s}\x1b[39m` : String(s));
@@ -66,6 +82,8 @@ const c = {
   addfg: fg("addfg"),
   delfg: fg("delfg"),
   panel: bg("panel"),
+  soft: bg("soft"),
+  chip: bg("chip"),
   addbg: bg("addbg"),
   delbg: bg("delbg"),
 };
@@ -128,7 +146,7 @@ function drawSpinner() {
   if (!spin) return;
   const secs = Math.round((Date.now() - spin.start) / 1000);
   const meta = [`${secs}s`, spin.tokens ? `${tok(spin.tokens)} tokens` : ""].filter(Boolean).join(" · ");
-  const line = ` ${c.yellow(FRAMES[spin.frame++ % FRAMES.length])} ${c.yellow(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to interrupt")}`;
+  const line = ` ${c.accent(FRAMES[spin.frame++ % FRAMES.length])} ${c.accent(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to interrupt")}`;
   process.stdout.write("\r\x1b[K" + line);
 }
 const word = (t) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : "thinking");
@@ -227,12 +245,12 @@ function markdownWriter() {
     else out = c.ink(inline(line));
     if (first) {
       section("text");
-      print(` ${c.accent("◆")} ${out}`);
+      print(` ${c.accent("●")} ${out}`);
       first = false;
     } else print(`   ${out}`);
   };
 }
-// The width replies are wrapped at, so the indent under ◆ still fits.
+// The width replies are wrapped at, so the indent under ● still fits.
 const textWidth = () => Math.max(40, Math.min(columns(), 112) - 6);
 
 // The user's message, on the panel background: "› fix the billing tests".
@@ -242,25 +260,20 @@ function userLine(text) {
   rawPrint(c.panel(pad(` ${c.user("›")} ${c.ink(first)}`, width())));
 }
 
-// ---------- steps: "   ✓ read  api/_bizdays.js          41 lines   0.2s" ----------
-const VERB = { Read: "read", List: "list", Find: "find", Search: "search", Update: "edit", Edit: "edit", Write: "create", Create: "create", PowerShell: "run", Bash: "run", Shell: "run", Image: "image", Video: "video" };
+// ---------- steps: "   • Read    api/_bizdays.js  41 lines                 0.2s" ----------
+const VERB = { Read: "Read", List: "List", Find: "Find", Search: "Search", Update: "Edit", Edit: "Edit", Write: "Create", Create: "Create", PowerShell: "Run", Bash: "Run", Shell: "Run", Image: "Image", Video: "Video" };
 let pending = null;
 
 function rowText(p, result, col) {
-  const icon = col === c.red ? c.red("●") : col === c.yellow ? c.yellow("!") : c.green("✓");
-  let name = p.verb, arg = p.arg;
-  if (p.verb === "run") {
-    const sp = p.arg.indexOf(" ");
-    name = sp < 0 ? p.arg : p.arg.slice(0, sp);
-    arg = sp < 0 ? "" : p.arg.slice(sp + 1);
-  }
-  name = middle(name, 32);
+  const icon = col === c.red ? c.red("●") : col === c.yellow ? c.yellow("!") : c.faint("•");
+  const name = middle(p.verb, 24);
   const secs = (Date.now() - p.t) / 1000;
   const dur = secs < 0.1 ? "" : secs < 10 ? secs.toFixed(1) + "s" : Math.round(secs) + "s";
-  const res = result ? (col ? col(result) : c.dim(result)) : "";
-  const right = [res, dur ? c.faint(dur.padStart(5)) : ""].filter(Boolean).join("  ");
-  const room = Math.max(10, width() - 6 - name.length - (right ? vis(right) + 3 : 0));
-  const left = `   ${icon} ${c.ink(name)} ${c.dim(middle(arg, room))}`;
+  const res = result ? (col ? col(result) : c.faint(result)) : "";
+  const right = dur ? c.faint(dur.padStart(5)) : "";
+  const label = c.bold(c.ink(name.padEnd(7)));
+  const room = Math.max(10, width() - 8 - Math.max(7, name.length) - (res ? vis(res) + 2 : 0) - (right ? vis(right) + 3 : 0));
+  const left = `   ${icon} ${label} ${c.ink(middle(p.arg, room))}${res ? "  " + res : ""}`;
   return right ? pad(left, width() - vis(right)) + right : left;
 }
 function flushRow() {
@@ -275,7 +288,8 @@ function toolHeader(name, arg) {
   flushRow();
   if (last === "step" && output) rawPrint(""); // a step that showed output gets room after it
   section("step");
-  pending = { verb: VERB[name] || String(name).toLowerCase(), arg: String(arg || ""), t: Date.now() };
+  const verb = VERB[name] || String(name).charAt(0).toUpperCase() + String(name).slice(1);
+  pending = { verb, arg: String(arg || ""), t: Date.now() };
 }
 // Drops the waiting row (used before asking to run a command, which shows the command instead).
 function cancelRow() {
@@ -338,8 +352,8 @@ function lineDiff(a, b) {
 
 const splitLines = (s) => (s === "" ? [] : s.replace(/\r\n/g, "\n").split("\n"));
 
-// A proposed change in a box: the file and +/− counts on the panel, then the changed lines with three
-// lines of context, removed lines on red and added lines on green. A new file shows its first lines.
+// A proposed change: a "• Edit  file  +9 −1" row, then the changed lines in a box with three lines of context,
+// numbered as the file will be, removed lines on red and added lines on green. A new file shows its first lines.
 function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) {
   const ops = lineDiff(splitLines(before), splitLines(after));
   let added = 0, removed = 0;
@@ -348,11 +362,14 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
   ops.forEach((o, i) => {
     if (o.t !== " ") for (let k = Math.max(0, i - 3); k <= Math.min(ops.length - 1, i + 3); k++) show[k] = true;
   });
-  const inner = Math.min(columns() - 6, 100);
+  const inner = Math.min(columns() - 8, 100);
   const num = String(ops.length ? Math.max(...ops.map((o) => o.an || o.bn || 0)) : 1).length;
   const room = Math.max(10, inner - num - 5);
-  const counts = created ? c.dim(`new · ${added} line${added === 1 ? "" : "s"}`) : `${c.green("+" + added)} ${c.red("−" + removed)}`;
-  const rows = [{ text: ` ${c.ink(middle(title, inner - 16))}  ${counts}`, fill: "panel" }];
+  const counts = created ? c.faint(`new · ${added} line${added === 1 ? "" : "s"}`) : `${c.addfg("+" + added)} ${c.delfg("−" + removed)}`;
+  flushRow();
+  section("step");
+  rawPrint(`   ${c.faint("•")} ${c.bold(c.ink((created ? "Create" : "Edit").padEnd(7)))} ${c.ink(middle(title, inner - 20))}  ${counts}`);
+  const rows = [];
   let skipped = false, printed = 0;
   ops.forEach((o, i) => {
     if (!show[i]) return void (skipped = true);
@@ -362,14 +379,13 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
     printed++;
     const n = String(o.t === "-" ? o.an : o.bn).padStart(num);
     const text = clip(o.text.replace(/\t/g, "  "), room);
-    if (o.t === "-") rows.push({ text: c.delfg(` ${n} − ${text}`), fill: "del" });
-    else if (o.t === "+") rows.push({ text: c.addfg(` ${n} + ${text}`), fill: "add" });
-    else rows.push(c.faint(` ${n}   ${text}`));
+    if (o.t === "-") rows.push({ text: c.delfg(` ${n}  − ${text}`), fill: "del" });
+    else if (o.t === "+") rows.push({ text: c.addfg(` ${n}  + ${text}`), fill: "add" });
+    else rows.push(` ${c.faint(n)}    ${c.dim(text)}`);
   });
   const hidden = ops.filter((o, i) => show[i]).length - printed;
   if (hidden > 0) rows.push(c.faint(` … ${hidden} more line${hidden === 1 ? "" : "s"}`));
-  flushRow();
-  frame(rows, { indent: 3, inner });
+  frame(rows, { indent: 5, inner });
   last = "step"; // so yAI's next words get a blank line before them
   return { added, removed };
 }
@@ -384,17 +400,56 @@ function choices(list, def) {
 }
 
 // ---------- the welcome box ----------
-// " yAI  v1.0.0 · model: Qwen 3.8 27B Max · PowerShell", then label / value rows.
-function welcome({ version, model, shell, rows }) {
-  const inner = Math.min(columns() - 4, 96);
-  const labelW = 14;
-  const body = [` ${c.bold(c.accent("yAI"))}  ${c.dim(`v${version} · model: ${model} · ${shell}`)}`, ""];
-  for (const [label, value, extra] of rows) {
-    const room = inner - labelW - 2 - (extra ? vis(extra) + 1 : 0);
-    body.push(` ${c.dim(label.padEnd(labelW))}${c.ink(middle(value, Math.max(10, room)))}${extra ? " " + extra : ""}`);
+// The design's start screen: "yAI• Code" and the version on the left, a rule, then label / value rows
+// (model, project, context …); under the box the tips and recent sessions are printed by index.js.
+function welcome({ version, rows }) {
+  const inner = Math.min(columns() - 4, 100);
+  const leftW = 31;
+  const logo = `${c.ink("y")}${c.bold(c.ink("AI"))}${c.accent("•")} ${c.dim("Code")}`;
+  const left = ["", logo, c.faint(`v${version}`), c.faint("your models, your terminal"), ""];
+  const labelW = 9;
+  const right = rows.map(([label, value, extra]) => {
+    const room = inner - leftW - 5 - labelW - (extra ? vis(extra) + 1 : 0);
+    return `${c.faint(label.padEnd(labelW))}${c.ink(middle(value, Math.max(10, room)))}${extra ? " " + extra : ""}`;
+  });
+  const n = Math.max(left.length, right.length + 2);
+  const top = Math.floor((n - right.length) / 2);
+  const body = [];
+  for (let i = 0; i < n; i++) {
+    const r = right[i - top] || "";
+    body.push(`  ${pad(left[i] || "", leftW - 2)}${c.line(theme.box.v)}  ${r}`);
   }
   print("");
   frame(body, { indent: 1, inner });
+}
+
+// ---------- choice boxes: approvals, /model, the folder trust question ----------
+// A box with an accent border: a title (and a note on its right), an optional detail on a chip, optional column
+// headings, the options with a › on the chosen one (on the soft purple band), and a hint at the bottom.
+// Returns the lines; index.js prints them and redraws them in place as the arrow keys move.
+function selectLines({ title, note: titleNote = "", detail, header, options, selected, hint }) {
+  const inner = Math.min(columns() - 9, 96);
+  const b = theme.box;
+  const edge = (s) => c.accent(s);
+  const row = (s, fill) => {
+    const body = pad(s, inner);
+    return `     ${edge(b.v)}${fill ? fill(body) : body}${edge(b.v)}`;
+  };
+  const lines = [`     ${edge(b.tl + b.h.repeat(inner) + b.tr)}`];
+  const head = ` ${c.bold(c.ink(title))}`;
+  lines.push(row(titleNote ? pad(head, inner - vis(titleNote) - 1) + c.faint(titleNote) : head));
+  if (detail) lines.push(row(` ${c.chip(` ${c.ink(clip(detail, inner - 4))} `)}`));
+  lines.push(row(""));
+  if (header) lines.push(row(`   ${c.faint(header)}`));
+  options.forEach((o, i) => {
+    const on = i === selected;
+    const text = `${on ? c.accent("›") : " "} ${on ? c.bold(c.accent(o)) : c.dim(o)}`;
+    lines.push(row(` ${text}`, on ? c.soft : null));
+  });
+  lines.push(row(""));
+  lines.push(row(` ${c.faint(hint || "↑↓ choose · enter confirm · esc cancel")}`));
+  lines.push(`     ${edge(b.bl + b.h.repeat(inner) + b.br)}`);
+  return lines;
 }
 
 // The line above the prompt: status on the left, keys on the right, all quiet.
@@ -411,6 +466,6 @@ function resetSections() {
 
 module.exports = {
   c, print, spinner, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
-  welcome, footer, frame, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal,
+  welcome, footer, frame, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };

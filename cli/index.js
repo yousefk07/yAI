@@ -239,6 +239,128 @@ function nestedRepos() {
   return repoCache;
 }
 
+
+// ---------- choice boxes (the 2026-10-20 design): ↑↓ or a number to choose, enter to confirm, esc to cancel ----------
+// Draws ui.selectLines and redraws it in place. Resolves to the chosen index, or -1 for esc / Ctrl+C.
+// While it's open the typed keys don't reach readline's line (output is muted and the line is cleared after).
+function select(opts) {
+  if (!process.stdout.isTTY) return Promise.resolve(0);
+  spinner.stop();
+  let sel = opts.selected || 0;
+  let lines = ui.selectLines({ ...opts, selected: sel });
+  for (const l of lines) process.stdout.write(l + "\n");
+  const wasMuted = ui.rlOutput.muted;
+  ui.rlOutput.muted = true;
+  state.selecting = true;
+  return new Promise((resolve) => {
+    const redraw = () => {
+      const next = ui.selectLines({ ...opts, selected: sel });
+      process.stdout.write(`\x1b[${lines.length}A`);
+      for (const l of next) process.stdout.write("\r\x1b[K" + l + "\n");
+      lines = next;
+    };
+    let finished = false;
+    const done = (i) => {
+      if (finished) return;
+      finished = true;
+      process.stdin.removeListener("keypress", onKey);
+      state.selecting = false;
+      state.cancelSelect = null;
+      // The box goes away; what was chosen is shown by the caller.
+      process.stdout.write(`\x1b[${lines.length}A\r\x1b[J`);
+      rl.write(null, { ctrl: true, name: "u" });
+      ui.rlOutput.muted = wasMuted;
+      resolve(i);
+    };
+    const onKey = (s, key = {}) => {
+      if (key.name === "up" || key.name === "k") { sel = (sel + opts.options.length - 1) % opts.options.length; redraw(); }
+      else if (key.name === "down" || key.name === "j" || key.name === "tab") { sel = (sel + 1) % opts.options.length; redraw(); }
+      else if (key.name === "return" || key.name === "enter") done(sel);
+      else if (key.name === "escape" || (key.ctrl && key.name === "c")) done(-1);
+      else if (/^[1-9]$/.test(s || "") && Number(s) <= opts.options.length) { sel = Number(s) - 1; redraw(); done(sel); }
+    };
+    state.cancelSelect = () => done(-1);
+    process.stdin.on("keypress", onKey);
+  });
+}
+
+// ---------- /help: the commands, grouped, in columns ----------
+const HELP_GROUPS = [
+  ["Session", [["/clear", "start a new conversation"], ["/resume", "continue the last one here"], ["/compact", "summarise to free context"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
+  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"]]],
+  ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
+  ["Look & make", [["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
+  ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"]]],
+  ["Account", [["/login", "sign in to yAI"], ["/logout", "sign out"], ["/theme", "colours"], ["/config url", "use another yAI site"], ["/exit", "quit"]]],
+  ["Keys", [["@", "mention a file or folder"], ["!", "run a shell command"], ["shift+tab", "cycle the approval mode"], ["esc", "interrupt yAI"]]],
+];
+function showHelp() {
+  const inner = Math.min(ui.columns() - 4, 112);
+  const cols = inner >= 108 ? 3 : inner >= 72 ? 2 : 1;
+  const colW = Math.floor((inner - 2) / cols);
+  const keyW = 12;
+  const blocks = HELP_GROUPS.map(([name, items]) => [
+    c.faint(name),
+    ...items.map(([k, d]) => `${c.accent(k.padEnd(keyW))}${c.dim(ui.middle(d, colW - keyW - 2))}`),
+  ]);
+  const rows = [` ${c.bold(c.ink("Commands"))}${" ".repeat(Math.max(2, inner - 10 - 33))}${c.faint("type one at the prompt to run it")}`, ""];
+  for (let i = 0; i < blocks.length; i += cols) {
+    const group = blocks.slice(i, i + cols);
+    const h = Math.max(...group.map((g) => g.length));
+    for (let r = 0; r < h; r++) rows.push(" " + group.map((g) => padVis(g[r] || "", colW)).join(""));
+    rows.push("");
+  }
+  rows.push(` ${c.faint("Docs and setup: ")}${c.dim(api.baseUrl())}${c.faint("  ·  yai -p \"task\" answers once  ·  yai -c continues")}`);
+  ui.print("");
+  ui.frame(rows, { indent: 1, inner });
+}
+const padVis = (s, n) => s + " ".repeat(Math.max(0, n - ui.stripAnsi(s).length));
+
+// ---------- /model: a table to pick from ----------
+const SPEED = { "kimi-k3-ultra": "~48 tok/s", "qwen3.8-27b-cloud": "~34 tok/s", "qwen3-coder-30b-cloud": "~60 tok/s" };
+async function modelPicker() {
+  let ultraLeft = "";
+  try {
+    const u = await (await fetch(`${api.baseUrl()}/api/hub?op=usage`, { headers: { Cookie: api.cfg.cookie || "", "User-Agent": "yai-code/1.0" } })).json();
+    if (u.today) ultraLeft = `$${Math.max(0, u.today.ultra.limitUsd - u.today.ultra.spentUsd).toFixed(2)} left`;
+  } catch {}
+  const W = { name: 24, where: 10, ctx: 9, speed: 11 };
+  const rowOf = (m) => {
+    const where = m.price || m.id === "kimi-k3-ultra" ? "hosted" : m.cloud || /cloud/.test(m.id) ? "cloud GPU" : "your PC";
+    const ctx = m.context ? `${Math.round(m.context / 1000)}k` : "8k";
+    const cost = m.id === "kimi-k3-ultra" ? ultraLeft || "daily limit" : "free";
+    const name = ui.middle(m.label, W.name - (m.id === state.model ? 10 : 1)) + (m.id === state.model ? " (current)" : "");
+    return `${name.padEnd(W.name)}${where.padEnd(W.where)}${ctx.padEnd(W.ctx)}${(SPEED[m.id] || (where === "your PC" ? "~120 tok/s" : "—")).padEnd(W.speed)}${cost}`;
+  };
+  const i = await select({
+    title: "Switch model", note: "applies from the next message",
+    header: `${"model".padEnd(W.name)}${"where".padEnd(W.where)}${"context".padEnd(W.ctx)}${"speed".padEnd(W.speed)}cost`,
+    options: state.models.map(rowOf),
+    selected: Math.max(0, state.models.findIndex((m) => m.id === state.model)),
+    hint: "↑↓ choose · enter switch · esc cancel",
+  });
+  return i < 0 ? null : state.models[i];
+}
+
+// Recently used sessions in any folder, for the welcome screen: [{ when, title, here }]
+function recentSessions(n = 3) {
+  const dir = path.join(api.DIR, "sessions");
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t).slice(0, n * 2);
+  } catch {}
+  const out = [];
+  for (const { f } of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      if (!s.messages?.length || String(s.root || "").startsWith(os.tmpdir())) continue; // not /bench's temporary folders
+      out.push({ when: ago(s.savedAt), title: sessionTitle(s), folder: path.basename(s.root || ""), here: s.root === root });
+    } catch {}
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
 // ---------- system prompt ----------
 function projectNotes() {
   for (const name of ["YAI.md", "CLAUDE.md", "AGENTS.md"]) {
@@ -335,7 +457,7 @@ function syncMute() {
 // The prompt: "› ", with a faint hint while it's empty.
 const PLACEHOLDER = "Ask yAI, or / for commands";
 function promptText() {
-  return ` ${c.user("›")} `;
+  return ` ${c.accent("›")} `;
 }
 
 // Git branch and how many files are modified, for the footer and the welcome box.
@@ -369,23 +491,34 @@ function toolBudget() {
 }
 
 // The line above the prompt: "main ● 2 modified   ctx 23%   approvals: ask        ⇧⇥ plan mode   /undo".
-const MODE_NAMES = { default: "ask", acceptEdits: "auto-edit", plan: "plan · read-only" };
+const MODE_NAMES = { default: "ask before running", acceptEdits: "auto-approve edits", plan: "plan · read-only" };
+const shortPath = (p) => { const h = os.homedir(); return p.toLowerCase().startsWith(h.toLowerCase()) ? "~" + p.slice(h.length).replace(/\\/g, "/") : p; };
 function footerLine() {
-  const left = [];
+  const left = [`${c.green("●")} ${c.dim(modelLabel())}`, c.faint(ui.middle(shortPath(root), 36))];
   const git = gitStatus();
-  if (git) left.push(c.faint(git.branch) + (git.modified ? " " + c.yellow(`● ${git.modified} modified`) : ""));
-  left.push(c.faint(`ctx ${contextPercent()}%`));
-  left.push(c.faint("approvals: ") + (state.mode === "default" ? c.faint("ask") : c.yellow(MODE_NAMES[state.mode])));
-  if (state.tutor) left.push(c.yellow("tutor"));
+  if (git) left.push(c.faint(git.branch) + (git.modified ? " " + c.yellow(`●${git.modified}`) : ""));
+  left.push(state.mode === "default" ? c.faint(MODE_NAMES.default) : c.accent(MODE_NAMES[state.mode]));
+  if (state.tutor) left.push(c.accent("tutor"));
   if (state.duo) left.push(c.accent("duo"));
-  const right = [c.faint(state.mode === "plan" ? "⇧⇥ leave plan" : "⇧⇥ plan mode"), c.faint(state.undo.length ? "/undo" : "/help")];
-  return ui.footer(left, right);
+  const pct = contextPercent();
+  const filled = Math.round((pct / 100) * 6);
+  const meter = c.dim("━".repeat(filled)) + c.line("─".repeat(6 - filled));
+  const right = [c.faint(state.lastStats || "ready"), `${c.faint("context")} ${meter} ${c.faint(pct + "%")}`];
+  // On a narrow terminal the folder goes first, so the stats and the context meter stay.
+  const fits = (l) => ui.stripAnsi(ui.footer(l, right)).includes("context");
+  return ui.footer(fits(left) ? left : left.filter((_, i) => i !== 1), right);
+}
+// The rule the prompt sits under, with the keys on its right.
+function ruleLine() {
+  const hint = state.undo.length ? "@ files · / commands · /undo" : "@ files · / commands · ⇧⇥ mode";
+  return " " + c.line("─".repeat(Math.max(4, ui.width() - hint.length - 3))) + " " + c.faint(hint);
 }
 
 function showPrompt() {
   if (state.printMode) return;
   print("");
   print(footerLine());
+  print(ruleLine());
   rl.setPrompt(promptText());
   rl.prompt(true);
   showPlaceholder();
@@ -399,7 +532,7 @@ function showPlaceholder() {
 function setMode(mode, { announce = true } = {}) {
   state.mode = mode;
   if (announce && !state.busy) {
-    process.stdout.write("\r\x1b[K\x1b[1A\r\x1b[K" + footerLine() + "\n");
+    process.stdout.write("\r\x1b[K\x1b[2A\r\x1b[K" + footerLine() + "\n" + ruleLine() + "\n");
     rl.setPrompt(promptText());
     rl.prompt(true);
     showPlaceholder();
@@ -465,6 +598,7 @@ function setupReadline() {
   rl = readline.createInterface({ input: process.stdin, output: ui.rlOutput, terminal: true, history, historySize: 300, completer });
 
   process.stdin.on("keypress", (s, key) => {
+    if (state.selecting) return;
     // The first key clears the faint hint (readline has already drawn the key; this wipes the rest).
     if (state.placeholder && !state.asking) {
       state.placeholder = false;
@@ -486,6 +620,7 @@ function setupReadline() {
   });
 
   rl.on("SIGINT", () => {
+    if (state.selecting) return state.cancelSelect && state.cancelSelect();
     if (state.asking) {
       state.escAnswer = true;
       rl.write(null, { ctrl: true, name: "u" });
@@ -515,6 +650,11 @@ function setupReadline() {
   // Pasted text arrives as many lines at once: lines that land within 25 ms become one message.
   let lines = [], timer = null;
   rl.on("line", (line) => {
+    // Enter in a choice box (and anything ↑ pulled from history meanwhile) isn't a message.
+    if (state.selecting) {
+      if (rl.history && rl.history[0] === line) rl.history.shift();
+      return;
+    }
     if (state.asking) return;
     lines.push(line);
     clearTimeout(timer);
@@ -773,23 +913,15 @@ function fromKimi(text) {
   return `${before}\n\n<tool name="${call[1]}">\n${body}\n</tool>`;
 }
 
-// "Apply edit to math.js?" then "[Y] Yes  [A] Yes to All  [N] No  (default is "Y"):", PowerShell-style.
-// One letter, Enter means yes.
-async function askPermission(questionText, alwaysLabel) {
+// "Run this command?" in a box: › 1 Yes · 2 Yes, and don't ask again … · 3 No, tell yAI what to do instead.
+async function askPermission(title, alwaysLabel, detail) {
   spinner.stop();
-  print(`   ${c.ink(questionText)}`);
-  const line = ui.choices([["Y", "Yes"], ["A", alwaysLabel], ["N", "No"]], "Y");
-  for (;;) {
-    const raw = await question(line);
-    if (raw === null) return { no: true, feedback: "" };
-    const a = raw.trim().toLowerCase();
-    if (a === "" || a === "y" || a === "yes" || a === "1") return "yes";
-    if (a === "a" || a === "always" || a === "2") return "always";
-    if (a === "n" || a === "no" || a === "3") {
-      const fb = await question(`   ${c.ink("What should yAI do instead?")} ${c.dim("(Enter to just stop):")} `);
-      return { no: true, feedback: (fb || "").trim() };
-    }
-  }
+  const i = await select({ title, detail, options: ["Yes", alwaysLabel, "No, tell yAI what to do instead"] });
+  if (i === 0) return "yes";
+  if (i === 1) return "always";
+  if (i < 0) return { no: true, feedback: "" };
+  const fb = await question(`   ${c.accent("›")} ${c.ink("What should yAI do instead?")} ${c.faint("(Enter to just stop)")} `);
+  return { no: true, feedback: (fb || "").trim() };
 }
 
 function commandPrefix(cmd) {
@@ -818,7 +950,7 @@ async function execTool(call) {
         const allowedMcp = project().mcpAllowed || [];
         if (!state.printMode && !allowedMcp.includes(call.name)) {
           ui.cancelRow();
-          const ans = await askPermission(`Use ${c.bold(tool.tool)} from the MCP server ${tool.server}?`, "Always for this tool");
+          const ans = await askPermission("Use this MCP tool?", "Yes, and don't ask again for this tool", `${tool.server} · ${tool.tool}`);
           if (ans.no) return rejected(ans);
           if (ans === "always") {
             project().mcpAllowed = [...allowedMcp, call.name];
@@ -860,7 +992,7 @@ async function execTool(call) {
       const name = path.basename(plan.abs);
       T.showEdit(ctx, plan);
       if (state.mode !== "acceptEdits") {
-        const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply edit to ${name}?`, "Yes to All");
+        const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply this edit to ${name}?`, "Yes, and apply edits without asking");
         if (ans.no) return rejected(ans);
         if (ans === "always") state.mode = "acceptEdits";
       }
@@ -886,7 +1018,7 @@ async function execTool(call) {
       // The question shows the command, so the waiting step row is dropped and redrawn after.
       ui.cancelRow();
       const prefix = commandPrefix(command);
-      const ans = await askPermission(`Run ${c.bold(ui.middle(shownCommand, ui.columns() - 12))}?`, chained ? "Yes, this once" : `Always for "${prefix}"`);
+      const ans = await askPermission("Run this command?", chained ? "Yes, this once" : `Yes, and don't ask again for ${prefix}`, shownCommand);
       if (ans.no) return rejected(ans);
       if (ans === "always" && !chained) {
         project().allowedCommands.push(prefix);
@@ -1044,7 +1176,8 @@ async function runAgent(content) {
     }
     const secs = Math.round((Date.now() - started) / 1000);
     const out = state.usage.out - startOut;
-    if (secs >= 5) print(c.faint(`\n done in ${secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}${out ? ` · ${kTokens(out)} tokens` : ""}`));
+    const took = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+    state.lastStats = out ? `↓ ${kTokens(out)} tok · ${Math.round(out / Math.max(1, secs))} tok/s · ${took}` : `done in ${took}`;
     if (state.mode === "plan") print(c.dim(" ⇧⇥ to leave plan mode, then tell yAI to go ahead"));
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
   } catch (err) {
@@ -1132,7 +1265,7 @@ const HELP = [
   ["/plan", "Think first: read-only planning mode"],
   ["/undo", "Revert the last edit yAI made (not commands)"],
   ["/resume", "Continue the last conversation in this folder"],
-  ["/theme [name]", "Midnight · Classic Blue · Paper · Amber"],
+  ["/theme [name]", "yAI Dark · yAI Light · Midnight · Classic Blue · Paper · Amber"],
   ["/fix [test command]", "Run the tests and let yAI fix them until they pass · /fix watch reruns on save"],
   ["/review [focus]", "A second model reviews your uncommitted changes (runs the tests too)"],
   ["/commit [note]", "Write a commit message for your changes and commit"],
@@ -1166,7 +1299,7 @@ async function chooseTheme(arg) {
   }
   const q = arg.toLowerCase();
   const key = THEME_KEYS[Number(q) - 1] || THEME_KEYS.find((k) => k === q || ui.THEMES[k].name.toLowerCase().startsWith(q));
-  if (!key) return print(c.yellow(`No theme matches "${arg}". Try midnight, blue, paper or amber.`));
+  if (!key) return print(c.yellow(`No theme matches "${arg}". Try dark, light, midnight, blue, paper or amber.`));
   ui.setTheme(key);
   api.cfg.theme = key;
   api.save();
@@ -1319,14 +1452,10 @@ const INIT_PROMPT =
 async function chooseModel(arg) {
   await loadModels();
   if (!arg) {
-    print("");
-    state.models.forEach((m, i) => {
-      const mark = m.id === state.model ? c.accent("◆") : " ";
-      print(` ${mark} ${String(i + 1).padStart(2)}. ${c.bold(c.ink(m.label))} ${c.dim("· " + (m.desc || m.id))}`);
-    });
     if (state.localOffline) print(c.yellow("   The PC is offline, so only cloud models are listed."));
-    arg = ((await question(c.dim(" Pick a model (number or name, Enter to keep): "))) || "").trim();
-    if (!arg) return;
+    const picked = await modelPicker();
+    if (!picked) return;
+    arg = picked.id;
   }
   const m = findModel(arg);
   if (!m) return print(c.yellow(`No model matches "${arg}".`));
@@ -1405,13 +1534,7 @@ async function command(line) {
   switch (cmd) {
     case "/help":
     case "/?":
-      print("");
-      for (const [n, d] of HELP) print(`  ${c.bold(c.ink(n.padEnd(34)))} ${c.dim(d)}`);
-      print("");
-      print(c.dim("  @path        attach a file or folder to your message (Tab completes)"));
-      print(c.dim("  !command     run a shell command yourself; yAI sees the output"));
-      print(c.dim("  esc          stop yAI · ⇧⇥ cycles ask / auto-edit / plan · paste works for multi-line text"));
-      return;
+      return showHelp();
     case "/model":
       return chooseModel(arg);
     case "/mode": {
@@ -1575,7 +1698,7 @@ async function main() {
 
   if (printPrompt !== null) {
     state.printMode = true;
-    ui.setTheme(api.cfg.theme || "midnight", { paint: false }); // a one-off answer leaves the terminal's colours alone
+    ui.setTheme(api.cfg.theme || "dark", { paint: false }); // a one-off answer leaves the terminal's colours alone
     if (!process.stdin.isTTY) {
       let piped = "";
       for await (const chunk of process.stdin) piped += chunk;
@@ -1595,7 +1718,7 @@ async function main() {
     process.exit(1);
   }
 
-  ui.setTheme(api.cfg.theme || "midnight");
+  ui.setTheme(api.cfg.theme || "dark");
   process.on("exit", () => ui.resetTerminal()); // the terminal gets its own colours back however yai ends
   setupReadline();
   await ensureLogin();
@@ -1610,37 +1733,32 @@ async function main() {
     else print(c.yellow(`No model matches "${modelArg}".`));
   }
 
-  // The welcome box: workspace and git, the project notes, the last conversation, the account.
+  // The welcome box (the design's start screen): model, project, instructions, account.
   const git = gitStatus();
-  const rows = [["workspace", root, git ? c.dim(`(git: ${git.branch}, ${git.modified ? `${git.modified} modified` : "clean"})`) : ""]];
+  const cur = state.models.find((m) => m.id === state.model);
+  const where = !cur ? "" : cur.id === "kimi-k3-ultra" ? "hosted" : cur.cloud || /cloud/.test(cur.id) ? "cloud GPU" : "your PC";
+  const rows = [["model", modelLabel(), cur ? c.faint(`· ${where} · ${Math.round((cur.context || 8192) / 1000)}k context`) : ""]];
+  rows.push(["project", shortPath(root), git ? c.faint(`· ${git.branch}${git.modified ? ` · ${git.modified} modified` : ""}`) : ""]);
   const notes = ["YAI.md", "CLAUDE.md", "AGENTS.md"].find((n) => fs.existsSync(path.join(root, n)));
-  if (notes) {
-    const n = fs.readFileSync(path.join(root, notes), "utf8").split("\n").length;
-    rows.push(["instructions", `${notes} loaded`, c.dim(`· ${n} lines`)]);
-  } else rows.push(["instructions", "none yet", c.dim("· /init writes YAI.md")]);
-  const saved = readSession();
-  if (saved?.messages?.length && !resume) rows.push(["last session", `“${sessionTitle(saved)}”`, c.dim(`· ${ago(saved.savedAt)} · /resume`)]);
+  if (notes) rows.push(["context", notes, c.faint(`· ${fs.readFileSync(path.join(root, notes), "utf8").split("\n").length} lines`)]);
+  else rows.push(["context", "no notes yet", c.faint("· /init writes YAI.md")]);
   rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
-  if (prewarm()) rows.push(["gpu", "waking up", c.dim("· in the background while you type")]);
-  ui.welcome({ version: VERSION, model: modelLabel(), shell: process.platform === "win32" ? "PowerShell" : path.basename(process.env.SHELL || "bash"), rows });
+  if (prewarm()) rows.push(["gpu", "waking up", c.faint("· in the background while you type")]);
+  ui.welcome({ version: VERSION, rows });
 
   // First time in a folder: ask before working in it.
   if (!project().trusted) {
     print("");
-    print(` ${c.yellow("?")} ${c.ink("Trust this folder? yAI will read files and propose commands in")} ${c.bold(c.ink(root))}${c.ink(".")}`);
-    for (;;) {
-      const a = ((await question(` ${ui.choices([["Y", "Yes"], ["S", "Yes, this session only"], ["N", "No"], ["?", "Help"]], "Y").trimStart()}`)) || "").trim().toLowerCase();
-      if (a === "" || a === "y" || a === "yes") {
-        project().trusted = true;
-        api.save();
-        break;
-      }
-      if (a === "s") break;
-      if (a === "n" || a === "no") {
-        print(c.dim("   OK. Start yai in a folder you trust."));
-        return rl.close();
-      }
-      print(c.dim("   yAI reads files in this folder and asks before it edits a file or runs a command. Trusting it just skips this question next time."));
+    const i = await select({
+      title: "Trust this folder?", note: "yAI reads files here and asks before changes", detail: root,
+      options: ["Yes, trust it", "Yes, for this session only", "No, quit"],
+    });
+    if (i === 0) {
+      project().trusted = true;
+      api.save();
+    } else if (i !== 1) {
+      print(c.dim("   OK. Start yai in a folder you trust."));
+      return rl.close();
     }
   }
 
@@ -1653,9 +1771,18 @@ async function main() {
     if (m) ui.note(`${m.failed.length ? c.yellow("!") : c.green("✓")} ${c.ink("MCP: " + m.text)}${m.failed.length ? c.dim(` · didn't start: ${m.failed.join(", ")} (/mcp)`) : ""}`);
   }
   if (resume) resumeSession();
+  // Tips and recent sessions, as in the design's start screen
   print("");
-  const hint = (cmd, text) => `${c.dim(cmd)} ${c.faint(text)}`;
-  print(" " + [hint("/plan", "think first"), hint("/undo", "revert last edit"), hint("/image", "make an image"), hint("/theme", "colours"), hint("@file", "attach")].join("   "));
+  const k = (key, text) => `${c.accent(key)}  ${c.dim(text)}`;
+  print(` ${c.faint("Tips")}`);
+  print(` ${[k("/model", "switch model"), k("@", "mention a file"), k("/help", "all commands")].join("     ")}`);
+  print(` ${[k("shift+tab", "cycle ask · auto-approve · plan"), k("!", "run a command yourself")].join("     ")}`);
+  const recent = recentSessions(3);
+  if (recent.length) {
+    print("");
+    print(` ${c.faint("Recent sessions")}`);
+    for (const r of recent) print(` ${c.faint(r.when.padEnd(12))}${c.ink(r.title)}${r.here ? c.faint("  · /resume") : c.faint(`  · ${r.folder}`)}`);
+  }
   showPrompt();
 }
 
