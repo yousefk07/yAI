@@ -591,7 +591,7 @@ module.exports = function create(d) {
       : `${c.green("✓")} ${c.ink("tests pass")}${r.pass !== undefined ? c.dim(` · ${r.pass}`) : ""}`;
     if (ui.stripAnsi(line) === lastWatch) return;
     lastWatch = ui.stripAnsi(line);
-    if (process.stdout.isTTY) process.stdout.write("\r\x1b[K");
+    if (process.stdout.isTTY && !ui.screen) process.stdout.write("\r\x1b[K");
     print(`   ${line}`);
     d.showPrompt();
   }

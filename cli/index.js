@@ -21,6 +21,9 @@ const ui = require("./ui");
 const T = require("./tools");
 const { c, print, spinner } = ui;
 const LOOK = require("./look")({ ui }); // the v2 look: status pill, key bar, plan card, approvals, summaries
+// The full-window app (cli/screen.js): header, conversation, plan panel, input box and key bar, like the design.
+const SCREEN = require("./screen")({ ui });
+ui.setScreen(SCREEN);
 
 // The version is the build number: how many changes have been pushed to yAI so far (the site's What's new page uses the
 // same number). Read from git when yai runs from its own clone, otherwise from package.json.
@@ -291,15 +294,19 @@ function select(opts) {
   let sel = opts.selected || 0;
   const render = opts.render || ui.selectLines;
   let lines = render({ ...opts, selected: sel });
-  for (const l of lines) process.stdout.write(l + "\n");
+  if (SCREEN.on) SCREEN.setExtra(["", ...lines]);
+  else for (const l of lines) process.stdout.write(l + "\n");
   const wasMuted = ui.rlOutput.muted;
   ui.rlOutput.muted = true;
   state.selecting = true;
   return new Promise((resolve) => {
     const redraw = () => {
       const next = render({ ...opts, selected: sel });
-      process.stdout.write(`\x1b[${lines.length}A`);
-      for (const l of next) process.stdout.write("\r\x1b[K" + l + "\n");
+      if (SCREEN.on) SCREEN.setExtra(["", ...next]);
+      else {
+        process.stdout.write(`\x1b[${lines.length}A`);
+        for (const l of next) process.stdout.write("\r\x1b[K" + l + "\n");
+      }
       lines = next;
     };
     let finished = false;
@@ -310,12 +317,14 @@ function select(opts) {
       state.selecting = false;
       state.cancelSelect = null;
       // The box goes away; what was chosen is shown by the caller.
-      process.stdout.write(`\x1b[${lines.length}A\r\x1b[J`);
+      if (SCREEN.on) SCREEN.setExtra([]);
+      else process.stdout.write(`\x1b[${lines.length}A\r\x1b[J`);
       rl.write(null, { ctrl: true, name: "u" });
       ui.rlOutput.muted = wasMuted;
       resolve(i);
     };
     const onKey = (s, key = {}) => {
+      if (state.inMouse) return; // a mouse-wheel report's characters aren't answers
       if (opts.keys && s && opts.keys.includes(s.toLowerCase())) { sel = opts.keys.indexOf(s.toLowerCase()); redraw(); return done(sel); }
       if (key.name === "up" || key.name === "left" || (key.name === "k" && !opts.keys)) { sel = (sel + opts.options.length - 1) % opts.options.length; redraw(); }
       else if (key.name === "down" || key.name === "right" || (key.name === "j" && !opts.keys) || key.name === "tab") { sel = (sel + 1) % opts.options.length; redraw(); }
@@ -525,7 +534,8 @@ let lastCtrlC = 0;
 const queue = [];
 
 function syncMute() {
-  ui.rlOutput.muted = state.busy && !state.asking;
+  ui.rlOutput.muted = SCREEN.on || (state.busy && !state.asking);
+  SCREEN.render();
 }
 
 // The prompt: "› ", with a faint hint while it's empty (what it says depends on where things stand).
@@ -607,6 +617,11 @@ function showPrompt() {
     state.redrawWhenIdle = false;
     redrawTranscript();
   }
+  if (SCREEN.on) {
+    rl.setPrompt("");
+    rl.prompt(true);
+    return drawBelow();
+  }
   print("");
   const [st, label] = pillState();
   print(LOOK.statusRow({ project: path.basename(root), branch: gitBranch(), st, label }));
@@ -615,6 +630,34 @@ function showPrompt() {
   showPlaceholder();
   drawBelow();
 }
+// What each part of the full-window app shows (cli/screen.js asks for them on every draw).
+let branchCache = { at: 0, name: "" };
+function liveBranch() {
+  if (Date.now() - branchCache.at > 5000) branchCache = { at: Date.now(), name: gitBranch() };
+  return branchCache.name;
+}
+const panelOpen = () => !!(SCREEN.on && state.busy && state.plan && state.plan.steps.length && state.task && !state.task.over && (process.stdout.columns || 0) >= 100);
+SCREEN.parts.header = (cols) => {
+  let [st, label] = pillState();
+  if (state.selecting && state.busy) [st, label] = ["waiting", "Waiting for you"];
+  else if (state.busy) [st, label] = ["working", state.plan && state.plan.steps.length ? `Working · step ${Math.min(state.plan.done + 1, state.plan.steps.length)} of ${state.plan.steps.length}` : "Working"];
+  return LOOK.headerRow(cols, { project: path.basename(root), branch: liveBranch(), st, label });
+};
+SCREEN.parts.panel = () => (panelOpen() ? (w) => LOOK.panelLines(state.plan, state.task, w) : null);
+SCREEN.parts.input = () => {
+  const text = rl ? rl.line : "";
+  if (state.asking) {
+    return { label: "›", text: state.askHidden ? "•".repeat(text.length) : text, cursor: rl.cursor, placeholder: state.askLabel || "", active: true };
+  }
+  if (state.busy) return { text, cursor: rl ? rl.cursor : 0, placeholder: state.selecting ? "Or tell me what to do instead" : "Add a note while I work…", hint: "I'll read it after this step", active: false };
+  return { text, cursor: rl ? rl.cursor : 0, placeholder: placeholder(), hint: text ? "" : state.phase === "welcome" ? "enter to send" : "", active: true };
+};
+SCREEN.parts.keys = (cols) => {
+  const list = suggestions();
+  const keys = list ? LOOK.KEYS.commands : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
+  return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
+};
 function showPlaceholder() {
   if (!process.stdout.isTTY || rl.line) return;
   const p = placeholder();
@@ -646,6 +689,13 @@ function belowLines() {
   return [LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() })];
 }
 function drawBelow() {
+  if (SCREEN.on) {
+    // the /command suggestions sit at the end of the conversation, over the input
+    const list = !state.busy && !state.selecting && !state.asking ? suggestions() : null;
+    if (list) sugg.sel = Math.min(sugg.sel, Math.max(0, list.length - 1));
+    if (!state.selecting) SCREEN.setExtra(list ? ["", ...LOOK.suggestionLines(list, sugg.sel, rl.line)] : []);
+    return SCREEN.render();
+  }
   if (!process.stdout.isTTY || state.printMode || state.stdio || state.busy || state.selecting || state.asking || !rl) return;
   const lines = belowLines();
   const cols = process.stdout.columns || 100;
@@ -658,7 +708,7 @@ function drawBelow() {
 
 function setMode(mode, { announce = true } = {}) {
   state.mode = mode;
-  if (announce && !state.busy) drawBelow();
+  if (announce && (!state.busy || SCREEN.on)) drawBelow();
 }
 
 // rl.question, but the answer doesn't end up in the ↑ history.
@@ -666,18 +716,22 @@ function setMode(mode, { announce = true } = {}) {
 function question(q, { hidden = false } = {}) {
   state.asking = true;
   state.escAnswer = false;
+  state.askLabel = ui.stripAnsi(String(q)).trim();
+  state.askHidden = hidden;
   syncMute();
   return new Promise((resolve) => {
-    if (hidden) {
+    if (hidden && !SCREEN.on) {
       process.stdout.write(q);
       ui.rlOutput.muted = true;
     }
     rl.question(hidden ? "" : q, (answer) => {
       if (rl.history && rl.history[0] === answer) rl.history.shift();
-      if (hidden) {
+      if (hidden && !SCREEN.on) {
         ui.rlOutput.muted = false;
         process.stdout.write("\n");
       }
+      state.askLabel = "";
+      state.askHidden = false;
       state.asking = false;
       syncMute();
       resolve(state.escAnswer ? null : answer);
@@ -728,6 +782,7 @@ function setupReadline() {
       if (process.stdout.columns === cols) return;
       cols = process.stdout.columns;
       state.redrawWhenIdle = true;
+      if (SCREEN.on) return SCREEN.render(); // the full-window app redraws at any size
       if (state.busy || state.asking || state.selecting) return;
       process.stdout.write("\r\x1b[K");
       showPrompt();
@@ -737,7 +792,25 @@ function setupReadline() {
   // While a /command is being typed, ↑↓ move through the suggestions (not the history), tab completes the chosen
   // one, enter runs it and esc closes the list.
   const ttyWrite = rl._ttyWrite.bind(rl);
+  let mouse = null;
   rl._ttyWrite = (s, key = {}) => {
+    // Mouse reports (SGR: ESC [ < button ; x ; y M) arrive as single characters; the wheel scrolls, the rest is dropped.
+    if (SCREEN.on) {
+      if (key.code === "[<") { mouse = ""; state.inMouse = true; return; }
+      if (mouse !== null) {
+        if (s === "M" || s === "m") {
+          const btn = Number(mouse.split(";")[0]);
+          if (btn === 64) SCREEN.scrollBy(3);
+          else if (btn === 65) SCREEN.scrollBy(-3);
+          mouse = null;
+          setImmediate(() => (state.inMouse = false));
+        } else mouse += s || "";
+        return;
+      }
+      if (key.name === "pageup") return SCREEN.page(1);
+      if (key.name === "pagedown") return SCREEN.page(-1);
+      if (key.name === "end" && key.ctrl) return SCREEN.toBottom();
+    }
     const list = !state.busy && !state.selecting && !state.asking ? suggestions() : null;
     if (list && list.length) {
       const setLine = (t) => { rl.line = t; rl.cursor = t.length; rl._refreshLine(); };
@@ -753,7 +826,8 @@ function setupReadline() {
   };
 
   process.stdin.on("keypress", (s, key) => {
-    if (state.selecting) return;
+    if (SCREEN.on) setImmediate(() => SCREEN.render());
+    if (state.selecting || state.inMouse) return;
     // (not after enter: the input has just been sent, and the bar under it goes away with it)
     if (!state.busy && !state.asking && !(key && (key.name === "return" || key.name === "enter"))) setImmediate(() => {
       if (!/^\/\S*$/.test(rl.line)) sugg.sel = 0;
@@ -769,13 +843,13 @@ function setupReadline() {
         const act = k === "?" ? () => command("/help").then(showPrompt) : state.quick[k.toLowerCase()];
         rl.line = "";
         rl.cursor = 0;
-        process.stdout.write("\r\x1b[J");
+        if (!SCREEN.on) process.stdout.write("\r\x1b[J");
         print("");
         act();
       }, 450);
     }
     // The first key clears the faint hint (readline has already drawn the key; this wipes the rest).
-    if (state.placeholder && !state.asking) {
+    if (state.placeholder && !state.asking && !SCREEN.on) {
       state.placeholder = false;
       process.stdout.write("\x1b[K");
     }
@@ -810,7 +884,8 @@ function setupReadline() {
     if (rl.line) return rl.write(null, { ctrl: true, name: "u" });
     if (Date.now() - lastCtrlC < 2000) return rl.close();
     lastCtrlC = Date.now();
-    process.stdout.write("\r\x1b[K" + c.dim("Press Ctrl+C again to exit") + "\n");
+    if (SCREEN.on) print(c.dim("   Press Ctrl+C again to exit"));
+    else process.stdout.write("\r\x1b[K" + c.dim("Press Ctrl+C again to exit") + "\n");
     rl.prompt(true);
   });
 
@@ -819,6 +894,7 @@ function setupReadline() {
       fs.mkdirSync(api.DIR, { recursive: true });
       fs.writeFileSync(HISTORY_FILE, [...rl.history].reverse().join("\n") + "\n");
     } catch {}
+    SCREEN.exit();
     process.stdout.write("\n");
     ui.resetTerminal();
     process.exit(0);
@@ -1226,6 +1302,7 @@ async function execTool(call) {
     if (tool.readOnly) {
       const doing = { read_file: "reading", list_files: "listing files", find_files: "finding files", search: "searching the files" }[call.name];
       if (doing) spinner.start(doing);
+      if (state.task) call.name === "read_file" ? state.task.reads++ : state.task.searches++;
       try {
         return { output: await tool.run(ctx, call.args) };
       } finally {
@@ -1381,9 +1458,9 @@ async function runAgent(content) {
   const failedCommands = new Set();
   const undoStart = state.undo.length;
   const costStart = state.cost.session;
-  state.task = { files: new Map(), tests: null, failure: null, offerFix: false };
+  state.task = { files: new Map(), tests: null, failure: null, offerFix: false, reads: 0, searches: 0 };
   state.plan = null;
-  if (process.stdout.isTTY && !state.stdio) ui.setLive(() => LOOK.planLines(state.plan, { files: state.task.files }));
+  if (process.stdout.isTTY && !state.stdio) ui.setLive(() => (panelOpen() ? [] : LOOK.planLines(state.plan, { files: state.task.files })));
   let reviewed = false;
   let nudges = 0; // replies that announced a step but stopped before it
   let planReady = false; // plan mode finished with a plan: ask to go ahead
@@ -1498,6 +1575,7 @@ async function runAgent(content) {
     const out = state.usage.out - startOut;
     const took = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
     state.lastStats = out ? `↓ ${kTokens(out)} tok · ${Math.round(out / Math.max(1, secs))} tok/s · ${took}` : `done in ${took}`;
+    state.task.over = true; // the plan panel closes, so the summary gets the full width
     if (!state.interrupted) finishTask({ took, secs: took.replace("s", " s"), out, cost: state.cost.session - costStart, undoStart });
     if (state.mode === "plan" && !state.printMode && !state.interrupted) planReady = true;
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
@@ -1613,7 +1691,7 @@ function pasteImage({ fromCommand = false } = {}) {
   const file = clipboardImage();
   if (!file) {
     if (fromCommand) return print(c.yellow("   There's no image on the clipboard. Copy a screenshot first (Win+Shift+S on Windows), then Alt+V."));
-    process.stdout.write(`\r\x1b[K${c.faint("   no image on the clipboard")}\n`);
+    print(c.faint("   no image on the clipboard"));
     return rl.prompt(true);
   }
   state.pasted.push(file);
@@ -1859,7 +1937,7 @@ function welcomeRows() {
 // words and a row for each step it took (tool output itself isn't kept, so steps show without their results).
 const STEP_NAMES = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Edit", write_file: "Create", run: "Run", web_search: "Web search", web_fetch: "Fetch", task_output: "Task output", task_stop: "Stop task" };
 function redrawTranscript() {
-  if (!process.stdout.isTTY || state.printMode) return;
+  if (!process.stdout.isTTY || state.printMode || SCREEN.on) return; // the full-window app redraws itself
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   ui.resetSections();
   ui.welcome({ version: VERSION, rows: welcomeRows() });
@@ -2158,7 +2236,8 @@ async function command(line) {
       state.conversationId = crypto.randomUUID();
       state.title = null;
       ctx.readFiles.clear();
-      if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+      if (SCREEN.on) SCREEN.clear();
+      else if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
       return print(c.dim("New conversation."));
     case "/compact":
       return compact(arg);
@@ -2255,6 +2334,12 @@ async function command(line) {
 
 // readline has echoed what was typed after "› "; redraw it as the user's message on the panel.
 function restyleInput(text) {
+  if (SCREEN.on) {
+    SCREEN.toBottom();
+    SCREEN.endStart();
+    print("");
+    return ui.userLine(text);
+  }
   if (!process.stdout.isTTY || text.includes("\n")) return;
   const rows = Math.max(1, Math.ceil((3 + text.length) / ui.columns()));
   // the key bar under the input, the input itself and the status row over it make way for the message
@@ -2268,7 +2353,7 @@ async function handleInput(input) {
   let text = input.trim();
   if (!text) {
     // an empty enter: the prompt is drawn again in the same place, not under the old one
-    if (process.stdout.isTTY && !state.stdio) process.stdout.write("\r\x1b[J" + "\x1b[1A".repeat(3) + "\r\x1b[J");
+    if (process.stdout.isTTY && !state.stdio && !SCREEN.on) process.stdout.write("\r\x1b[J" + "\x1b[1A".repeat(3) + "\r\x1b[J");
     return showPrompt();
   }
   restyleInput(input);
@@ -2278,6 +2363,7 @@ async function handleInput(input) {
   state.hint = "";
   if (state.prefix && !text.startsWith("/")) text = state.prefix + text;
   state.prefix = "";
+  if (state.mcpStart) await state.mcpStart; // MCP servers start in the background; their tools are needed now
   try {
     if (text.startsWith("/") && !text.includes("\n") && /^\/[a-z?]+(\s|$)/i.test(text)) await command(text);
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());
@@ -2608,9 +2694,16 @@ async function main() {
     else print(c.yellow(`No model matches "${modelArg}".`));
   }
 
+  // The full-window app, unless YAI_CLASSIC=1 asks for the plain scrolling terminal.
+  if (!process.env.YAI_CLASSIC) {
+    SCREEN.enter();
+    syncMute();
+  }
   // The start screen (v2): a greeting, what yAI saw in the project, four numbered starters, and the last conversation.
   const here = recentSessions(6).find((r) => r.here);
-  for (const l of LOOK.welcome({ user: state.user, projectName: path.basename(root), root, version: VERSION, recent: here })) print(l);
+  const start = LOOK.welcome({ user: state.user, projectName: path.basename(root), root, version: VERSION, recent: here, logo: !SCREEN.on });
+  for (const l of start) print(l);
+  SCREEN.centerFirst(start.length + 1);
   if (prewarm()) print(`  ${c.faint(`${modelLabel()} is waking up in the background while you type`)}`);
   state.phase = "welcome";
   state.quick = {
@@ -2639,11 +2732,19 @@ async function main() {
 
   // MCP servers start after the folder is trusted; their tools are ready by the time the first answer needs them.
   if (!process.env.YAI_NO_MCP && MCP.configured().length) {
-    spinner.start("starting MCP servers");
-    await MCP.startAll({ approve: approveMcp });
-    spinner.stop();
-    const m = mcpSummary();
-    if (m) ui.note(`${m.failed.length ? c.yellow("!") : c.green("✓")} ${c.ink("MCP: " + m.text)}${m.failed.length ? c.dim(` · didn't start: ${m.failed.join(", ")} (/mcp)`) : ""}`);
+    const announce = () => {
+      const m = mcpSummary();
+      if (m) ui.note(`${m.failed.length ? c.yellow("!") : c.green("✓")} ${c.ink("MCP: " + m.text)}${m.failed.length ? c.dim(` · didn't start: ${m.failed.join(", ")} (/mcp)`) : ""}`);
+    };
+    if (SCREEN.on) {
+      // in the background: you can type straight away, and a message waits for them
+      state.mcpStart = MCP.startAll({ approve: approveMcp }).catch(() => {}).then(() => { state.mcpStart = null; announce(); });
+    } else {
+      spinner.start("starting MCP servers");
+      await MCP.startAll({ approve: approveMcp });
+      spinner.stop();
+      announce();
+    }
   }
   if (resume) await resumeSession(resume === "last" ? "last" : "");
   if (remote) await remoteMode();
@@ -2652,6 +2753,7 @@ async function main() {
 
 main().catch((err) => {
   spinner.stop();
+  SCREEN.exit(); // back to the normal screen first, so the error stays readable
   console.error(c.red(err.message));
   ui.resetTerminal();
   process.exit(1);

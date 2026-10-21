@@ -110,7 +110,8 @@ const vis = (s) => stripAnsi(s).length;
 const pad = (s, n) => s + " ".repeat(Math.max(0, n - vis(s)));
 const columns = () => process.stdout.columns || Number(process.env.YAI_COLUMNS) || 100;
 // The width everything is drawn to: the terminal's, less a margin, up to 120 columns on a full-screen window.
-const width = () => Math.max(40, Math.min(columns() - 2, 120));
+// In the full-window app it's the conversation's pane (narrower while the plan panel is open).
+const width = () => (screen && screen.on ? screen.width() : Math.max(40, Math.min(columns() - 2, 120)));
 
 // Cut from the middle, so both ends stay readable: a command's name and a path's file name.
 function middle(s, n) {
@@ -147,7 +148,12 @@ let spin = null;
 let liveAbove = null; // () => string[]
 let liveRows = 0;     // rows the live area takes on screen now (the working line included)
 const setLive = (fn) => { liveAbove = fn; };
+// The full-window app (cli/screen.js), when it's on: printed lines and the working line go to it.
+let screen = null;
+const setScreen = (s) => { screen = s; };
+const full = () => screen && screen.on;
 function clearLive() {
+  if (full()) return screen.setLive([]);
   if (!liveRows) return;
   process.stdout.write((liveRows > 1 ? `\x1b[${liveRows - 1}A` : "") + "\r\x1b[J");
   liveRows = 0;
@@ -159,6 +165,7 @@ function drawSpinner() {
   const meta = [`${secs}s`, spin.tokens ? `↓ ${tok(spin.tokens)} tokens` : "", spin.extra || ""].filter(Boolean).join(" · ");
   const line = ` ${c.accent(FRAMES[spin.frame++ % FRAMES.length])} ${c.ink(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to pause")}`;
   const above = (liveAbove && liveAbove()) || [];
+  if (full()) return screen.setLive(["", ...above, line]);
   clearLive();
   process.stdout.write([...above, line].join("\n"));
   liveRows = above.length + 1;
@@ -226,6 +233,7 @@ const setSink = (fn) => (sink = fn);
 function rawPrint(text) {
   if (sink) return sink({ type: "out", text: String(text) + "\n" });
   output = /^ {5}/.test(stripAnsi(text));
+  if (full()) return screen.add(text);
   if (spin) clearLive();
   process.stdout.write(text + "\n");
   if (spin) drawSpinner();
@@ -533,6 +541,6 @@ function resetSections() {
 
 module.exports = {
   c, print, spinner, setSink, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
-  welcome, footer, frame, setLive, clearLive, pad, vis, clip, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
+  welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };

@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.95",
+      "date": "2026-10-21",
+      "title": "yAI Code fills the window",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "A full-window app, like the design",
+          "text": "The header with the status pill stays at the top, the plan sits in a panel on the right while yAI works, and the input box and the keys that work right now stay at the bottom. PgUp/PgDn or the mouse wheel scroll back through the conversation. YAI_CLASSIC=1 brings back the plain scrolling terminal."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Ready to type straight away",
+          "text": "MCP servers start in the background, so the input works at once; a message waits for them if it needs their tools."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Cleaner start",
+          "text": "The start screen sits in the middle of the window and gives way to the conversation; \"pick up where you left off\" shows a clean title."
+        }
+      ]
+    },
+    {
       "version": "1.0.92",
       "date": "2026-10-21",
       "title": "yAI Code, reimagined",

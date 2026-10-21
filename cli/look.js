@@ -36,16 +36,49 @@ module.exports = function create({ ui }) {
   }
   // The keys that work now on the left; the mode, the model and the memory on the right.
   const keyChip = (k) => c.chip(` ${c.dim(k)} `);
-  function keysRow(keys, { mode, model, memory }) {
+  function keysRow(keys, { mode, model, memory }, width = W()) {
     const left = " " + keys.map(([k, l]) => `${keyChip(k)} ${c.faint(l)}`).join("  ");
     const right = [`${keyChip("shift+tab")} ${mode}`, `${c.green("●")} ${c.dim(model)}`, c.faint(`memory ${memory}% used`)];
     for (let n = right.length; n >= 0; n--) {
       const r = right.slice(0, n).join("   ");
-      if (ui.vis(left) + ui.vis(r) + 3 <= W()) return ui.pad(left, W() - ui.vis(r)) + r;
+      if (ui.vis(left) + ui.vis(r) + 3 <= width) return ui.pad(left, width - ui.vis(r) - 1) + r;
     }
     return left;
   }
+  // The full-window header: the same row, across the whole window.
+  function headerRow(cols, { project, branch, st, label }) {
+    const left = ` ${c.ink("y")}${c.bold(c.ink("AI"))}${c.accent("•")} ${c.dim("Code")}  ${c.line("│")}  ${c.ink(project)}${branch ? c.faint(" on ") + c.dim(branch) : ""}`;
+    const right = pill(st, label) + " ";
+    return ui.pad(left, Math.max(ui.vis(left) + 1, cols - ui.vis(right))) + right;
+  }
+  // The plan panel on the right of the full-window app: progress, the steps, what was read, the files changed.
+  function panelLines(plan, task, w) {
+    const total = plan.steps.length, done = Math.min(plan.done, total);
+    const head = `${c.bold(c.ink("Plan"))}`, prog = c.faint(`${done} of ${total} done`);
+    const out = ["", ui.pad(head, w - ui.vis(prog)) + prog];
+    const fill = Math.round((done / Math.max(1, total)) * w);
+    out.push(c.accent("━".repeat(fill)) + c.line("━".repeat(Math.max(0, w - fill))), "");
+    plan.steps.forEach((t, i) => {
+      const st = i < done ? "done" : i === done ? "now" : "todo";
+      const mark = st === "done" ? c.chip(c.faint(` ${i + 1} `)) : st === "now" ? c.soft(c.bold(c.accent(` ${i + 1} `))) : c.faint(` ${i + 1} `);
+      const words = wrap(t, w - 5);
+      words.forEach((l, k) => out.push(`${k ? "    " : mark + " "}${st === "now" ? c.bold(c.ink(l)) : st === "done" ? c.faint(l) : c.dim(l)}`));
+    });
+    out.push("", c.line("─".repeat(w)));
+    const seen = [task.reads ? `Read ${task.reads} file${task.reads === 1 ? "" : "s"}` : "", task.searches ? `${task.searches} search${task.searches === 1 ? "" : "es"}` : ""].filter(Boolean).join(" · ");
+    out.push(c.dim(seen || "Nothing read yet"));
+    if (task.files.size) {
+      out.push(c.line("─".repeat(w)), c.faint("Files changed"));
+      for (const [f, n] of task.files) {
+        const counts = `${c.addfg("+" + n.a)}${n.d ? " " + c.delfg("−" + n.d) : ""}`;
+        out.push(ui.pad(c.ink(ui.clip(f, w - ui.vis(counts) - 2)), w - ui.vis(counts)) + counts);
+      }
+    }
+    return out;
+  }
   const KEYS = {
+    working: [["esc", "pause"], ["type", "to add a note"]],
+    waiting: [["y", "yes"], ["a", "always"], ["n", "no"], ["esc", "pause"]],
     welcome: [["1–4", "pick"], ["/", "commands"], ["@", "add a file"], ["?", "help"]],
     ready: [["/", "commands"], ["@", "add a file"], ["?", "help"]],
     finished: [["r", "review"], ["u", "undo all"], ["c", "commit"], ["/", "commands"]],
@@ -125,21 +158,23 @@ module.exports = function create({ ui }) {
     }
     return out;
   }
-  function welcome({ user, projectName, root, version, recent }) {
+  function welcome({ user, projectName, root, version, recent, logo = true }) {
     const s = projectSummary(root);
     const what = [s.kind || "a project", s.files ? `with ${s.files} file${s.files === 1 ? "" : "s"}` : "", s.tests ? `and ${s.tests} test file${s.tests === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ");
     const lines = [
-      "",
-      `  ${c.ink("█ █")} ${c.bold(c.ink("▄▀▄ █"))}`,
-      `  ${c.ink("▀▄█")} ${c.bold(c.ink("█▀█ █"))}${c.accent("▄")}  ${c.dim("Code")}   ${c.faint("v" + version)}`,
-      `  ${c.ink("▄▄▀")}`,
+      ...(logo ? ["",
+        `  ${c.ink("█ █")} ${c.bold(c.ink("▄▀▄ █"))}`,
+        `  ${c.ink("▀▄█")} ${c.bold(c.ink("█▀█ █"))}${c.accent("▄")}  ${c.dim("Code")}   ${c.faint("v" + version)}`,
+        `  ${c.ink("▄▄▀")}`] : []),
       "",
       `  ${c.bold(c.ink(`Hi ${user ? user.charAt(0).toUpperCase() + user.slice(1) : "there"}. What should we do in ${projectName}?`))}`,
       ...wrap(s.files ? `I've looked at the project: ${what}. Type anything, or press a number.` : "This folder is empty. Describe what to build, or press a number.", W() - 4).map((l) => `  ${c.dim(l)}`),
       "",
       ...starters(changedSinceCommit(root)),
     ];
-    if (recent) lines.push("", `  ${c.panel(` ${keyChip("R")} ${c.bold(c.ink("Pick up where you left off:"))} ${c.dim(`“${ui.clip(recent.title, Math.max(10, W() - 60))}”, ${recent.when}`)} `)}`);
+    // the last conversation's title, without any tags or pasted context the first message carried
+    const title = recent ? String(recent.title).replace(/<[^>]*>[\s\S]*$/, "").replace(/\s+/g, " ").trim() || "your last conversation" : "";
+    if (recent) lines.push("", `  ${c.panel(` ${keyChip("R")} ${c.bold(c.ink("Pick up where you left off:"))} ${c.dim(`“${ui.clip(title, Math.max(10, W() - 60))}”, ${recent.when}`)} `)}`);
     return lines;
   }
 
@@ -294,5 +329,5 @@ module.exports = function create({ ui }) {
     return out;
   }
 
-  return { pill, statusRow, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
+  return { pill, statusRow, headerRow, panelLines, keysRow, KEYS, welcome, projectSummary, suggestionLines, planLines, PLAN_RULES, riskOf, approveTitle, approveLines, cards, buttons, testCounts, failureLines, keyChip };
 };

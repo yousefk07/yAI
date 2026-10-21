@@ -159,6 +159,7 @@ module.exports = function create(d) {
     const draw = () => {
       if (!tty) return;
       const lines = boardLines(agents, tick++);
+      if (ui.screen) return ui.screen.setExtra(["", ...lines]); // the full-window app keeps the board at the end
       if (drawn) process.stdout.write(`\x1b[${drawn}A`);
       for (const l of lines) process.stdout.write("\r\x1b[K" + l + "\n");
       drawn = lines.length;
@@ -199,6 +200,8 @@ module.exports = function create(d) {
         draw();
       });
     } finally {
+      // the full-window app: the board's last state goes into the conversation, where it stays
+      if (ui.screen) { ui.screen.setExtra([]); for (const l of boardLines(agents, 0)) print(l); }
       state.busy = false;
       state.abort = null;
       d.syncMute();
