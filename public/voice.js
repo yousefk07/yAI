@@ -142,14 +142,43 @@
     if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => ({}))).error || "No voice"), { fallback: true });
     return URL.createObjectURL(await r.blob());
   }
+  // The browser's own voice. Chrome has three traps, all handled here: speech queued right after cancel() is
+  // dropped (so it starts a moment later), an utterance can be garbage-collected mid-sentence so onend never fires
+  // (so they're kept in `held`), and its online voices stop after about 15 s (so text goes a sentence or two at a
+  // time, on a voice installed on the device when there is one).
+  const held = [];
+  function pickVoice() {
+    const all = speechSynthesis.getVoices();
+    const lang = (navigator.language || "en-US").toLowerCase();
+    const same = all.filter((v) => v.lang.toLowerCase() === lang);
+    const base = all.filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2)));
+    return same.find((v) => v.localService) || base.find((v) => v.localService) || same[0] || base[0] || null;
+  }
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => {};
   function browserSpeak(text, onEnd) {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = navigator.language || "en-US";
-    u.rate = 1.03;
-    u.onend = u.onerror = () => onEnd();
+    const chunks = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)?.reduce((out, s) => {
+      if (out.length && (out[out.length - 1] + s).length < 220) out[out.length - 1] += s;
+      else out.push(s);
+      return out;
+    }, []) || [text];
+    let stopped = false, i = 0;
+    const voice = pickVoice();
+    const next = () => {
+      if (stopped) return;
+      if (i >= chunks.length) { held.length = 0; return onEnd(); }
+      const u = new SpeechSynthesisUtterance(chunks[i++].trim());
+      if (voice) u.voice = voice;
+      u.lang = voice?.lang || navigator.language || "en-US";
+      u.rate = 1.03;
+      u.onend = next;
+      u.onerror = (e) => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
+      held.push(u);
+      speechSynthesis.speak(u);
+      speechSynthesis.resume(); // Chrome sometimes leaves the queue paused
+    };
     speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-    return () => { speechSynthesis.cancel(); };
+    setTimeout(next, 60);
+    return () => { stopped = true; speechSynthesis.cancel(); held.length = 0; onEnd(); };
   }
   // Speaks text; resolves when it ends or is stopped.
   function speak(text, { onStart } = {}) {
