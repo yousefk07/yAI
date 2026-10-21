@@ -15,18 +15,43 @@ function renderTex(tex, display) {
   }
 }
 
+// Calendar and email (2026-10-20): <gmail-draft …>body</gmail-draft> and <calendar-event …>notes</calendar-event> from the
+// model become cards the chat page gives Save buttons (extras.js). Attributes are read, never passed through as HTML.
+const attrsOf = (s) => Object.fromEntries([...String(s).matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+function googleCard(tag, attrs, body, done) {
+  const a = attrsOf(attrs);
+  const data = escapeHtml(JSON.stringify({ ...a, body: body.trim() }));
+  if (tag === "gmail-draft") {
+    return `<div class="g-card" data-kind="draft" data-g="${data}"><div class="g-head"><span class="g-badge">Gmail draft</span><b>${escapeHtml(a.subject || "(no subject)")}</b></div>` +
+      `<div class="g-meta">To ${escapeHtml(a.to || "?")}${a["reply-to"] ? " · a reply" : ""}</div><div class="g-body">${escapeHtml(body.trim())}</div>` +
+      `<div class="g-actions">${done ? '<button type="button" class="btn-primary g-save">Save to Gmail drafts</button>' : '<span class="muted">Writing…</span>'}</div></div>`;
+  }
+  return `<div class="g-card" data-kind="event" data-g="${data}"><div class="g-head"><span class="g-badge">Calendar</span><b>${escapeHtml(a.title || "Event")}</b></div>` +
+    `<div class="g-meta">${escapeHtml((a.start || "").replace("T", " "))}${a.end ? " – " + escapeHtml(a.end.replace("T", " ")) : ""}${a.location ? " · " + escapeHtml(a.location) : ""}</div>` +
+    (body.trim() ? `<div class="g-body">${escapeHtml(body.trim())}</div>` : "") +
+    `<div class="g-actions">${done ? '<button type="button" class="btn-primary g-save">Add to Google Calendar</button>' : '<span class="muted">Writing…</span>'}</div></div>`;
+}
+
 window.renderMarkdown = function renderMarkdown(src) {
   const blocks = [];
   const hold = (html) => `\u0000${blocks.push(html) - 1}\u0000`;
   const displayMath = (tex) => `\n${hold(`<div class="math">${renderTex(tex.trim(), true)}</div>`)}\n`;
 
   let text = String(src)
+    // Canvas (2026-10-20): ```canvas <kind> <title> is a document for the canvas beside the chat (canvas.js), shown as a card.
+    .replace(/```canvas[ \t]+([\w+#.-]+)[ \t]*([^\n]*)\n?([\s\S]*?)(```|$)/g, (_, kind, title, body, end) =>
+      hold(`<div class="canvas-card${end ? "" : " writing"}" data-kind="${escapeHtml(kind.toLowerCase())}" data-title="${escapeHtml(title.trim() || "Untitled")}">` +
+        `<div class="cc-icon">${kind.toLowerCase() === "doc" ? "Aa" : "&lt;/&gt;"}</div><div class="cc-text"><b>${escapeHtml(title.trim() || "Untitled")}</b>` +
+        `<small>${kind.toLowerCase() === "doc" ? "Document" : escapeHtml(kind)} · ${body.split("\n").length} lines${end ? "" : " · writing"}</small></div>` +
+        `<button type="button" class="btn-ghost open-canvas">Open</button><pre hidden class="cc-src">${escapeHtml(body.replace(/\n$/, ""))}</pre></div>`))
+    .replace(/<(gmail-draft|calendar-event)\b([^>]*)>([\s\S]*?)(<\/\1>|$)/g, (_, tag, attrs, body, end) => `\n${hold(googleCard(tag, attrs, body, !!end))}\n`)
     .replace(/```([\w+#.-]*)[^\n]*\n?([\s\S]*?)(```|$)/g, (_, lang, code) =>
       hold(
         `<div class="code"><div class="code-head"><span>${escapeHtml(lang || "code")}</span>` +
           // Web code gets a live Preview (the chat page runs it in a sandboxed frame).
           (/^(html?|svg|xml|js|javascript|jsx)$/i.test(lang) ? `<button class="preview-code" type="button" data-lang="${escapeHtml(lang.toLowerCase())}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5l13 7.5-13 7.5z"/></svg><span>Preview</span></button>` : "") +
           (/^(python|py)$/i.test(lang) && typeof window !== "undefined" && window.yaiData ? `<button class="run-code" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5l13 7.5-13 7.5z"/></svg><span>Run</span></button>` : "") +
+          (typeof window !== "undefined" && window.yaiCanvas ? `<button class="to-canvas" type="button" title="Edit in the canvas"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span>Edit</span></button>` : "") +
           `<button class="copy-code" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>Copy</span></button></div>` +
           `<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre></div>`
       ))

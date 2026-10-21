@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>API keys · yAI</title>
+  <meta name="description" content="Call yAI's models from your own code with an OpenAI-style API." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* API keys (2026-10-20): make and delete keys, and how to call /v1/chat/completions (lib/apikeys.js). */
+    .btn-primary { width: auto; padding: 0 16px; }
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+    .panel h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    .panel p { margin: 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row input { flex: 1; min-width: 180px; height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font-size: 14px; }
+    .key { display: grid; grid-template-columns: 1fr auto auto auto; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
+    .key code, .new-key code { font-family: var(--mono); font-size: 13px; }
+    .key small { color: var(--muted); font-size: 12.5px; }
+    .new-key { padding: 14px; border-radius: 12px; background: var(--acc-soft); display: flex; flex-direction: column; gap: 8px; }
+    .new-key div { display: flex; gap: 8px; align-items: center; }
+    .new-key code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 8px 10px; border-radius: 8px; background: var(--surface); color: var(--text); }
+    .new-key b { color: var(--acc-ink); font-weight: 600; font-size: 13.5px; }
+    pre { margin: 0; padding: 14px 16px; border-radius: 12px; background: var(--code-bg); border: 1px solid var(--border); font: 12.5px/1.6 var(--mono); overflow-x: auto; }
+    .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-2); gap: 2px; align-self: flex-start; }
+    .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: none; font-size: 13px; font-weight: 500; color: var(--text-2); }
+    .seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+    td code { font: 12.5px var(--mono); }
+    tr:last-child td { border-bottom: 0; }
+    .err { color: var(--bad); font-size: 13px; margin: 0; min-height: 16px; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) {
+      .stage { padding: 4px 16px 24px; }
+      .head h1 { display: none; } .page-title { display: block; }
+      .key { grid-template-columns: 1fr auto; }
+      .key .hide-sm { display: none; }
+    }
+    @media (max-width: 600px) { .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; } }
+  </style>
+</head>
+<body data-page="developers">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">API keys</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap">
+          <div class="head"><h1>API keys</h1><p>Use yAI's models from your own code. The API works like OpenAI's, so most libraries and tools that take a "base URL" work with it. Calls count toward your own daily limits (yAI Ultra's dollar allowance included) and show on <a href="/usage">your usage page</a>.</p></div>
+
+          <section class="panel">
+            <h2>Your keys</h2>
+            <div class="row"><input id="keyName" placeholder="Name this key, e.g. my script" maxlength="60" /><button type="button" class="btn-primary" id="create">Create a key</button></div>
+            <p class="err" id="err" role="alert"></p>
+            <div id="fresh"></div>
+            <div id="keys"><p style="color:var(--muted);font-size:14px;margin:0">Loading…</p></div>
+          </section>
+
+          <section class="panel">
+            <h2>Calling the API</h2>
+            <p>Base URL <code id="base"></code> · send your key as <code>Authorization: Bearer yai_…</code></p>
+            <div class="seg" id="lang" role="tablist">
+              <button type="button" data-l="curl" aria-selected="true">curl</button>
+              <button type="button" data-l="python" aria-selected="false">Python</button>
+              <button type="button" data-l="js" aria-selected="false">JavaScript</button>
+            </div>
+            <pre id="sample"></pre>
+            <p>Add <code>"stream": true</code> for a streamed reply (server-sent events, the same chunks as OpenAI's). A <code>system</code> message becomes instructions at the top of the conversation.</p>
+          </section>
+
+          <section class="panel">
+            <h2>Models</h2>
+            <table><thead><tr><th>Model id</th><th>Also called</th><th>About</th></tr></thead>
+              <tbody>
+                <tr><td><code>kimi-k3-ultra</code></td><td><code>yai-ultra</code></td><td>yAI Ultra, the most capable. Uses your daily dollar allowance.</td></tr>
+                <tr><td><code>qwen3.8-27b-cloud</code></td><td><code>yai-max</code></td><td>yAI Q3.8 Max. Strong, reads images; may take a minute to wake up.</td></tr>
+                <tr><td colspan="3" style="color:var(--muted)"><code>GET /v1/models</code> lists what's available right now, including yAI Q3.5 and yAI P4 when the host PC is on.</td></tr>
+              </tbody></table>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/side.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const base = `${location.origin}/v1`;
+    $("base").textContent = base;
+    let lastKey = "yai_your_key_here";
+    const SAMPLES = {
+      curl: () => `curl ${base}/chat/completions \\
+  -H "Authorization: Bearer ${lastKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "yai-ultra",
+    "messages": [{ "role": "user", "content": "Explain recursion in one paragraph." }]
+  }'`,
+      python: () => `# pip install openai
+from openai import OpenAI
+
+client = OpenAI(base_url="${base}", api_key="${lastKey}")
+reply = client.chat.completions.create(
+    model="yai-ultra",
+    messages=[{"role": "user", "content": "Explain recursion in one paragraph."}],
+)
+print(reply.choices[0].message.content)`,
+      js: () => `// npm install openai
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "${base}", apiKey: "${lastKey}" });
+const reply = await client.chat.completions.create({
+  model: "yai-ultra",
+  messages: [{ role: "user", content: "Explain recursion in one paragraph." }],
+});
+console.log(reply.choices[0].message.content);`,
+    };
+    let lang = "curl";
+    const showSample = () => ($("sample").textContent = SAMPLES[lang]());
+    $("lang").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      lang = b.dataset.l;
+      $("lang").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+      showSample();
+    });
+    showSample();
+
+    const when = (iso) => (iso ? new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "never");
+    async function load() {
+      const r = await fetch("/api/hub?op=apikeys", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/"; return; }
+      const { keys = [] } = await r.json();
+      $("keys").innerHTML = keys.length ? keys.map((k) => `<div class="key"><div><b style="font-weight:500">${esc(k.name)}</b><br><small><code>${esc(k.prefix)}…</code> · made ${when(k.createdAt)}</small></div>
+        <small class="hide-sm">${k.requests.toLocaleString()} request${k.requests === 1 ? "" : "s"}</small><small class="hide-sm">last used ${when(k.lastUsed)}</small>
+        <button type="button" class="btn-ghost" data-del="${esc(k.id)}" style="color:var(--bad)">Delete</button></div>`).join("")
+        : '<p style="color:var(--muted);font-size:14px;margin:0">No keys yet.</p>';
+    }
+    $("create").addEventListener("click", async () => {
+      $("err").textContent = "";
+      const r = await fetch("/api/hub?op=apikey", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("keyName").value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { $("err").textContent = d.error || "Couldn't create a key"; return; }
+      lastKey = d.key.token;
+      showSample();
+      $("keyName").value = "";
+      $("fresh").innerHTML = `<div class="new-key"><b>Copy your new key now. It won't be shown again.</b><div><code id="tok">${esc(d.key.token)}</code><button type="button" class="btn-primary" id="copyTok">Copy</button></div></div>`;
+      $("copyTok").onclick = async () => { await navigator.clipboard.writeText(d.key.token).catch(() => {}); $("copyTok").textContent = "Copied"; };
+      load();
+    });
+    $("keys").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-del]");
+      if (!b || !confirm("Delete this key? Anything using it stops working.")) return;
+      await fetch(`/api/hub?op=apikey&id=${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
+      load();
+    });
+    load();
+  </script>
+</body>
+</html>

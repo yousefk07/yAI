@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>Study · yAI</title>
+  <meta name="description" content="Flashcards with spaced repetition and practice quizzes, made by yAI from your notes, PDFs or chats." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Study (2026-10-20): make a set from notes, a PDF or a chat; review flashcards (Leitner boxes: a card you know
+       comes back later and later, one you miss comes back soon); take quizzes, short answers graded by yAI. */
+    .btn-primary { width: auto; padding: 0 16px; }
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2); }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .panel h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-2); gap: 2px; align-self: flex-start; flex-wrap: wrap; }
+    .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: none; font-size: 13px; font-weight: 500; color: var(--text-2); }
+    .seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    textarea.notes { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--surface); color: var(--text); font: 14px/1.55 var(--sans); }
+    .drop { border: 1.5px dashed var(--border-strong); border-radius: 12px; padding: 26px; text-align: center; color: var(--text-2); font-size: 14px; cursor: pointer; background: none; width: 100%; }
+    .drop:hover, .drop.over { border-color: var(--acc); color: var(--text); }
+    select, .inp { height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; background: var(--surface); color: var(--text); font-size: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row .grow { flex: 1; min-width: 160px; }
+    .src-note { font-size: 13px; color: var(--muted); }
+    .err { color: var(--bad); font-size: 13.5px; min-height: 18px; margin: 0; }
+    .decks { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .deck { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .deck b { font-size: 15px; font-weight: 600; }
+    .deck small { color: var(--muted); font-size: 12.5px; }
+    .deck .due { color: var(--acc-ink); font-weight: 600; }
+    .deck .row { margin-top: auto; }
+    .deck .btn-primary, .deck .btn-ghost { height: 34px; padding: 0 12px; font-size: 13px; }
+    .empty { color: var(--muted); font-size: 14px; }
+    /* review */
+    .review { max-width: 640px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+    .bar i { display: block; height: 100%; background: var(--acc); transition: width 0.2s; }
+    .card { perspective: 1200px; cursor: pointer; min-height: 280px; }
+    .card-in { position: relative; min-height: 280px; transition: transform 0.45s; transform-style: preserve-3d; }
+    .card.flipped .card-in { transform: rotateY(180deg); }
+    .face { position: absolute; inset: 0; backface-visibility: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 28px;
+      text-align: center; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 20px; box-shadow: var(--shadow); font-size: 19px; line-height: 1.5; overflow: auto; }
+    .face.back { transform: rotateY(180deg); font-size: 17px; }
+    .face small { position: absolute; top: 14px; left: 18px; font-size: 12px; color: var(--muted); }
+    .face p { margin: 0; }
+    .grades { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .grades button { height: 52px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+    .grades button small { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+    .grades button:hover { border-color: var(--border-strong); }
+    .grades .again { color: var(--bad); }
+    .hint { text-align: center; font-size: 13px; color: var(--muted); }
+    /* quiz */
+    .q { font-size: 18px; font-weight: 500; line-height: 1.5; }
+    .opts { display: flex; flex-direction: column; gap: 8px; }
+    .opt { text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 15px; }
+    .opt:hover:not(:disabled) { border-color: var(--border-strong); }
+    .opt.right { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
+    .opt.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); }
+    .why { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); font-size: 14px; line-height: 1.5; }
+    .why.good b { color: var(--ok); } .why.bad b { color: var(--bad); }
+    .score { font-size: 44px; font-weight: 600; letter-spacing: -0.03em; text-align: center; }
+    .cards-list { display: flex; flex-direction: column; gap: 8px; }
+    .cl { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: start; }
+    .cl textarea { min-height: 54px; resize: vertical; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface); color: var(--text); font: 13.5px/1.45 var(--sans); }
+    .topline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .topline h2 { flex: 1; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) {
+      .stage { padding: 4px 16px 24px; }
+      .head h1 { display: none; }
+      .page-title { display: block; }
+      .grades { grid-template-columns: repeat(2, 1fr); }
+      .cl { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) { .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; } }
+  </style>
+</head>
+<body data-page="study">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">Study</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap" id="home">
+          <div class="head"><h1>Study</h1><p>Flashcards that come back just before you'd forget them, and practice quizzes, made from your notes, a PDF or a chat. For a tutor in the chat, turn on Tools &gt; Study mode.</p></div>
+          <section class="panel">
+            <h2>Make a study set</h2>
+            <div class="seg" role="tablist" id="srcTabs">
+              <button type="button" data-src="text" aria-selected="true">Paste notes</button>
+              <button type="button" data-src="file" aria-selected="false">From a file</button>
+              <button type="button" data-src="chat" aria-selected="false">From a chat</button>
+            </div>
+            <div id="srcText"><textarea class="notes" id="notes" placeholder="Paste lecture notes, a textbook section, or a list of terms…"></textarea></div>
+            <div id="srcFile" hidden>
+              <button type="button" class="drop" id="drop">Drop a PDF or text file here, or click to choose</button>
+              <input type="file" id="fileIn" accept="application/pdf,.pdf,.txt,.md,.csv,text/plain" hidden />
+            </div>
+            <div id="srcChat" hidden><select id="chatPick" class="inp" style="width:100%"><option value="">Choose a chat…</option></select></div>
+            <span class="src-note" id="srcNote"></span>
+            <div class="row">
+              <div class="seg" role="tablist" id="kindTabs">
+                <button type="button" data-kind="cards" aria-selected="true">Flashcards</button>
+                <button type="button" data-kind="quiz" aria-selected="false">Quiz</button>
+              </div>
+              <select id="count" aria-label="How many"><option value="10">10</option><option value="15" selected>15</option><option value="25">25</option><option value="40">40</option></select>
+              <input class="inp grow" id="title" placeholder="Title (optional)" maxlength="100" />
+              <button type="button" class="btn-primary" id="make">Make it</button>
+            </div>
+            <p class="err" id="makeErr" role="alert"></p>
+          </section>
+          <section style="display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-size:16px;font-weight:600">Your sets</h2>
+            <div class="decks" id="decks"><p class="empty">Loading…</p></div>
+          </section>
+        </div>
+        <div class="wrap" id="deckView" hidden></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
+  <script src="/md.js"></script>
+  <script src="/side.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const md = (s) => renderMarkdown(String(s || ""));
+    const DAY = 864e5;
+    const INTERVAL = [0, 1, 3, 7, 14, 30, 60]; // days until a card in each box comes back
+    let src = "text", kind = "cards", fileText = "", decks = [], deck = null;
+
+    async function hub(op, opts = {}) {
+      const r = await fetch(`/api/hub?op=${op}`, { cache: "no-store", ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
+      if (r.status === 401) { location.href = "/"; throw new Error("Log in"); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      return d;
+    }
+    const segPick = (box, attr, val) => box.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset[attr] === val)));
+
+    // ---------- Making a set ----------
+    $("srcTabs").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      src = b.dataset.src; segPick($("srcTabs"), "src", src);
+      $("srcText").hidden = src !== "text"; $("srcFile").hidden = src !== "file"; $("srcChat").hidden = src !== "chat";
+      $("srcNote").textContent = src === "file" && fileText ? `${fileText.length.toLocaleString()} characters read` : "";
+      if (src === "chat") loadChats();
+    });
+    $("kindTabs").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      kind = b.dataset.kind; segPick($("kindTabs"), "kind", kind);
+      $("count").value = kind === "quiz" ? "10" : "15";
+    });
+    let chatsLoaded = false;
+    async function loadChats() {
+      if (chatsLoaded) return;
+      chatsLoaded = true;
+      const r = await fetch("/api/chats", { cache: "no-store" });
+      const { chats = [] } = r.ok ? await r.json() : {};
+      $("chatPick").innerHTML = '<option value="">Choose a chat…</option>' + chats.slice(0, 100).map((c) => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join("");
+    }
+    async function chatText(id) {
+      const r = await fetch(`/api/chats?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const { chat } = await r.json();
+      return (chat.messages || []).filter((m) => typeof m.content === "string" && !m.hidden).map((m) => `${m.role === "user" ? "Question" : "Answer"}: ${m.content}`).join("\n\n");
+    }
+    function loadPdfJs() {
+      return (loadPdfJs.p ||= new Promise((resolve, reject) => {
+        const base = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+        const s = document.createElement("script");
+        s.src = base + "pdf.min.js";
+        s.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = base + "pdf.worker.min.js"; resolve(pdfjsLib); };
+        s.onerror = () => { loadPdfJs.p = null; reject(new Error("Couldn't load the PDF reader")); };
+        document.head.appendChild(s);
+      }));
+    }
+    async function readFile(file) {
+      $("srcNote").textContent = "Reading…";
+      try {
+        if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)) {
+          const pdfjs = await loadPdfJs();
+          const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+          let text = "";
+          for (let i = 1; i <= Math.min(pdf.numPages, 80) && text.length < 40000; i++) {
+            const page = await pdf.getPage(i);
+            text += (await page.getTextContent()).items.map((x) => x.str).join(" ") + "\n\n";
+          }
+          fileText = text.trim();
+          if (!fileText) throw new Error("This PDF has no text to read (a scan?). Paste the text instead.");
+        } else fileText = (await file.text()).slice(0, 40000);
+        if (!$("title").value) $("title").value = file.name.replace(/\.[^.]+$/, "").slice(0, 100);
+        $("drop").textContent = file.name;
+        $("srcNote").textContent = `${fileText.length.toLocaleString()} characters read`;
+      } catch (err) { fileText = ""; $("srcNote").textContent = err.message; }
+    }
+    $("drop").addEventListener("click", () => $("fileIn").click());
+    $("fileIn").addEventListener("change", (e) => e.target.files[0] && readFile(e.target.files[0]));
+    $("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+    $("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+    $("drop").addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); e.dataTransfer.files[0] && readFile(e.dataTransfer.files[0]); });
+
+    $("make").addEventListener("click", async () => {
+      $("makeErr").textContent = "";
+      const btn = $("make");
+      try {
+        const text = src === "text" ? $("notes").value : src === "file" ? fileText : $("chatPick").value ? await chatText($("chatPick").value) : "";
+        if (text.trim().length < 40) throw new Error(src === "chat" ? "Choose a chat with some content." : "Add a bit more material first.");
+        btn.disabled = true;
+        btn.textContent = kind === "quiz" ? "Writing questions…" : "Writing cards…";
+        const out = await hub("study-make", { method: "POST", body: JSON.stringify({ kind, text, title: $("title").value.trim(), count: Number($("count").value) }) });
+        const body = kind === "quiz"
+          ? { title: out.title, cards: [], quizzes: [{ id: crypto.randomUUID?.() || String(Date.now()), title: out.title, questions: out.questions, results: [] }] }
+          : { title: out.title, cards: out.cards };
+        const { deck: saved } = await hub("deck", { method: "PUT", body: JSON.stringify(body) });
+        $("notes").value = ""; $("title").value = "";
+        await loadDecks();
+        openDeck(saved.id, kind === "quiz" ? "quiz" : "review");
+      } catch (err) {
+        $("makeErr").textContent = err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Make it";
+      }
+    });
+
+    // ---------- Sets ----------
+    async function loadDecks() {
+      try {
+        decks = (await hub("decks")).decks;
+        $("decks").innerHTML = decks.length ? decks.map((d) => `<div class="deck">
+          <b>${esc(d.title)}</b>
+          <small>${d.cards ? `${d.cards} card${d.cards === 1 ? "" : "s"}${d.due ? ` · <span class="due">${d.due} to review</span>` : " · all caught up"}` : ""}${d.cards && d.quizzes ? " · " : ""}${d.quizzes ? `${d.quizzes} quiz${d.quizzes === 1 ? "" : "zes"}` : ""}</small>
+          <div class="row">${d.cards ? `<button type="button" class="btn-primary" data-open="${d.id}" data-go="review">Review</button>` : `<button type="button" class="btn-primary" data-open="${d.id}" data-go="quiz">Take the quiz</button>`}
+          <button type="button" class="btn-ghost" data-open="${d.id}" data-go="set">Open</button></div></div>`).join("")
+          : '<p class="empty">No sets yet. Make one above.</p>';
+      } catch (err) { $("decks").innerHTML = `<p class="empty">${esc(err.message)}</p>`; }
+    }
+    $("decks").addEventListener("click", (e) => { const b = e.target.closest("[data-open]"); if (b) openDeck(b.dataset.open, b.dataset.go); });
+
+    let saveTimer = null;
+    const saveDeck = (now = false) => {
+      clearTimeout(saveTimer);
+      const go = () => hub("deck", { method: "PUT", body: JSON.stringify(deck) }).catch(() => {});
+      if (now) return go();
+      saveTimer = setTimeout(go, 800);
+    };
+    function show(view) { $("home").hidden = view !== "home"; $("deckView").hidden = view === "home"; document.querySelector(".stage").scrollTop = 0; }
+    async function openDeck(id, go = "set") {
+      deck = (await hub(`deck&id=${encodeURIComponent(id)}`)).deck;
+      if (go === "review") startReview();
+      else if (go === "quiz") startQuiz(deck.quizzes[deck.quizzes.length - 1]);
+      else renderSet();
+    }
+    function backHome() { show("home"); loadDecks(); }
+
+    function renderSet() {
+      show("deck");
+      const due = deck.cards.filter((c) => !c.due || c.due <= Date.now()).length;
+      $("deckView").innerHTML = `
+        <div class="topline"><button type="button" class="btn-ghost" id="back">← All sets</button><h2>${esc(deck.title)}</h2>
+          ${deck.cards.length ? `<button type="button" class="btn-primary" id="rev">${due ? `Review ${due}` : "Practise all"}</button>` : ""}
+          <button type="button" class="btn-ghost" id="newQuiz">${deck.cards.length ? "Quiz me on these" : "New quiz"}</button></div>
+        ${deck.quizzes?.length ? `<section class="panel"><h2>Quizzes</h2>${deck.quizzes.map((q, i) => `<div class="row"><span class="grow">${esc(q.title || `Quiz ${i + 1}`)} · ${q.questions.length} questions${q.results?.length ? ` · best ${Math.max(...q.results.map((r) => r.score))}%` : ""}</span><button type="button" class="btn-ghost" data-quiz="${i}">Take it</button></div>`).join("")}</section>` : ""}
+        <section class="panel"><div class="row"><h2 class="grow">Cards</h2><button type="button" class="btn-ghost" id="addCard">Add a card</button></div>
+          <div class="cards-list" id="cardsList">${deck.cards.map((c, i) => `<div class="cl" data-i="${i}"><textarea data-f="front" aria-label="Front">${esc(c.front)}</textarea><textarea data-f="back" aria-label="Back">${esc(c.back)}</textarea><button type="button" class="icon-btn" data-del="${i}" title="Delete card" aria-label="Delete card">×</button></div>`).join("") || '<p class="empty">No cards in this set.</p>'}</div></section>
+        <div class="row"><button type="button" class="btn-ghost" id="delDeck" style="color:var(--bad)">Delete this set</button></div>`;
+      $("back").onclick = backHome;
+      if ($("rev")) $("rev").onclick = startReview;
+      $("newQuiz").onclick = newQuizFromCards;
+      $("addCard").onclick = () => { deck.cards.push({ front: "New question", back: "Answer", box: 0, due: 0, right: 0, wrong: 0 }); saveDeck(true).then(() => openDeck(deck.id)); };
+      $("cardsList").oninput = (e) => { const t = e.target.closest("textarea"); if (!t) return; deck.cards[+t.closest(".cl").dataset.i][t.dataset.f] = t.value; saveDeck(); };
+      $("cardsList").onclick = (e) => { const d = e.target.closest("[data-del]"); if (d) { deck.cards.splice(+d.dataset.del, 1); saveDeck(true); renderSet(); } };
+      $("deckView").querySelectorAll("[data-quiz]").forEach((b) => (b.onclick = () => startQuiz(deck.quizzes[+b.dataset.quiz])));
+      $("delDeck").onclick = async () => { if (!confirm(`Delete “${deck.title}”?`)) return; await hub(`deck&id=${deck.id}`, { method: "DELETE" }); backHome(); };
+    }
+    async function newQuizFromCards() {
+      const btn = $("newQuiz");
+      btn.disabled = true; btn.textContent = "Writing questions…";
+      try {
+        const text = deck.cards.length ? deck.cards.map((c) => `${c.front} — ${c.back}`).join("\n") : deck.quizzes.flatMap((q) => q.questions.map((x) => `${x.q} ${x.why || ""}`)).join("\n");
+        const out = await hub("study-make", { method: "POST", body: JSON.stringify({ kind: "quiz", text, title: `${deck.title} quiz`, count: Math.min(15, Math.max(5, deck.cards.length)) }) });
+        deck.quizzes = [...(deck.quizzes || []), { id: String(Date.now()), title: out.title, questions: out.questions, results: [] }];
+        await saveDeck(true);
+        startQuiz(deck.quizzes[deck.quizzes.length - 1]);
+      } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = "Quiz me on these"; }
+    }
+
+    // ---------- Review (spaced repetition) ----------
+    let queue = [], done = 0, tally = { again: 0, good: 0 };
+    function startReview() {
+      const due = deck.cards.filter((c) => !c.due || c.due <= Date.now());
+      queue = (due.length ? due : [...deck.cards]).sort(() => Math.random() - 0.5);
+      done = 0; tally = { again: 0, good: 0 };
+      show("deck");
+      nextCard();
+    }
+    const label = (d) => (d < 1 ? "<1 min" : d === 1 ? "1 day" : `${d} days`);
+    function nextCard() {
+      const c = queue[0];
+      if (!c) return finishReview();
+      const total = done + queue.length;
+      $("deckView").innerHTML = `<div class="review">
+        <div class="topline"><button type="button" class="btn-ghost" id="back">← ${esc(deck.title)}</button><span class="src-note">${done + 1} of ${total}</span></div>
+        <div class="bar"><i style="width:${(done / total) * 100}%"></i></div>
+        <div class="card" id="card" role="button" tabindex="0" aria-label="Flip the card"><div class="card-in">
+          <div class="face front"><small>Question</small>${md(c.front)}</div>
+          <div class="face back"><small>Answer</small>${md(c.back)}</div></div></div>
+        <p class="hint" id="hint">Tap the card or press Space to see the answer</p>
+        <div class="grades" id="grades" hidden>
+          <button type="button" class="again" data-g="0">Again<small>${label(0)}</small></button>
+          <button type="button" data-g="1">Hard<small>${label(INTERVAL[Math.max(1, c.box)])}</small></button>
+          <button type="button" data-g="2">Good<small>${label(INTERVAL[Math.min(6, c.box + 1)])}</small></button>
+          <button type="button" data-g="3">Easy<small>${label(INTERVAL[Math.min(6, c.box + 2)])}</small></button>
+        </div></div>`;
+      $("back").onclick = () => { saveDeck(true); renderSet(); };
+      const flip = () => { $("card").classList.add("flipped"); $("grades").hidden = false; $("hint").textContent = "How well did you know it? (1–4)"; };
+      $("card").onclick = flip;
+      $("grades").onclick = (e) => { const b = e.target.closest("[data-g]"); if (b) grade(+b.dataset.g); };
+      document.onkeydown = (e) => {
+        if (e.target.matches("input, textarea")) return;
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); if (!$("card")?.classList.contains("flipped")) flip(); }
+        else if (/^[1-4]$/.test(e.key) && !$("grades")?.hidden) grade(Number(e.key) - 1);
+      };
+    }
+    function grade(g) {
+      const c = queue.shift();
+      if (g === 0) { c.box = 0; c.due = Date.now() + 60000; c.wrong = (c.wrong || 0) + 1; tally.again++; queue.splice(Math.min(queue.length, 3), 0, c); }
+      else {
+        c.box = g === 1 ? Math.max(1, c.box) : Math.min(6, c.box + (g === 3 ? 2 : 1));
+        c.due = Date.now() + INTERVAL[c.box] * DAY;
+        c.right = (c.right || 0) + 1;
+        tally.good++;
+        done++;
+      }
+      saveDeck();
+      nextCard();
+    }
+    function finishReview() {
+      document.onkeydown = null;
+      saveDeck(true);
+      const next = deck.cards.filter((c) => c.due > Date.now()).sort((a, b) => a.due - b.due)[0];
+      $("deckView").innerHTML = `<div class="review"><div class="panel" style="align-items:center;text-align:center">
+        <div class="score">Done</div><p class="src-note">${done} card${done === 1 ? "" : "s"} reviewed${tally.again ? ` · ${tally.again} to try again soon` : ""}.${next ? ` The next one comes back ${new Date(next.due).toLocaleDateString([], { weekday: "long" })}.` : ""}</p>
+        <div class="row"><button type="button" class="btn-ghost" id="back">← ${esc(deck.title)}</button><button type="button" class="btn-primary" id="quizMe">Quiz me</button></div></div></div>`;
+      $("back").onclick = renderSet;
+      $("quizMe").onclick = () => { renderSet(); newQuizFromCards(); };
+    }
+
+    // ---------- Quiz ----------
+    let quiz = null, qi = 0, points = 0;
+    function startQuiz(q) {
+      quiz = q; qi = 0; points = 0;
+      show("deck");
+      document.onkeydown = null;
+      renderQuestion();
+    }
+    function renderQuestion() {
+      const q = quiz.questions[qi];
+      if (!q) return finishQuiz();
+      $("deckView").innerHTML = `<div class="review">
+        <div class="topline"><button type="button" class="btn-ghost" id="back">← ${esc(deck.title)}</button><span class="src-note">Question ${qi + 1} of ${quiz.questions.length}</span></div>
+        <div class="bar"><i style="width:${(qi / quiz.questions.length) * 100}%"></i></div>
+        <div class="panel"><div class="q">${md(q.q)}</div>
+          ${q.type === "mc" ? `<div class="opts" id="opts">${q.options.map((o, i) => `<button type="button" class="opt" data-i="${i}">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join("")}</div>`
+            : `<textarea class="notes" id="ans" style="min-height:90px" placeholder="Your answer"></textarea><div class="row"><button type="button" class="btn-primary" id="check">Check</button></div>`}
+          <div id="fb"></div></div></div>`;
+      $("back").onclick = renderSet;
+      if (q.type === "mc") $("opts").onclick = (e) => {
+        const b = e.target.closest(".opt"); if (!b) return;
+        const pick = +b.dataset.i, ok = pick === q.answer;
+        if (ok) points++;
+        $("opts").querySelectorAll(".opt").forEach((x, i) => { x.disabled = true; if (i === q.answer) x.classList.add("right"); else if (i === pick) x.classList.add("wrong"); });
+        feedback(ok, q.why);
+      };
+      else $("check").onclick = async () => {
+        const ans = $("ans").value.trim(); if (!ans) return;
+        $("check").disabled = true; $("check").textContent = "Checking…";
+        try {
+          const g = await hub("study-grade", { method: "POST", body: JSON.stringify({ question: q.q, expected: q.answer, answer: ans }) });
+          points += g.score;
+          feedback(g.correct, `${g.feedback}<br><br><b style="color:var(--text)">Model answer:</b> ${esc(q.answer)}`, true);
+        } catch (err) { $("check").disabled = false; $("check").textContent = "Check"; alert(err.message); }
+      };
+    }
+    function feedback(ok, why, html = false) {
+      $("fb").innerHTML = `<div class="why ${ok ? "good" : "bad"}"><b>${ok ? "Right." : "Not quite."}</b> ${html ? why : esc(why || "")}</div>
+        <div class="row" style="margin-top:12px"><button type="button" class="btn-primary" id="nextQ">${qi + 1 < quiz.questions.length ? "Next" : "See my score"}</button></div>`;
+      $("check")?.remove();
+      $("nextQ").onclick = () => { qi++; renderQuestion(); };
+      $("nextQ").focus();
+    }
+    function finishQuiz() {
+      const pct = Math.round((points / quiz.questions.length) * 100);
+      quiz.results = [...(quiz.results || []), { ts: Date.now(), score: pct }];
+      saveDeck(true);
+      $("deckView").innerHTML = `<div class="review"><div class="panel" style="align-items:center;text-align:center">
+        <div class="score">${pct}%</div><p class="src-note">${pct >= 85 ? "Excellent." : pct >= 60 ? "Good work. Review the ones you missed." : "Keep going: review the cards, then try again."}</p>
+        <div class="row"><button type="button" class="btn-ghost" id="back">← ${esc(deck.title)}</button><button type="button" class="btn-primary" id="again">Try again</button></div></div></div>`;
+      $("back").onclick = renderSet;
+      $("again").onclick = () => startQuiz(quiz);
+    }
+
+    loadDecks();
+    const p = new URLSearchParams(location.search);
+    if (p.get("deck")) openDeck(p.get("deck"));
+  </script>
+</body>
+</html>

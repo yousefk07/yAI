@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>People · yAI</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* People and limits (2026-10-20, admins only): everyone's use today and over 30 days, each person's daily limits,
+       pausing an account, and the flags raised automatically for unusual use (lib/policy.js). */
+    .btn-primary { width: auto; padding: 0 16px; }
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2); }
+    .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .tile, .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+    .tile { padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+    .tile span { font-size: 13px; color: var(--text-2); }
+    .tile b { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+    .tile.alert b { color: var(--acc-ink); }
+    .panel { padding: 6px 0; }
+    .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .tools input { height: 36px; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font-size: 14px; min-width: 220px; }
+    .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-2); gap: 2px; }
+    .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: none; font-size: 13px; font-weight: 500; color: var(--text-2); }
+    .seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+    th.num, td.num { text-align: right; }
+    td { padding: 11px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: middle; }
+    tr.person { cursor: pointer; }
+    tr.person:hover td { background: var(--hover); }
+    tr:last-child td { border-bottom: 0; }
+    .who { display: flex; align-items: center; gap: 10px; }
+    .who .avatar { width: 28px; height: 28px; font-size: 11px; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; }
+    .tag.flag { background: var(--acc-soft); color: var(--acc-ink); }
+    .tag.paused { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+    .tag.custom { background: var(--surface-2); color: var(--text-2); }
+    .meter { width: 70px; height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 8px; }
+    .meter i { display: block; height: 100%; background: var(--text-2); }
+    .meter.hot i { background: var(--acc); }
+    dialog.person-dlg { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 22px 24px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); color: var(--text); box-shadow: 0 24px 80px rgba(0,0,0,.28); }
+    dialog::backdrop { background: var(--scrim); }
+    .dlg-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .dlg-head h2 { flex: 1; margin: 0; font-size: 19px; font-weight: 600; }
+    .dlg-sec { margin: 18px 0 8px; font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .limits { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+    .limits label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-2); }
+    .limits input { height: 36px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; background: var(--surface); color: var(--text); font-size: 14px; }
+    .limits small { color: var(--muted); font-size: 11.5px; }
+    .flags { display: flex; flex-direction: column; gap: 6px; }
+    .flag-row { display: flex; gap: 10px; font-size: 13.5px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+    .flag-row b { font-weight: 500; }
+    .flag-row small { color: var(--muted); margin-left: auto; white-space: nowrap; }
+    .flag-row span { color: var(--text-2); }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .stats div { padding: 10px; border-radius: 10px; background: var(--surface-2); }
+    .stats b { display: block; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stats small { font-size: 11.5px; color: var(--muted); }
+    .pause { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--border); }
+    .pause input[type="text"] { flex: 1; min-width: 0; height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; background: var(--surface); color: var(--text); }
+    .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .err { color: var(--bad); font-size: 13px; min-height: 16px; margin: 8px 0 0; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) {
+      .stage { padding: 4px 16px 24px; }
+      .head h1 { display: none; } .page-title { display: block; }
+      .tiles { grid-template-columns: 1fr 1fr; }
+      .limits, .stats { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) { .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; } }
+  </style>
+</head>
+<body data-page="people">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">People</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap">
+          <div class="head"><h1>People and limits</h1><p id="lede">Loading</p></div>
+          <div class="tiles" id="tiles"></div>
+          <div class="tools">
+            <input id="q" placeholder="Find someone" autocomplete="off" />
+            <div class="seg" id="filter" role="tablist">
+              <button type="button" data-f="all" aria-selected="true">Everyone</button>
+              <button type="button" data-f="flagged" aria-selected="false">Flagged</button>
+              <button type="button" data-f="paused" aria-selected="false">Paused</button>
+              <button type="button" data-f="today" aria-selected="false">Active today</button>
+            </div>
+          </div>
+          <div class="panel"><div class="scroll"><table id="table"></table></div></div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <dialog class="person-dlg" id="dlg"></dialog>
+
+  <script src="/side.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const num = (n) => (n || 0).toLocaleString();
+    const usd = (n) => `$${(n || 0).toFixed(2)}`;
+    const msgs = (d) => (d?.messages || 0) + (d?.codeMessages || 0) + (d?.apiMessages || 0);
+    const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+    let data = { users: [], defaults: {} }, filter = "all", sort = { key: "ultra30", dir: -1 };
+
+    const COLS = [
+      ["username", "Account", (u) => u.username.toLowerCase()],
+      ["today", "Messages today", (u) => msgs(u.todayCounts), true],
+      ["m30", "30 days", (u) => msgs(u.last30), true],
+      ["ultraToday", "Ultra today", (u) => u.today.ultra.spentUsd, true],
+      ["ultra30", "Ultra 30 d", (u) => (u.last30.ultraMicros || 0) / 1e6, true],
+      ["images", "Images today", (u) => u.today.images.used, true],
+      ["searches", "Searches today", (u) => u.today.searches.used, true],
+      ["status", "Status", (u) => (u.blocked ? 2 : u.flagged ? 1 : 0)],
+    ];
+
+    async function load() {
+      const r = await fetch("/api/hub?op=people", { cache: "no-store" });
+      if (r.status === 401) { location.href = "/"; return; }
+      if (r.status === 403) { $("lede").textContent = "Only admins can see this page."; return; }
+      data = await r.json();
+      render();
+    }
+    function render() {
+      const U = data.users;
+      const flagged = U.filter((u) => u.flagged).length, paused = U.filter((u) => u.blocked).length;
+      const active = U.filter((u) => msgs(u.todayCounts) > 0).length;
+      const ultraToday = U.reduce((n, u) => n + u.today.ultra.spentUsd, 0);
+      $("lede").textContent = `${U.length} account${U.length === 1 ? "" : "s"} · defaults: yAI Ultra ${usd(data.defaults.ultraUsd)} a day, ${data.defaults.images} images, ${data.defaults.videos} videos, ${data.defaults.searches} searches. Click someone to change their limits.`;
+      $("tiles").innerHTML = [["Active today", active], ["yAI Ultra today", usd(ultraToday)], ["Flagged", flagged, flagged > 0], ["Paused", paused]]
+        .map(([l, v, hot]) => `<div class="tile${hot ? " alert" : ""}"><span>${l}</span><b>${v}</b></div>`).join("");
+      const q = $("q").value.trim().toLowerCase();
+      const col = COLS.find((c) => c[0] === sort.key);
+      const rows = U.filter((u) => (!q || u.username.toLowerCase().includes(q)) &&
+        (filter === "all" || (filter === "flagged" && u.flagged) || (filter === "paused" && u.blocked) || (filter === "today" && msgs(u.todayCounts) > 0)))
+        .sort((a, b) => { const x = col[2](a), y = col[2](b); return (x > y ? 1 : x < y ? -1 : 0) * sort.dir; });
+      const maxUltra = Math.max(0.01, ...U.map((u) => u.today.ultra.limitUsd || 0));
+      $("table").innerHTML = `<thead><tr>${COLS.map(([k, l, , n]) => `<th class="${n ? "num" : ""}" data-k="${k}">${l}${sort.key === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead><tbody>` +
+        (rows.map((u) => {
+          const share = u.today.ultra.limitUsd ? u.today.ultra.spentUsd / u.today.ultra.limitUsd : 0;
+          return `<tr class="person" data-u="${esc(u.username)}">
+            <td><div class="who"><span class="avatar">${esc(u.username.slice(0, 2))}</span>${esc(u.username)}</div></td>
+            <td class="num">${num(msgs(u.todayCounts))}</td><td class="num">${num(msgs(u.last30))}</td>
+            <td class="num">${usd(u.today.ultra.spentUsd)}<span class="meter${share >= 0.8 ? " hot" : ""}"><i style="width:${Math.min(100, share * 100)}%"></i></span></td>
+            <td class="num">${usd((u.last30.ultraMicros || 0) / 1e6)}</td>
+            <td class="num">${u.today.images.used}${u.today.images.limit != null ? ` / ${u.today.images.limit}` : ""}</td>
+            <td class="num">${u.today.searches.used} / ${u.today.searches.limit}</td>
+            <td>${u.blocked ? '<span class="tag paused">Paused</span> ' : ""}${u.flagged ? `<span class="tag flag">⚑ ${u.flags.length}</span> ` : ""}${Object.keys(u.overrides || {}).length ? '<span class="tag custom">Custom limits</span>' : ""}${!u.blocked && !u.flagged && !Object.keys(u.overrides || {}).length ? '<span style="color:var(--muted)">OK</span>' : ""}</td></tr>`;
+        }).join("") || `<tr><td colspan="${COLS.length}" style="color:var(--muted)">Nobody here.</td></tr>`) + "</tbody>";
+    }
+    $("table").addEventListener("click", (e) => {
+      const th = e.target.closest("th[data-k]");
+      if (th) { sort = { key: th.dataset.k, dir: sort.key === th.dataset.k ? -sort.dir : th.dataset.k === "username" ? 1 : -1 }; return render(); }
+      const tr = e.target.closest("tr.person");
+      if (tr) openPerson(tr.dataset.u);
+    });
+    $("q").addEventListener("input", render);
+    $("filter").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      filter = b.dataset.f;
+      $("filter").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+      render();
+    });
+
+    const LIMITS = [["ultraUsd", "yAI Ultra, $ a day", 0.5], ["images", "Images a day", 1], ["videos", "Videos a day", 1], ["searches", "Web searches a day", 1], ["voiceChars", "Natural-voice characters a day", 1000]];
+    function openPerson(name) {
+      const u = data.users.find((x) => x.username === name);
+      if (!u) return;
+      const t = u.today;
+      $("dlg").innerHTML = `
+        <div class="dlg-head"><span class="avatar">${esc(u.username.slice(0, 2))}</span><h2>${esc(u.username)}</h2><button type="button" class="icon-btn" id="x" aria-label="Close">×</button></div>
+        <p style="margin:0;color:var(--muted);font-size:13px">Joined ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "?"} · ${num(u.chats)} saved chats</p>
+        <div class="dlg-sec">Last 30 days</div>
+        <div class="stats">
+          <div><b>${num(u.last30.messages)}</b><small>Website messages</small></div>
+          <div><b>${num(u.last30.codeMessages)}</b><small>yAI Code</small></div>
+          <div><b>${num(u.last30.apiMessages)}</b><small>API calls</small></div>
+          <div><b>${usd((u.last30.ultraMicros || 0) / 1e6)}</b><small>yAI Ultra</small></div>
+          <div><b>${num(u.last30.images)}</b><small>Images</small></div>
+          <div><b>${num(u.last30.videos)}</b><small>Videos</small></div>
+          <div><b>${num(u.last30.searches)}</b><small>Searches</small></div>
+          <div><b>${num(u.last30.voiceChars)}</b><small>Voice characters</small></div>
+        </div>
+        <div class="dlg-sec">Daily limits (empty = the default)</div>
+        <div class="limits">${LIMITS.map(([k, l, step]) => `<label>${l}<input type="number" min="0" step="${step}" data-k="${k}" value="${u.overrides?.[k] ?? ""}" placeholder="${data.defaults[k]}"><small>Today: ${k === "ultraUsd" ? usd(t.ultra.spentUsd) : k === "voiceChars" ? num(t.voice?.used) : num(t[k]?.used)}${k !== "ultraUsd" && t[k]?.limit === null ? " · admins have no limit" : ""}</small></label>`).join("")}</div>
+        <div class="dlg-sec">Account</div>
+        <label class="pause"><input type="checkbox" id="blocked" ${u.blocked ? "checked" : ""}> <span style="white-space:nowrap">Pause this account</span><input type="text" id="reason" placeholder="Reason (only admins see it)" value="${esc(u.reason)}"></label>
+        <div class="dlg-sec">Flags${u.flags.length ? ` (${u.flags.length})` : ""}</div>
+        <div class="flags">${u.flags.length ? u.flags.map((f) => `<div class="flag-row"><b>${esc(f.label)}</b><span>${esc(f.detail)}</span><small>${ago(f.ts)}</small></div>`).join("") : '<p style="margin:0;color:var(--muted);font-size:13.5px">Nothing unusual.</p>'}</div>
+        <p class="err" id="err" role="alert"></p>
+        <div class="dlg-foot">${u.flags.length ? '<button type="button" class="btn-ghost" id="dismiss">Dismiss flags</button>' : ""}<button type="button" class="btn-plain" id="cancel">Cancel</button><button type="button" class="btn-primary" id="save">Save</button></div>`;
+      $("dlg").showModal();
+      $("x").onclick = $("cancel").onclick = () => $("dlg").close();
+      if ($("dismiss")) $("dismiss").onclick = async () => { await fetch(`/api/hub?op=flags&user=${encodeURIComponent(u.username)}`, { method: "DELETE" }); $("dlg").close(); load(); };
+      $("save").onclick = async () => {
+        const limits = {};
+        $("dlg").querySelectorAll("input[data-k]").forEach((i) => (limits[i.dataset.k] = i.value === "" ? null : Number(i.value)));
+        const r = await fetch("/api/hub?op=policy", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user: u.username, limits, blocked: $("blocked").checked, reason: $("reason").value }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { $("err").textContent = d.error || "Couldn't save"; return; }
+        $("dlg").close();
+        load();
+      };
+    }
+    $("dlg").addEventListener("click", (e) => { if (e.target === $("dlg")) $("dlg").close(); });
+    load().catch(() => ($("lede").textContent = "Couldn't load. Try again in a moment."));
+    setInterval(() => { if (!document.hidden && !$("dlg").open) load().catch(() => {}); }, 60000);
+  </script>
+</body>
+</html>

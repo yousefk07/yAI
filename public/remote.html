@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>Run on your PC · yAI</title>
+  <meta name="description" content="Send tasks to yAI Code on your computer from your phone, and watch it work." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Run on your PC (2026-10-20): the phone side of `yai remote` (lib/remote.js). Pick a PC that's listening, send it
+       a task, watch the output, answer its questions (may it edit this file?) and stop it. */
+    .btn-primary { width: auto; padding: 0 16px; }
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
+    .head code, .panel code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    .panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    .machines { display: flex; flex-direction: column; gap: 8px; }
+    .mach { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; text-align: left; color: var(--text); width: 100%; }
+    .mach[aria-pressed="true"] { border-color: var(--acc); background: var(--acc-soft); }
+    .mach .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+    .mach .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
+    .mach span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .mach b { font-weight: 600; font-size: 14.5px; }
+    .mach small { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    textarea { width: 100%; min-height: 96px; resize: vertical; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--surface); color: var(--text); font: 15px/1.5 var(--sans); }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row .grow { flex: 1; }
+    select { height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; background: var(--surface); color: var(--text); font-size: 14px; }
+    .term { margin: 0; min-height: 200px; max-height: 60vh; overflow: auto; padding: 14px 16px; border-radius: 12px; background: #151514; color: #e8e7e2; font: 12.5px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
+    .ask { padding: 14px; border-radius: 12px; border: 1px solid var(--acc); background: var(--acc-soft); display: flex; flex-direction: column; gap: 10px; }
+    .ask b { font-weight: 600; }
+    .ask pre { margin: 0; max-height: 220px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--surface); font: 12px/1.5 var(--mono); white-space: pre-wrap; }
+    .ask .row button { height: 36px; }
+    .status { font-size: 13px; color: var(--muted); }
+    .status.live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+    .task { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 13.5px; cursor: pointer; }
+    .task span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task small { color: var(--muted); white-space: nowrap; }
+    .empty { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.55; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) {
+      .stage { padding: 4px 14px 24px; }
+      .head h1 { display: none; } .page-title { display: block; }
+    }
+    @media (max-width: 600px) { .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; } }
+  </style>
+</head>
+<body data-page="remote">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">Run on your PC</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap">
+          <div class="head"><h1>Run on your PC</h1><p>Send a coding task from your phone to yAI Code on your computer. On the PC, open a terminal in the project and run <code>yai remote</code> (or type <code>/remote</code> in yAI Code). It stays listening; you watch it work here and answer its questions.</p></div>
+          <section class="panel">
+            <h2>Your computers</h2>
+            <div class="machines" id="machines"><p class="empty">Loading…</p></div>
+          </section>
+          <section class="panel" id="sendPanel" hidden>
+            <h2>New task</h2>
+            <textarea id="task" placeholder="e.g. Fix the failing test in utils, then run the tests"></textarea>
+            <div class="row">
+              <select id="mode" aria-label="Approvals">
+                <option value="default">Ask me before edits and commands</option>
+                <option value="acceptEdits">Make edits without asking</option>
+                <option value="plan">Plan only (no changes)</option>
+              </select>
+              <span class="grow"></span>
+              <button type="button" class="btn-primary" id="sendTask">Send to PC</button>
+            </div>
+            <p class="empty" id="sendErr" style="color:var(--bad)"></p>
+          </section>
+          <section class="panel" id="runPanel" hidden>
+            <div class="row"><h2 class="grow" id="runTitle">Task</h2><span class="status" id="runStatus"></span><button type="button" class="btn-ghost" id="stop">Stop</button></div>
+            <div id="asks"></div>
+            <pre class="term" id="term"></pre>
+          </section>
+          <section class="panel" id="historyPanel" hidden>
+            <h2>Recent tasks</h2>
+            <div id="tasks"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/side.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const ago = (ms) => { const s = (Date.now() - ms) / 1000; return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+    let machines = [], picked = localStorage.getItem("remotePC") || "", running = null, feedCtl = null;
+
+    async function hub(op, opts = {}) {
+      const r = await fetch(`/api/hub?op=${op}`, { cache: "no-store", ...opts, headers: { "Content-Type": "application/json" } });
+      if (r.status === 401) { location.href = "/"; throw new Error("Log in"); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      return d;
+    }
+    async function loadMachines() {
+      try { machines = (await hub("remote-machines")).machines; } catch { return; }
+      if (!machines.some((m) => m.id === picked)) picked = machines.find((m) => m.online)?.id || machines[0]?.id || "";
+      $("machines").innerHTML = machines.length ? machines.map((m) => `<button type="button" class="mach" data-m="${esc(m.id)}" aria-pressed="${m.id === picked}">
+        <i class="dot${m.online ? " on" : ""}"></i><span><b>${esc(m.name)}</b><small>${esc(m.folder)} · ${m.online ? `listening · ${esc(m.model || "")}` : `offline · seen ${ago(m.seen)}`}</small></span></button>`).join("")
+        : '<p class="empty">No computers yet. In a terminal on your PC, in the project folder, run <code>yai remote</code>. It shows up here within a few seconds.</p>';
+      $("sendPanel").hidden = !picked;
+      const m = machines.find((x) => x.id === picked);
+      $("sendTask").textContent = m && !m.online ? "Queue for when it's back" : "Send to PC";
+      if (picked) loadTasks();
+    }
+    $("machines").addEventListener("click", (e) => {
+      const b = e.target.closest(".mach"); if (!b) return;
+      picked = b.dataset.m;
+      localStorage.setItem("remotePC", picked);
+      loadMachines();
+    });
+    async function loadTasks() {
+      const { tasks } = await hub(`remote-tasks&m=${encodeURIComponent(picked)}`).catch(() => ({ tasks: [] }));
+      $("historyPanel").hidden = !tasks.length;
+      $("tasks").innerHTML = tasks.map((t) => `<div class="task" data-t="${esc(t.id)}"><span>${esc(t.text)}</span><small>${esc(t.status)} · ${ago(t.ts)}</small></div>`).join("");
+      if (!running) { const live = tasks.find((t) => t.status === "running" || t.status === "queued"); if (live) watch(live); }
+    }
+    $("tasks").addEventListener("click", async (e) => {
+      const row = e.target.closest(".task"); if (!row) return;
+      const { tasks } = await hub(`remote-tasks&m=${encodeURIComponent(picked)}`);
+      const t = tasks.find((x) => x.id === row.dataset.t);
+      if (t) watch(t);
+    });
+    $("sendTask").addEventListener("click", async () => {
+      const text = $("task").value.trim();
+      $("sendErr").textContent = "";
+      if (!text) return;
+      try {
+        const { task } = await hub("remote-task", { method: "POST", body: JSON.stringify({ m: picked, text, mode: $("mode").value }) });
+        $("task").value = "";
+        watch(task);
+        loadTasks();
+      } catch (err) { $("sendErr").textContent = err.message; }
+    });
+
+    // Follows one task's output (long polls), shows its questions as buttons.
+    async function watch(task) {
+      feedCtl?.abort();
+      const ctl = (feedCtl = new AbortController());
+      running = task;
+      $("runPanel").hidden = false;
+      $("runTitle").textContent = task.text.length > 80 ? task.text.slice(0, 77) + "…" : task.text;
+      $("term").textContent = "";
+      $("asks").innerHTML = "";
+      let from = 0;
+      const answered = new Set();
+      const setStatus = (s) => {
+        $("runStatus").textContent = { queued: "waiting for the PC", running: "running", done: "done", stopped: "stopped", error: "failed" }[s] || s;
+        $("runStatus").classList.toggle("live", s === "running");
+        $("stop").hidden = !(s === "running" || s === "queued");
+      };
+      setStatus(task.status);
+      while (!ctl.signal.aborted) {
+        let d;
+        try {
+          const r = await fetch(`/api/hub?op=remote-feed&task=${encodeURIComponent(task.id)}&from=${from}`, { cache: "no-store", signal: ctl.signal });
+          d = await r.json();
+          if (!r.ok) throw new Error(d.error);
+        } catch (err) {
+          if (ctl.signal.aborted) return;
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
+        from = d.next;
+        const term = $("term");
+        const atBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 40;
+        for (const ev of d.events) {
+          if (ev.t === "out") term.textContent += ev.text;
+          else if (ev.t === "error") term.textContent += `\n✕ ${ev.text}\n`;
+          else if (ev.t === "ask" && !answered.has(ev.id)) showAsk(ev, task, answered);
+          else if (ev.t === "answered") document.querySelector(`[data-ask="${CSS.escape(ev.id)}"]`)?.remove();
+        }
+        if (atBottom) term.scrollTop = term.scrollHeight;
+        setStatus(d.status);
+        if (["done", "stopped", "error"].includes(d.status)) { running = null; $("asks").innerHTML = ""; loadTasks(); return; }
+      }
+    }
+    function showAsk(ev, task, answered) {
+      $("asks").insertAdjacentHTML("beforeend", `<div class="ask" data-ask="${esc(ev.id)}"><b>${esc(ev.title)}</b>${ev.detail ? `<pre>${esc(ev.detail)}</pre>` : ""}
+        <div class="row">${ev.options.map((o, i) => `<button type="button" class="${i === 0 ? "btn-primary" : "btn-ghost"}" data-choice="${i}">${esc(o)}</button>`).join("")}</div></div>`);
+      const box = $("asks").lastElementChild;
+      box.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-choice]"); if (!b) return;
+        answered.add(ev.id);
+        box.remove();
+        await hub("remote-answer", { method: "POST", body: JSON.stringify({ m: task.m, task: task.id, ask: ev.id, choice: Number(b.dataset.choice) }) }).catch(() => {});
+      });
+      if (navigator.vibrate) navigator.vibrate(120);
+    }
+    $("stop").addEventListener("click", async () => {
+      if (!running) return;
+      await hub("remote-stop", { method: "POST", body: JSON.stringify({ m: running.m, task: running.id }) }).catch(() => {});
+      $("runStatus").textContent = "stopping…";
+    });
+    loadMachines();
+    setInterval(() => { if (!document.hidden) loadMachines(); }, 15000);
+  </script>
+</body>
+</html>
