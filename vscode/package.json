@@ -1,0 +1,53 @@
+{
+  "name": "yai-code",
+  "displayName": "yAI Code",
+  "description": "yAI Code in a VS Code side panel: ask it to change your project, and approve each edit as a diff.",
+  "version": "1.0.73",
+  "publisher": "yousefk07",
+  "license": "UNLICENSED",
+  "repository": { "type": "git", "url": "https://github.com/yousefk07/yAI.git" },
+  "icon": "media/icon.png",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Programming Languages", "Other"],
+  "keywords": ["yAI", "AI", "coding agent", "chat"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [{ "id": "yai", "title": "yAI Code", "icon": "media/yai.svg" }]
+    },
+    "views": {
+      "yai": [{ "type": "webview", "id": "yai.chat", "name": "yAI Code" }]
+    },
+    "commands": [
+      { "command": "yai.newChat", "title": "yAI: New conversation", "icon": "$(add)" },
+      { "command": "yai.stop", "title": "yAI: Stop", "icon": "$(debug-stop)" },
+      { "command": "yai.askAboutSelection", "title": "yAI: Ask about this code" },
+      { "command": "yai.fixProblems", "title": "yAI: Fix the problems in this file" },
+      { "command": "yai.restart", "title": "yAI: Restart yAI Code" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "yai.newChat", "when": "view == yai.chat", "group": "navigation@1" },
+        { "command": "yai.stop", "when": "view == yai.chat", "group": "navigation@2" }
+      ],
+      "editor/context": [
+        { "command": "yai.askAboutSelection", "when": "editorHasSelection", "group": "yai@1" },
+        { "command": "yai.fixProblems", "group": "yai@2" }
+      ]
+    },
+    "keybindings": [
+      { "command": "yai.askAboutSelection", "key": "ctrl+alt+y", "mac": "cmd+alt+y", "when": "editorTextFocus" }
+    ],
+    "configuration": {
+      "title": "yAI Code",
+      "properties": {
+        "yai.command": {
+          "type": "string",
+          "default": "yai",
+          "description": "How to start yAI Code. \"yai\" works once you've run `npm link` in your yAI folder; otherwise give the full path to yAI's cli/index.js."
+        }
+      }
+    }
+  }
+}

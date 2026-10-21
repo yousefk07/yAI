@@ -143,16 +143,18 @@ async function chat({ messages, model, system, conversationId, signal, onText, o
   });
   if (res.status === 401) throw Object.assign(new Error("Your session expired. Run /login."), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));
-  let usage, error;
+  let usage, error, cost;
   await readEvents(res, (ev) => {
     if (ev.status && onStatus) onStatus(ev.status);
     if (ev.t) onTokens(ev.t);
     if (ev.error) error = ev.error;
     if (ev.done) usage = ev.usage;
+    // What the reply cost (yAI Ultra), and today's total against the allowance, for the status line.
+    if (ev.done && typeof ev.costUsd === "number") cost = { usd: ev.costUsd, todayUsd: ev.ultraTodayUsd, limitUsd: ev.ultraLimitUsd };
     if (ev.content) return onText(ev.content);
   });
   if (error) throw new Error(error);
-  return { usage };
+  return { usage, cost };
 }
 
 // ---------- images and videos (the web app's Make Image / Make Video) ----------
@@ -186,4 +188,9 @@ async function share(session) {
   return json("/api/share", { method: "POST", body: session });
 }
 
-module.exports = { cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, postBench };
+// ---------- yai remote: tasks from the phone (the site's /remote page) ----------
+async function hub(op, { method = "GET", body, signal } = {}) {
+  return json(`/api/hub?op=${op}`, { method, body, signal });
+}
+
+module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, postBench };

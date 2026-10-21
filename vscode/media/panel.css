@@ -1,0 +1,27 @@
+/* The yAI Code panel, in VS Code's own colours (the output keeps yAI's colours for its own marks). */
+html, body { height: 100%; }
+body { margin: 0; padding: 0; display: flex; flex-direction: column; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-sideBar-background); }
+#bar { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--vscode-panel-border, transparent); flex-wrap: wrap; }
+select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 4px; padding: 3px 6px; font: inherit; max-width: 48%; }
+#cost { margin-left: auto; font-family: var(--vscode-editor-font-family); font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+#log { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px 4px; }
+.out { font-family: var(--vscode-editor-font-family), monospace; font-size: 12px; line-height: 1.5; white-space: pre; overflow-x: auto; margin: 2px 0 6px; }
+.user { margin: 12px 0 6px; padding: 8px 10px; border-radius: 6px; background: var(--vscode-input-background); border-left: 3px solid #a77bf3; white-space: pre-wrap; word-break: break-word; }
+.note, .faint { font-size: 11.5px; color: var(--vscode-descriptionForeground); margin: 6px 0; }
+.error { color: var(--vscode-errorForeground); margin: 8px 0; white-space: pre-wrap; }
+.restart button, #ask button, #form button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; border-radius: 4px; padding: 5px 12px; font: inherit; cursor: pointer; }
+#ask button.secondary, #stop { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: 0.5; cursor: default; }
+#ask { margin: 0 10px 8px; padding: 10px; border-radius: 6px; border: 1px solid #a77bf3; background: var(--vscode-editorWidget-background); display: flex; flex-direction: column; gap: 8px; }
+#ask[hidden] { display: none; }
+.ask-title { font-weight: 600; }
+.ask-sub { font-size: 12px; color: var(--vscode-descriptionForeground); }
+#ask pre { margin: 0; max-height: 160px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: 11.5px; white-space: pre-wrap; }
+.ask-row { display: flex; gap: 6px; flex-wrap: wrap; }
+#status { padding: 0 10px; min-height: 18px; font-size: 11.5px; color: #a77bf3; }
+#form { padding: 6px 10px 10px; border-top: 1px solid var(--vscode-panel-border, transparent); }
+textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 6px 8px; font: inherit; }
+textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
+.row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.hint { flex: 1; font-size: 11px; color: var(--vscode-descriptionForeground); }

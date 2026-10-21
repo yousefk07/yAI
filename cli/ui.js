@@ -8,7 +8,7 @@
 
 const { Writable } = require("stream");
 
-const color = process.stdout.isTTY && !process.env.NO_COLOR;
+const color = (process.stdout.isTTY || !!process.env.YAI_FORCE_COLOR) && !process.env.NO_COLOR;
 
 // ---------- themes ----------
 // The design's palettes, with its oklch colours converted to hex. `box` is the border style, `bg` and
@@ -108,7 +108,7 @@ function resetTerminal() {
 const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");
 const vis = (s) => stripAnsi(s).length;
 const pad = (s, n) => s + " ".repeat(Math.max(0, n - vis(s)));
-const columns = () => process.stdout.columns || 100;
+const columns = () => process.stdout.columns || Number(process.env.YAI_COLUMNS) || 100;
 // The width everything is drawn to: the terminal's, less a margin, up to 120 columns on a full-screen window.
 const width = () => Math.max(40, Math.min(columns() - 2, 120));
 
@@ -146,14 +146,16 @@ let spin = null;
 function drawSpinner() {
   if (!spin) return;
   const secs = Math.round((Date.now() - spin.start) / 1000);
-  const meta = [`${secs}s`, spin.tokens ? `${tok(spin.tokens)} tokens` : ""].filter(Boolean).join(" · ");
+  const meta = [`${secs}s`, spin.tokens ? `${tok(spin.tokens)} tokens` : "", spin.extra || ""].filter(Boolean).join(" · ");
   const line = ` ${c.accent(FRAMES[spin.frame++ % FRAMES.length])} ${c.accent(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to interrupt")}`;
   process.stdout.write("\r\x1b[K" + line);
 }
 const word = (t) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : "thinking");
 
 const spinner = {
+  hook: null, // (state) => void: { text, tokens, extra } while working, null when stopped (yai --stdio, yai remote)
   start(text) {
+    if (spinner.hook) spinner.hook({ text: word(text) });
     if (!process.stdout.isTTY) return;
     if (spin) return void (spin.text = text ? word(text) : spin.text);
     spin = { text: word(text), start: Date.now(), frame: 0, tokens: 0 };
@@ -161,15 +163,22 @@ const spinner = {
     spin.timer = setInterval(drawSpinner, 160);
   },
   text(t) {
+    if (spinner.hook) spinner.hook({ text: word(t) });
     if (spin) spin.text = word(t);
   },
+  // A short note after the token count, e.g. "~$0.004" while yAI Ultra writes.
+  extra(s) {
+    if (spin) spin.extra = s;
+  },
   tokens(n) {
+    if (spinner.hook) spinner.hook({ tokens: n });
     if (spin) {
       spin.tokens = n;
       if (spin.text === "thinking") spin.text = "writing";
     }
   },
   stop() {
+    if (spinner.hook) spinner.hook(null);
     if (!spin) return;
     clearInterval(spin.timer);
     spin = null;

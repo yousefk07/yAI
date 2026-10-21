@@ -232,6 +232,108 @@ module.exports = function create(d) {
     return out;
   }
 
+  // ---------- /clone: rebuild a page from a screenshot or a live site (2026-10-20) ----------
+  // A model that can see writes a build spec from the picture, the coder builds it (clone/index.html unless the
+  // project has its own setup), then the result is screenshotted and compared with the original once, and the
+  // differences go back to the coder to fix.
+  const COMPARE_SYSTEM =
+    "You compare two screenshots: first the original design, then a rebuild of it. List the most important visible differences " +
+    "(layout, sizes and spacing, colours, fonts, text, missing or extra parts) as short bullet points, the most important first, at most 10. " +
+    "Say what the rebuild should change, concretely (e.g. 'the header should be 72px tall with a white background'). If they already " +
+    "match closely, reply with exactly: MATCH";
+  async function clone(arg, pasted = []) {
+    if (!visionModel()) return print(c.yellow("   /clone needs a model that can see images (yAI Ultra or yAI Q3.8 Max), and none is available right now."));
+    let notes = String(arg || "").trim();
+    let img = null, mime = "image/png", label = "";
+    const tagged = notes.match(/\[image (\d+)\]/);
+    const [first, ...rest] = notes.split(/\s+/);
+    try {
+      if (tagged) {
+        const f = pasted[Number(tagged[1]) - 1];
+        if (!f || !fs.existsSync(f)) throw new Error(`There's no [image ${tagged[1]}] in this session. Paste a screenshot with Alt+V first.`);
+        img = fs.readFileSync(f);
+        label = `image ${tagged[1]}`;
+        notes = notes.replace(tagged[0], "").trim();
+      } else if (first && /^https?:\/\//i.test(first)) {
+        label = first;
+        notes = rest.join(" ");
+        img = await busy(`opening ${first}`, async () => {
+          const b = await B.launch({ width: 1440, height: 900 });
+          try {
+            await B.setViewport(b, 1440, 900);
+            await B.open(b, first);
+            return await B.screenshot(b, { quality: 80 });
+          } finally {
+            b.close();
+          }
+        });
+        mime = "image/jpeg";
+      } else if (first && isImage(first.replace(/^@/, ""))) {
+        const abs = T.resolve(ctx, first.replace(/^@/, ""));
+        img = fs.readFileSync(abs);
+        mime = IMAGE_TYPES[path.extname(abs).toLowerCase()];
+        label = relPath(abs);
+        notes = rest.join(" ");
+      }
+    } catch (err) {
+      return print(c.yellow(`   ${err.message}`));
+    }
+    if (!img) return print(c.yellow("   Usage: /clone [image 1] (paste a screenshot with Alt+V first) · /clone @mockup.png · /clone https://example.com · then any notes"));
+    if (img.length > MAX_IMAGE_BYTES) return print(c.yellow("   That image is over 2.5 MB. Crop it or save it as a JPEG first."));
+    const dir = mediaDir();
+    const source = path.join(dir, `clone-source${mime === "image/jpeg" ? ".jpg" : ".png"}`);
+    fs.writeFileSync(source, img);
+    let spec;
+    try {
+      spec = await busy(`studying ${label}`, (signal) => withVision((m) => {
+        spinner.text(`${m.label} is studying the design`);
+        return oneShot({ model: m.id, system: DESCRIBE_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: "Write the build spec for this page: everything a developer needs to rebuild it pixel for pixel." }, imagePart(img, mime)] }] });
+      }, signal));
+    } catch (err) {
+      return failed(err);
+    }
+    ui.note(`${c.accent("◆")} ${c.ink(`${spec.vm.label} wrote the design spec`)} ${c.dim(`· the original is in yai-media/${path.basename(source)}`)}`);
+    const hasSetup = ["package.json", "index.html", "src"].some((p) => fs.existsSync(path.join(root, p)));
+    await d.runAgent(
+      `Rebuild this page as faithfully as you can${notes ? ` (${notes})` : ""}. ` +
+      (hasSetup ? "If this project already has a front-end setup that fits, build it there; otherwise " : "") +
+      "write it as one self-contained file, clone/index.html, with the CSS inline. Don't link outside images: use CSS shapes, gradients or " +
+      "plain blocks of the right size and colour where pictures go. Match the layout, every piece of text, colours, fonts, sizes and spacing.\n\n" +
+      `<design-spec source="${label}" described-by="${spec.vm.label}">\n${spec.text}\n</design-spec>`
+    );
+    const built = path.join(root, "clone", "index.html");
+    if (state.interrupted || !fs.existsSync(built)) return;
+    // Compare the build with the original, once.
+    let t, verdict;
+    try {
+      t = await target("clone/index.html");
+      verdict = await busy("comparing the rebuild with the original", async (signal) => {
+        const b = await B.launch({ width: 1440, height: 900 });
+        let shot;
+        try {
+          await B.setViewport(b, 1440, 900);
+          await B.open(b, t.url);
+          shot = await B.screenshot(b, { quality: 75 });
+        } finally {
+          b.close();
+        }
+        fs.writeFileSync(path.join(dir, "clone-result.jpg"), shot);
+        return withVision((m) => {
+          spinner.text(`${m.label} is comparing them`);
+          return oneShot({ model: m.id, system: COMPARE_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: "The original, then the rebuild:" }, imagePart(img, mime), imagePart(shot)] }] });
+        }, signal);
+      });
+    } catch (err) {
+      return failed(err);
+    } finally {
+      t?.close();
+    }
+    if (/^\s*MATCH\b/i.test(verdict.text)) return ui.note(`${c.green("✓")} ${c.ink(`${verdict.vm.label}: the rebuild matches the original`)} ${c.dim("· clone/index.html")}`);
+    ui.note(`${c.accent("◆")} ${c.ink(`${verdict.vm.label} found differences`)} ${c.dim("· fixing them")}`);
+    printMarkdown(verdict.text);
+    await d.runAgent(`I compared your rebuild (a screenshot of clone/index.html at 1440×900) with the original. Fix these differences:\n${verdict.text}`);
+  }
+
   // ---------- /showcase: a demo video of the project ----------
   async function showcase(arg) {
     const ff = B.findFfmpeg();
@@ -622,5 +724,5 @@ module.exports = function create(d) {
       : c.dim("tutor mode off"));
   }
 
-  return { look, showcase, isImage, describeImages, toggleDuo, duoPlan, duoReview, fix, commit, review, share, toggleTutor, TUTOR_PROMPT };
+  return { clone, look, showcase, isImage, describeImages, toggleDuo, duoPlan, duoReview, fix, commit, review, share, toggleTutor, TUTOR_PROMPT };
 };

@@ -21,7 +21,19 @@ const ui = require("./ui");
 const T = require("./tools");
 const { c, print, spinner } = ui;
 
-const VERSION = require("../package.json").version || "1.0.0";
+// The version is the build number: how many changes have been pushed to yAI so far (the site's What's new page uses the
+// same number). Read from git when yai runs from its own clone, otherwise from package.json.
+const VERSION = (() => {
+  const home = path.join(__dirname, "..");
+  const git = (args) => execSync(`git ${args}`, { cwd: home, stdio: ["ignore", "pipe", "ignore"], timeout: 3000 }).toString().trim();
+  try {
+    if (path.resolve(git("rev-parse --show-toplevel")).toLowerCase() === path.resolve(home).toLowerCase()) {
+      const n = git("rev-list --count HEAD");
+      if (/^\d+$/.test(n)) return `1.0.${n}`;
+    }
+  } catch {}
+  return require("../package.json").version || "1.0.0";
+})();
 const MODES = ["default", "acceptEdits", "plan"];
 const MAX_STEPS = 50; // tool calls per request before yAI stops to check in
 // Share of the model's window at which old tool output is dropped, and at which the conversation is
@@ -53,10 +65,17 @@ const state = {
   printMode: false,
   undo: [], // edits yAI made this session, newest last: { abs, before, created }
   placeholder: false, // the faint "Ask yAI…" hint is showing in the empty prompt
+  cost: { session: 0, todayUsd: null, limitUsd: null }, // yAI Ultra: this session's spend, and today's against the allowance
+  askHook: null, // ({ title, detail, options, edit }) => Promise<index>: questions go to the phone (yai remote) or VS Code (--stdio)
+  stdio: false, // run by the VS Code extension (yai --stdio)
+  remote: null, // yai remote: listening for tasks from the phone
 };
 const projectKey = crypto.createHash("sha1").update(root.toLowerCase()).digest("hex").slice(0, 16);
 const project = () => ((api.cfg.projects ||= {})[projectKey] ||= { path: root, allowedCommands: [] });
-const SESSION_FILE = path.join(api.DIR, "sessions", `${projectKey}.json`);
+const SESSION_FILE = path.join(api.DIR, "sessions", `${projectKey}.json`); // one per folder, before 2026-10-20
+const SESSIONS_DIR = path.join(api.DIR, "sessions");
+// Each conversation has its own file now, so /resume can pick any earlier one.
+const sessionFile = () => path.join(SESSIONS_DIR, `${projectKey}-${state.conversationId}.json`);
 const HISTORY_FILE = path.join(api.DIR, "history");
 
 // ---------- helpers ----------
@@ -212,9 +231,11 @@ function pushUser(content) {
 }
 
 function saveSession() {
+  if (!state.messages.length) return;
   try {
-    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ root, model: state.model, savedAt: new Date().toISOString(), messages: state.messages }));
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    state.title ||= sessionTitle({ messages: state.messages });
+    fs.writeFileSync(sessionFile(), JSON.stringify({ id: state.conversationId, title: state.title, root, model: state.model, savedAt: new Date().toISOString(), messages: state.messages }));
   } catch {}
 }
 
@@ -287,11 +308,11 @@ function select(opts) {
 
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
-  ["Session", [["/clear", "start a new conversation"], ["/resume", "continue the last one here"], ["/compact", "summarise to free context"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
+  ["Session", [["/clear", "start a new conversation"], ["/resume", "pick an earlier conversation"], ["/compact", "summarise (/compact <focus>)"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
   ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
-  ["Look & make", [["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
-  ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"]]],
+  ["Look & make", [["/clone", "rebuild a page from a screenshot"], ["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
+  ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"], ["/remote", "take tasks from your phone"]]],
   ["Account", [["/login", "sign in to yAI"], ["/logout", "sign out"], ["/theme", "colours"], ["/config url", "use another yAI site"], ["/exit", "quit"]]],
   ["Keys", [["@", "mention a file or folder"], ["!", "run a shell command"], ["alt+v", "paste a screenshot"], ["shift+tab", "cycle the approval mode"], ["esc", "interrupt yAI"]]],
 ];
@@ -528,6 +549,13 @@ function footerLine() {
   const filled = Math.round((pct / 100) * 6);
   const meter = c.dim("━".repeat(filled)) + c.line("─".repeat(6 - filled));
   const right = [c.faint(state.lastStats || "ready"), `${c.faint("context")} ${meter} ${c.faint(pct + "%")}`];
+  // yAI Ultra's spend: this session, and today against the daily allowance (purple from 80%).
+  if (state.cost.session > 0 || state.models.find((m) => m.id === state.model)?.price) {
+    const t = state.cost;
+    const today = t.todayUsd != null && t.limitUsd ? ` · today $${t.todayUsd.toFixed(2)}/$${t.limitUsd}` : "";
+    const hot = t.todayUsd != null && t.limitUsd && t.todayUsd / t.limitUsd >= 0.8;
+    right.unshift((hot ? c.accent : c.faint)(`$${t.session.toFixed(t.session < 1 ? 3 : 2)}${today}`));
+  }
   // On a narrow terminal the folder goes first, so the stats and the context meter stay.
   const fits = (l) => ui.stripAnsi(ui.footer(l, right)).includes("context");
   return ui.footer(fits(left) ? left : left.filter((_, i) => i !== 1), right);
@@ -868,7 +896,9 @@ async function callModel() {
   const onOuter = () => local.abort();
   outer.signal.addEventListener("abort", onOuter, { once: true });
   try {
-    const { usage } = await api.chat({
+    const price = state.models.find((m) => m.id === state.model)?.price; // US$ per million tokens (yAI Ultra)
+    const promptTokens = usedChars() / 3.6;
+    const { usage, cost } = await api.chat({
       messages: state.messages,
       model: state.model,
       system: systemPrompt(),
@@ -881,6 +911,8 @@ async function callModel() {
         if (!seen) spinner.text("writing");
         seen = n;
         spinner.tokens(n);
+        // What this reply is costing so far (an estimate; the site sends the real figure at the end).
+        if (price) spinner.extra(`~$${((promptTokens * price.in + n * price.out) / 1e6).toFixed(3)}`);
       },
       onText: (piece) => {
         text += piece;
@@ -907,6 +939,11 @@ async function callModel() {
       },
     });
     state.usage.out += usage?.out ?? seen; // a reply cut at a tool call has no final usage event
+    if (cost) {
+      state.cost.session += cost.usd;
+      if (cost.todayUsd != null) state.cost.todayUsd = cost.todayUsd;
+      if (cost.limitUsd != null) state.cost.limitUsd = cost.limitUsd;
+    } else if (price) state.cost.session += (promptTokens * price.in + (usage?.out ?? seen) * price.out) / 1e6; // cut short: estimate
     seen = 0;
   } catch (err) {
     if (!state.interrupted) {
@@ -942,10 +979,13 @@ function fromKimi(text) {
 // "Run this command?" in a box: › 1 Yes · 2 Yes, and don't ask again … · 3 No, tell yAI what to do instead.
 async function askPermission(title, alwaysLabel, detail) {
   spinner.stop();
-  const i = await select({ title, detail, options: ["Yes", alwaysLabel, "No, tell yAI what to do instead"] });
+  const options = ["Yes", alwaysLabel, "No, tell yAI what to do instead"];
+  const editPlan = state.pendingEdit;
+  state.pendingEdit = null;
+  const i = state.askHook ? await state.askHook({ title, detail, options, edit: editPlan }) : await select({ title, detail, options });
   if (i === 0) return "yes";
   if (i === 1) return "always";
-  if (i < 0) return { no: true, feedback: "" };
+  if (i < 0 || state.askHook) return { no: true, feedback: "" };
   const fb = await question(`   ${c.accent("›")} ${c.ink("What should yAI do instead?")} ${c.faint("(Enter to just stop)")} `);
   return { no: true, feedback: (fb || "").trim() };
 }
@@ -1018,6 +1058,7 @@ async function execTool(call) {
       const name = path.basename(plan.abs);
       T.showEdit(ctx, plan);
       if (state.mode !== "acceptEdits") {
+        state.pendingEdit = plan; // the phone and VS Code show the change itself
         const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply this edit to ${name}?`, "Yes, and apply edits without asking");
         if (ans.no) return rejected(ans);
         if (ans === "always") state.mode = "acceptEdits";
@@ -1097,6 +1138,7 @@ async function runAgent(content) {
   const undoStart = state.undo.length;
   let reviewed = false;
   let nudges = 0; // replies that announced a step but stopped before it
+  let planReady = false; // plan mode finished with a plan: ask to go ahead
   try {
     // /duo: the partner model's plan goes in with the request.
     if (state.duo && !state.tutor) {
@@ -1204,7 +1246,7 @@ async function runAgent(content) {
     const out = state.usage.out - startOut;
     const took = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
     state.lastStats = out ? `↓ ${kTokens(out)} tok · ${Math.round(out / Math.max(1, secs))} tok/s · ${took}` : `done in ${took}`;
-    if (state.mode === "plan") print(c.dim(" ⇧⇥ to leave plan mode, then tell yAI to go ahead"));
+    if (state.mode === "plan" && !state.printMode && !state.interrupted) planReady = true;
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
   } catch (err) {
     spinner.stop();
@@ -1217,6 +1259,20 @@ async function runAgent(content) {
     syncMute();
     saveSession();
   }
+  if (planReady) await approvePlan();
+}
+
+// Plan mode ends with a plan to approve (2026-10-20): go ahead with edits approved automatically, go ahead asking
+// before each edit, or keep planning.
+async function approvePlan() {
+  print("");
+  const options = ["Yes, and auto-approve edits", "Yes, but ask before each edit", "No, keep planning"];
+  const title = "Go ahead with this plan?";
+  const i = state.askHook ? await state.askHook({ title, options }) : await select({ title, note: "yAI carries it out", options });
+  if (i < 0 || i === 2) return print(c.dim("   Still in plan mode. Tell yAI what to change, or ⇧⇥ to leave it."));
+  state.mode = i === 0 ? "acceptEdits" : "default";
+  ui.note(`${c.green("✓")} ${c.ink("Plan approved")} ${c.dim(i === 0 ? "· edits are applied without asking" : "· asking before each edit")}`);
+  await runAgent("The plan is approved. Carry it out now, step by step. When you're done, say briefly what you changed and how you checked it.");
 }
 
 // ---------- Pasted screenshots (2026-10-20): Ctrl+V / Alt+V / /paste put the clipboard image in the prompt ----------
@@ -1376,7 +1432,9 @@ const HELP = [
   ["/model [name|#]", "Switch model"],
   ["/mode [ask|auto|plan]", "ask before edits · auto-edit · read-only planning (⇧⇥ cycles)"],
   ["/clear", "Start a new conversation"],
-  ["/compact", "Summarize the conversation to free up context"],
+  ["/compact [focus]", "Summarize the conversation to free up context, keeping the most detail about <focus>"],
+  ["/clone <[image 1]|@file|url> [notes]", "Rebuild a page from a screenshot or a live site, then compare and fix it once"],
+  ["/remote", "Take tasks from your phone (the site's Run on your PC page); also: yai remote"],
   ["/init", "Write a YAI.md with notes about this project"],
   ["/status", "Account, model, folder and usage"],
   ["/usage", "Today's use against the limits (Ultra $, images, videos, searches) and the last 30 days"],
@@ -1384,7 +1442,7 @@ const HELP = [
   ["/login, /logout", "Sign in or out of your yAI account"],
   ["/plan", "Think first: read-only planning mode"],
   ["/undo", "Revert the last edit yAI made (not commands)"],
-  ["/resume", "Continue the last conversation in this folder"],
+  ["/resume", "Pick an earlier conversation in this folder to continue (yai -c continues the latest)"],
   ["/theme [name]", "yAI Dark · yAI Light · Midnight · Classic Blue · Paper · Amber"],
   ["/fix [test command]", "Run the tests and let yAI fix them until they pass · /fix watch reruns on save"],
   ["/review [focus]", "A second model reviews your uncommitted changes (runs the tests too)"],
@@ -1403,7 +1461,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -1500,22 +1558,42 @@ function undoLast() {
   state.pendingContext.push(`I undid your last change: ${u.created ? `${relPath(u.abs)} was deleted` : `${relPath(u.abs)} is back to how it was before your edit`}. Re-read it before changing it again.`);
 }
 
-// ---------- /resume ----------
-function readSession() {
+// ---------- /resume: pick any earlier conversation in this folder ----------
+function folderSessions() {
+  let names = [];
   try {
-    return JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
-  } catch {
-    return null;
-  }
+    names = fs.readdirSync(SESSIONS_DIR).filter((f) => f === `${projectKey}.json` || (f.startsWith(`${projectKey}-`) && f.endsWith(".json")));
+  } catch {}
+  return names
+    .map((f) => { try { return { ...JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), "utf8")), file: f }; } catch { return null; } })
+    .filter((s) => s && s.messages?.length && (s.id !== state.conversationId || !state.messages.length))
+    .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
 }
-function resumeSession() {
-  const s = readSession();
-  if (!s || !s.messages?.length) return print(c.dim("   No earlier conversation in this folder."));
+const typedCount = (s) => s.messages.filter((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("<tool_result")).length;
+function loadSession(s) {
   state.messages = s.messages;
-  ui.note(`${c.green("✓")} ${c.ink(`Continuing “${sessionTitle(s)}”`)} ${c.dim(`· ${state.messages.length} messages · ${ago(s.savedAt)}`)}`);
+  state.conversationId = s.id || crypto.randomUUID();
+  state.title = s.title || null;
+  state.pendingContext = [];
+  ctx.readFiles.clear();
+  redrawTranscript();
+  ui.note(`${c.green("✓")} ${c.ink(`Continuing “${sessionTitle(s)}”`)} ${c.dim(`· ${typedCount(s)} messages · ${ago(s.savedAt)}`)}`);
+}
+async function resumeSession(arg = "") {
+  const list = folderSessions();
+  if (!list.length) return print(c.dim("   No earlier conversations in this folder."));
+  if (arg === "last" || list.length === 1 || state.stdio || !process.stdout.isTTY) return loadSession(list[0]);
+  const shown = list.slice(0, 9);
+  const i = await select({
+    title: "Resume a conversation", note: `${list.length} in this folder`,
+    options: shown.map((s) => `${sessionTitle(s)} ${c.faint(`· ${ago(s.savedAt)} · ${typedCount(s)} message${typedCount(s) === 1 ? "" : "s"}`)}`),
+    hint: "↑↓ choose · enter resume · esc cancel",
+  });
+  if (i >= 0) loadSession(shown[i]);
 }
 // The first thing the user asked in a saved conversation, for the welcome box and /resume.
 function sessionTitle(s) {
+  if (s.title) return s.title; // kept from the first message, so /compact doesn't change it
   const first = (s.messages || []).find((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("<tool_result"));
   // Only what was typed: attached @files are added after it as <file> / <folder> blocks.
   const typed = (first?.content || "").split(/\n\n<(?:file|folder) path=/)[0];
@@ -1648,7 +1726,7 @@ async function chooseModel(arg) {
 // Replaces the conversation with a summary of it (plus the last `keepRecent` messages, so a task in progress
 // carries on). The request has to fit the window too, which a full conversation no longer does, so long tool
 // output is cut down first and, if that isn't enough, the oldest messages after the first request are left out.
-async function summarize({ keepRecent = 0, signal } = {}) {
+async function summarize({ keepRecent = 0, signal, focus = "" } = {}) {
   const recent = keepRecent ? state.messages.slice(-keepRecent) : [];
   const slim = state.messages.slice(0, state.messages.length - recent.length).map((m) =>
     typeof m.content === "string" && m.content.length > 1500 ? { ...m, content: m.content.slice(0, 700) + "\n[…cut for the summary]" } : m
@@ -1663,7 +1741,8 @@ async function summarize({ keepRecent = 0, signal } = {}) {
         role: "user",
         content:
           "Summarize our conversation so far so we can continue in a fresh context. Include: what I asked for, decisions made, " +
-          "files you changed and how, the current state, and what's left to do. Be specific with file paths and names. No tool calls.",
+          "files you changed and how, the current state, and what's left to do. Be specific with file paths and names. No tool calls." +
+          (focus ? ` Keep the most detail about: ${focus}.` : ""),
       },
     ],
     model: state.model,
@@ -1682,7 +1761,7 @@ async function summarize({ keepRecent = 0, signal } = {}) {
   ctx.readFiles.clear();
 }
 
-async function compact() {
+async function compact(focus = "") {
   if (state.messages.length < 2) return print(c.dim("Nothing to compact yet."));
   state.busy = true;
   state.interrupted = false;
@@ -1690,8 +1769,8 @@ async function compact() {
   syncMute();
   const saved = state.messages;
   try {
-    spinner.start("Compacting");
-    await summarize({ signal: state.abort.signal });
+    spinner.start(focus ? `compacting, keeping ${focus}` : "Compacting");
+    await summarize({ signal: state.abort.signal, focus });
     spinner.stop();
     print(c.green("   Compacted the conversation") + c.dim(` (${kTokens(Math.round(JSON.stringify(saved).length / 3.6))} → ${kTokens(Math.round(JSON.stringify(state.messages).length / 3.6))} tokens)`));
   } catch (err) {
@@ -1725,11 +1804,16 @@ async function command(line) {
       state.messages = [];
       state.pendingContext = [];
       state.conversationId = crypto.randomUUID();
+      state.title = null;
       ctx.readFiles.clear();
       if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
       return print(c.dim("New conversation."));
     case "/compact":
-      return compact();
+      return compact(arg);
+    case "/clone":
+      return X.clone(arg, state.pasted);
+    case "/remote":
+      return remoteMode();
     case "/init":
       return runAgent(INIT_PROMPT);
     case "/image":
@@ -1768,7 +1852,7 @@ async function command(line) {
     case "/undo":
       return undoLast();
     case "/resume":
-      return resumeSession();
+      return resumeSession(arg);
     case "/plan":
       state.mode = "plan";
       return ui.note(`${c.yellow("◆")} ${c.ink("plan mode")} ${c.dim("· read-only: yAI investigates and proposes a plan · ⇧⇥ to leave")}`);
@@ -1781,6 +1865,8 @@ async function command(line) {
       print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}${state.tutor ? " · tutor" : ""}${state.duo ? " · duo" : ""}`);
       print(`  Context   ~${kTokens(tokens)} tokens in ${state.messages.length} messages`);
       print(`  Usage     ↓ ${kTokens(state.usage.out)} tokens generated this session`);
+      if (state.cost.session > 0) print(`  Cost      $${state.cost.session.toFixed(3)} of yAI Ultra this session${state.cost.todayUsd != null ? ` · $${state.cost.todayUsd.toFixed(2)} of $${state.cost.limitUsd} today` : ""}`);
+      print(`  Version   yAI Code ${VERSION}`);
       const allowed = project().allowedCommands;
       if (allowed.length) print(`  Allowed   ${allowed.join(", ")} ${c.dim("(commands that run without asking here)")}`);
       return;
@@ -1845,12 +1931,247 @@ async function handleInput(input) {
   showPrompt();
 }
 
+// A change in a few lines of text, for the phone (yai remote): the changed lines with a line of context.
+function diffText(plan) {
+  const lines = (t) => (t ? String(t).replace(/\r\n/g, "\n").split("\n") : []);
+  const ops = ui.lineDiff(lines(plan.before), lines(plan.after));
+  const keep = new Set();
+  ops.forEach((o, i) => { if (o.t !== " ") for (let k = i - 1; k <= i + 1; k++) keep.add(k); });
+  const out = [];
+  let last = -2;
+  ops.forEach((o, i) => {
+    if (!keep.has(i)) return;
+    if (i > last + 1 && out.length) out.push("  …");
+    out.push(`${o.t === " " ? " " : o.t} ${o.text}`);
+    last = i;
+  });
+  return `${plan.created ? "New file" : "Change to"} ${relPath(plan.abs)}\n${out.slice(0, 120).join("\n")}`;
+}
+
+// Turns what yai prints into plain lines: colours dropped, spinner redraws (\r) settled, cursor moves removed.
+function plainLines(text) {
+  return String(text)
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .split("\n")
+    .map((line) => line.split("\r").filter((p, i, all) => i === all.length - 1 || p).pop() || "")
+    .map((line) => line.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ""))
+    .join("\n");
+}
+
+// ---------- yai remote: tasks from the phone (2026-10-20) ----------
+// yAI Code waits for tasks sent from the site's Run on your PC page (/remote), runs each one here as if it had been
+// typed, and sends what it prints back to the phone. Questions it would ask here (may I edit this file?) come to the
+// phone as buttons. Esc or Ctrl+C while it's waiting stops listening.
+const MACHINE_ID = crypto.createHash("sha1").update(`${os.hostname()}|${root.toLowerCase()}`).digest("hex").slice(0, 16);
+async function remoteMode() {
+  if (state.remote) return print(c.dim("   Already listening for tasks."));
+  if (!state.user) await ensureLogin();
+  const hello = () => api.hub("remote-hello", { method: "POST", body: { machine: MACHINE_ID, name: os.hostname(), folder: root, model: modelLabel() } });
+  try {
+    await hello();
+  } catch (err) {
+    return print(c.red(`   Couldn't connect to ${api.baseUrl()}: ${err.message}`));
+  }
+  const R = (state.remote = { tasks: [], wake: null, current: null, answers: new Map(), stopped: false });
+  const pollAbort = new AbortController();
+  const push = (task, events, status) => api.hub("remote-push", { method: "POST", body: { task: task.id, events, status } }).catch(() => {});
+  print("");
+  ui.note(`${c.accent("◆")} ${c.ink("Listening for tasks from your phone")} ${c.dim(`· ${api.baseUrl()}/remote · esc to stop listening`)}`);
+
+  // The poller: new tasks, answers to questions, stops. Runs alongside the task being worked on.
+  (async () => {
+    while (!R.stopped) {
+      try {
+        const r = await api.hub(`remote-poll&m=${MACHINE_ID}`, { signal: pollAbort.signal });
+        for (const t of r.tasks) R.tasks.push(t);
+        if (r.tasks.length && R.wake) R.wake();
+        for (const a of r.answers) {
+          const resolve = R.answers.get(a.ask);
+          if (resolve) { R.answers.delete(a.ask); resolve(a.choice); }
+        }
+        for (const s of r.stop) {
+          if (R.current && R.current.id === s.task) {
+            state.interrupted = true;
+            state.abort?.abort();
+            for (const resolve of R.answers.values()) resolve(-1);
+            R.answers.clear();
+          } else R.tasks = R.tasks.filter((t) => t.id !== s.task);
+        }
+      } catch (err) {
+        if (R.stopped) break;
+        if (/register/i.test(err.message)) await hello().catch(() => {});
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+  })();
+
+  try {
+    for (;;) {
+      // Waiting: esc (or Ctrl+C) stops listening.
+      if (!R.tasks.length) {
+        state.busy = true;
+        state.abort = new AbortController();
+        syncMute();
+        spinner.start("waiting for a task from your phone");
+        const got = await new Promise((resolve) => {
+          R.wake = () => resolve(true);
+          state.abort.signal.addEventListener("abort", () => resolve(false), { once: true });
+        });
+        R.wake = null;
+        spinner.stop();
+        state.busy = false;
+        state.abort = null;
+        syncMute();
+        if (!got) break;
+      }
+      const task = R.tasks.shift();
+      if (!task) continue;
+      R.current = task;
+      const before = state.mode;
+      state.mode = ["default", "acceptEdits", "plan"].includes(task.mode) ? task.mode : "default";
+      await push(task, [{ t: "out", text: `› ${task.text}\n` }], "running");
+      print("");
+      ui.userLine(task.text);
+      ui.note(c.dim(`from your phone · ${{ default: "asks before changes", acceptEdits: "edits without asking", plan: "plan only" }[state.mode]}`));
+      // What yai prints goes to the phone too, in batches.
+      const write = process.stdout.write.bind(process.stdout);
+      let buf = "";
+      process.stdout.write = (chunk, ...rest) => { buf += String(chunk); return write(chunk, ...rest); };
+      const flush = async () => {
+        const cut = buf.lastIndexOf("\n");
+        if (cut < 0) return;
+        const text = plainLines(buf.slice(0, cut + 1));
+        buf = buf.slice(cut + 1);
+        if (text.trim()) await push(task, [{ t: "out", text }]);
+      };
+      const timer = setInterval(flush, 900);
+      state.askHook = async ({ title, detail, options, edit }) => {
+        const id = crypto.randomBytes(4).toString("hex");
+        await flush();
+        await push(task, [{ t: "ask", id, title, detail: edit ? diffText(edit) : detail || "", options }]);
+        spinner.start("waiting for your answer on the phone");
+        const choice = await new Promise((resolve) => R.answers.set(id, resolve));
+        spinner.stop();
+        await push(task, [{ t: "answered", id }]);
+        ui.note(c.dim(`answered on the phone: ${options[choice] || "stop"}`));
+        return choice;
+      };
+      let failedMsg = "";
+      try {
+        await runAgent(await expandMentions(task.text));
+      } catch (err) {
+        failedMsg = err.message;
+      } finally {
+        clearInterval(timer);
+        buf += "\n";
+        await flush();
+        process.stdout.write = write;
+        state.askHook = null;
+        state.mode = before;
+        R.current = null;
+      }
+      const status = failedMsg ? "error" : state.interrupted ? "stopped" : "done";
+      await push(task, [failedMsg ? { t: "error", text: failedMsg } : { t: "done", text: state.lastStats || "" }], status);
+      state.interrupted = false;
+    }
+  } finally {
+    R.stopped = true;
+    pollAbort.abort();
+    state.remote = null;
+    await api.hub("remote-bye", { method: "POST", body: { machine: MACHINE_ID } }).catch(() => {});
+    ui.note(c.dim("stopped listening for tasks"));
+  }
+}
+
+// ---------- yai --stdio: the VS Code extension (2026-10-20) ----------
+// One JSON object per line each way. In:  { type: "prompt", text } · { type: "command", text: "/compact" } ·
+// { type: "answer", id, choice } · { type: "stop" } · { type: "mode", mode } · { type: "model", id }.
+// Out: { type: "ready", version, user, model, models, mode, folder } · { type: "out", text } (what yai prints, with
+// colours) · { type: "status", text, tokens, extra } · { type: "busy" } · { type: "ask", id, title, detail, options,
+// edit?: { path, before, after, created } } · { type: "done", stats, cost, context, mode } · { type: "error", message }.
+async function stdioMode() {
+  state.stdio = true;
+  const write = process.stdout.write.bind(process.stdout);
+  const send = (obj) => write(JSON.stringify(obj) + "\n");
+  // Everything yai prints becomes an "out" event, so the protocol lines stay whole.
+  process.stdout.write = (chunk, enc, cb) => {
+    const text = String(chunk);
+    if (text) send({ type: "out", text });
+    if (typeof enc === "function") enc();
+    else if (typeof cb === "function") cb();
+    return true;
+  };
+  ui.spinner.hook = (s) => send(s ? { type: "status", ...s } : { type: "status", text: null });
+  ui.setTheme(process.env.YAI_THEME || api.cfg.theme || "dark", { paint: false }); // VS Code says light or dark
+  const answers = new Map();
+  state.askHook = ({ title, detail, options, edit }) => {
+    const id = crypto.randomBytes(4).toString("hex");
+    send({ type: "ask", id, title, detail: detail || "", options, ...(edit && { edit: { path: relPath(edit.abs), abs: edit.abs, before: edit.before, after: edit.after, created: !!edit.created } }) });
+    return new Promise((resolve) => answers.set(id, resolve));
+  };
+  try {
+    if (!(await api.me().catch(() => null))) {
+      send({ type: "error", message: `Not signed in. Open a terminal, run yai once and sign in, then reopen this panel.`, auth: true });
+      return process.exit(1);
+    }
+    state.user = api.cfg.user;
+    await loadModels();
+    if (!process.env.YAI_NO_MCP && MCP.configured().length) await MCP.startAll({ approve: async () => true }).catch(() => {});
+  } catch (err) {
+    send({ type: "error", message: err.message });
+    return process.exit(1);
+  }
+  const info = () => ({ model: state.model, models: state.models.map((m) => ({ id: m.id, label: m.label, price: !!m.price })), mode: state.mode, cost: state.cost, context: contextPercent() });
+  send({ type: "ready", version: VERSION, user: state.user, folder: root, ...info() });
+
+  const work = [];
+  let running = false;
+  async function next() {
+    if (running) return;
+    running = true;
+    while (work.length) {
+      const job = work.shift();
+      send({ type: "busy" });
+      try {
+        if (job.type === "command") await command(job.text);
+        else await runAgent(await expandMentions(job.text));
+      } catch (err) {
+        spinner.stop();
+        send({ type: "error", message: err.message });
+      }
+      send({ type: "done", stats: state.lastStats || "", ...info() });
+      state.interrupted = false;
+    }
+    running = false;
+  }
+  const lines = readline.createInterface({ input: process.stdin });
+  lines.on("line", (line) => {
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    if (msg.type === "prompt" && String(msg.text || "").trim()) { work.push({ type: "prompt", text: String(msg.text) }); next(); }
+    else if (msg.type === "command" && /^\/\w+/.test(msg.text || "")) { work.push({ type: "command", text: String(msg.text) }); next(); }
+    else if (msg.type === "answer") { const r = answers.get(msg.id); if (r) { answers.delete(msg.id); r(Number(msg.choice)); } }
+    else if (msg.type === "stop") {
+      state.interrupted = true;
+      state.abort?.abort();
+      for (const r of answers.values()) r(-1);
+      answers.clear();
+    } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; send({ type: "done", stats: state.lastStats || "", ...info() }); }
+    else if (msg.type === "model" && state.models.some((m) => m.id === msg.id)) { state.model = msg.id; prewarm(); send({ type: "done", stats: state.lastStats || "", ...info() }); }
+    else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
+  });
+  lines.on("close", () => process.exit(0));
+}
+
 // ---------- start ----------
 function usage() {
   console.log(`yAI Code ${VERSION}
 
   yai                    start in the current folder
   yai -c, --continue     continue the last conversation in this folder
+  yai -r, --resume       pick an earlier conversation in this folder
+  yai remote             take tasks from your phone (${api.baseUrl()}/remote)
+  yai --stdio            for the VS Code extension: JSON lines on stdin and stdout
   yai -p "task"          answer once and exit (read-only)
       --accept-edits     with -p: allow file edits
       --allow-commands   with -p: allow shell commands
@@ -1863,12 +2184,15 @@ Sign-in and settings are stored in ${path.join(api.DIR, "config.json")}`);
 
 async function main() {
   const args = process.argv.slice(2);
-  let printPrompt = null, modelArg = null, resume = false;
+  let printPrompt = null, modelArg = null, resume = false, remote = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "-h" || a === "--help") return usage();
     if (a === "-v" || a === "--version") return console.log(VERSION);
-    if (a === "-c" || a === "--continue") resume = true;
+    if (a === "--stdio") return stdioMode();
+    if (a === "remote" && i === 0) remote = true;
+    else if (a === "-c" || a === "--continue") resume = "last";
+    else if (a === "-r" || a === "--resume") resume = "pick";
     else if (a === "-m" || a === "--model") modelArg = args[++i];
     else if (a === "-p" || a === "--print") printPrompt = args[++i] || "";
     else if (a === "--plan") state.mode = "plan";
@@ -1946,7 +2270,8 @@ async function main() {
     const m = mcpSummary();
     if (m) ui.note(`${m.failed.length ? c.yellow("!") : c.green("✓")} ${c.ink("MCP: " + m.text)}${m.failed.length ? c.dim(` · didn't start: ${m.failed.join(", ")} (/mcp)`) : ""}`);
   }
-  if (resume) resumeSession();
+  if (resume) await resumeSession(resume === "last" ? "last" : "");
+  if (remote) await remoteMode();
   // Tips and recent sessions, as in the design's start screen
   print("");
   const k = (key, text) => `${c.accent(key)}  ${c.dim(text)}`;
