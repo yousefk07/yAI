@@ -38,8 +38,8 @@
     <!-- First visit: the tour video in a big card at the top left, the sign-in card beside it
          (the video is loaded only when the gate is a page). -->
     <figure class="gate-tour">
-      <div class="gate-tour-frame"><video id="gateVideo" muted loop playsinline preload="none" poster="/yai-tour-poster.jpg?v=2" aria-label="A 60-second tour of yAI: chat, web search with sources, Projects, live previews, Make Image, the model arena and the usage page"></video></div>
-      <figcaption>A 60-second tour of yAI.</figcaption>
+      <div class="gate-tour-frame"><video id="gateVideo" muted loop playsinline preload="none" poster="/yai-tour-poster.jpg?v=3" aria-label="A tour of yAI: chat, web search with sources, charts in answers, the canvas, live previews, Projects, Study flashcards and scheduled tasks"></video></div>
+      <figcaption>A short tour of yAI.</figcaption>
     </figure>
     <form id="gateForm" class="gate-card" novalidate>
       <button type="button" class="icon-btn gate-close" id="gateClose" aria-label="Close" hidden>
@@ -528,7 +528,7 @@
       const v = $("gateVideo");
       if (!play) return v.pause();
       if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      if (!v.getAttribute("src")) v.src = "/yai-tour.mp4?v=2";
+      if (!v.getAttribute("src")) v.src = "/yai-tour.mp4?v=3";
       v.play().catch(() => {});
     }
     $("gateClose").addEventListener("click", closeGate);

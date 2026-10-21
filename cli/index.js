@@ -1528,7 +1528,7 @@ function finishTask({ took, out, cost, undoStart }) {
     const header = f.tests && f.tests.failed ? `${f.tests.failed} test${f.tests.failed === 1 ? "" : "s"} failed` : "The command failed";
     print("");
     // the lines that say what failed (the test's name, the error, expected and actual), not the end of a stack dump
-    const telling = [...new Set(lines.filter((l) => /✖|not ok|FAILED|Error\b|error:|expected|actual|assert/i.test(l) && !/^\s*at /.test(l) && !/failing tests:?\s*$/i.test(l)).map((l) => l.trim()))];
+    const telling = [...new Set(lines.filter((l) => /✖|not ok|FAILED|Error\b|error:|expected|actual|assert/i.test(l) && !/^\s*at /.test(l) && !/failing tests:?\s*$/i.test(l) && !/^\s*code:/.test(l)).map((l) => l.trim()))];
     for (const l of LOOK.failureLines({ header, lines: [`$ ${f.command}`, ...(telling.length ? telling.slice(0, 4) : lines.slice(-3))] })) print(l);
     print("");
     print(LOOK.buttons([["f", "Fix it"], ["s", "Show me the fix first"], ["n", "Leave it, I'll look"]]));
