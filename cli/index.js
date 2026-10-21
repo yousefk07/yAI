@@ -884,6 +884,12 @@ async function callModel() {
       if (line.slice(0, kimi).trim()) write(line.slice(0, kimi).trimEnd());
       return void ((inTool = true), (heldFence = null));
     }
+    // DeepSeek's (yAI Ultra Flash) tool-call markers, the same way.
+    const ds = line.search(DSML_START);
+    if (ds >= 0) {
+      if (line.slice(0, ds).trim()) write(line.slice(0, ds).trimEnd());
+      return void ((inTool = true), (heldFence = null));
+    }
     if (/^\s*<tool[\s>]/.test(line)) return void ((inTool = true), (heldFence = null));
     if (heldFence !== null) write(heldFence), (heldFence = null);
     if (/^\s*```[\w-]*\s*$/.test(line)) return void (heldFence = line);
@@ -931,6 +937,7 @@ async function callModel() {
           lineBuf = lineBuf.slice(cut + 1);
         }
         if (text.includes("<|close|>tools")) return false; // Kimi K3's tool call is complete
+        if (DSML_END.test(text)) return false; // DeepSeek's tool call is complete
         const ts = text.search(/(^|\n)[ \t]*<tool[\s>]/);
         if (ts >= 0) {
           const after = text.slice(ts);
@@ -958,7 +965,25 @@ async function callModel() {
   }
   if (lineBuf && !state.interrupted) emit(lineBuf.replace(/\r$/, ""));
   if (heldFence !== null && !inTool) write(heldFence);
-  return fromKimi(text);
+  return fromDeepSeek(fromKimi(text));
+}
+
+// DeepSeek V4.1 Flash (yAI Ultra Flash) writes tool calls in its own markup (DSML, with full-width bars), e.g.
+//   <｜DSML｜ calls><｜DSML｜ invoke name="write_file"><｜DSML｜ parameter name="path" string="true">snake.html</｜DSML｜ parameter>…
+//   </｜DSML｜ invoke></｜DSML｜ calls>
+// It becomes the usual <tool> block. A call cut off before </…invoke> is left without </tool>, so it counts as cut off.
+const DSML_START = /<｜DSML｜\s*(?:function_)?calls>|<｜DSML｜\s*invoke\b/;
+const DSML_END = /<\/｜DSML｜\s*(?:(?:function_)?calls|invoke)>/;
+function fromDeepSeek(text) {
+  const m = DSML_START.exec(text);
+  if (!m) return text;
+  const before = text.slice(0, m.index).trimEnd();
+  const block = text.slice(m.index);
+  const inv = /<｜DSML｜\s*invoke\s+name="([\w-]+)"[^>]*>([\s\S]*?)(<\/｜DSML｜\s*invoke>|$)/.exec(block);
+  if (!inv) return before;
+  const params = [...inv[2].matchAll(/<｜DSML｜\s*parameter\s+name="([\w-]+)"[^>]*>([\s\S]*?)<\/｜DSML｜\s*parameter>/g)];
+  const body = params.map(([, key, value]) => `<${key}>\n${value}\n</${key}>`).join("\n");
+  return `${before}\n\n<tool name="${inv[1]}">\n${body}${inv[3] ? "\n</tool>" : ""}`;
 }
 
 // Kimi K3 (yAI Ultra) writes tool calls in its own format even when asked for <tool> blocks:
