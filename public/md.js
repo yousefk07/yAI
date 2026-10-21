@@ -44,6 +44,11 @@ window.renderMarkdown = function renderMarkdown(src) {
         `<div class="cc-icon">${kind.toLowerCase() === "doc" ? "Aa" : "&lt;/&gt;"}</div><div class="cc-text"><b>${escapeHtml(title.trim() || "Untitled")}</b>` +
         `<small>${kind.toLowerCase() === "doc" ? "Document" : escapeHtml(kind)} · ${body.split("\n").length} lines${end ? "" : " · writing"}</small></div>` +
         `<button type="button" class="btn-ghost open-canvas">Open</button><pre hidden class="cc-src">${escapeHtml(body.replace(/\n$/, ""))}</pre></div>`))
+    // Diagrams and charts (2026-10-21): ```mermaid and ```chart blocks become boxes the chat page draws (viz.js); elsewhere they stay code.
+    .replace(/```(mermaid|chart)[ \t]*\n([\s\S]*?)(```|$)/g, (whole, kind, body, end) => (typeof window === "undefined" || !window.yaiViz ? whole :
+      hold(`<div class="viz${end ? "" : " writing"}" data-kind="${kind}"><div class="viz-head"><span>${kind === "mermaid" ? "Diagram" : "Chart"}</span>` +
+        (end ? `<button type="button" class="viz-btn" data-act="code" aria-pressed="false">Code</button>${kind === "chart" ? '<button type="button" class="viz-btn" data-act="table" aria-pressed="false">Table</button>' : ""}<button type="button" class="viz-btn" data-act="download">Download</button>` : "") +
+        `</div><div class="viz-out"><div class="viz-wait">${end ? "Drawing…" : "Writing…"}</div></div><div class="viz-code" hidden><pre><code>${escapeHtml(body.replace(/\n$/, ""))}</code></pre></div><pre class="viz-src" hidden>${escapeHtml(body)}</pre></div>`)))
     .replace(/<(gmail-draft|calendar-event)\b([^>]*)>([\s\S]*?)(<\/\1>|$)/g, (_, tag, attrs, body, end) => `\n${hold(googleCard(tag, attrs, body, !!end))}\n`)
     .replace(/```([\w+#.-]*)[^\n]*\n?([\s\S]*?)(```|$)/g, (_, lang, code) =>
       hold(

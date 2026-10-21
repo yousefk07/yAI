@@ -201,3 +201,24 @@
 }
 .g-actions .btn-primary, .cv-ask-row .btn-primary, .voice-actions .btn-primary, .voice-actions .btn-ghost { width: auto; padding: 0 18px; }
 .voice-actions .btn-primary, .voice-actions .btn-ghost { height: 42px; }
+
+/* ---------- Diagrams and charts in answers (viz.js) ---------- */
+.viz { margin: 12px 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.viz-head { display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+.viz-head span { flex: 1; font-weight: 500; }
+.viz-btn { height: 26px; padding: 0 9px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font-size: 12px; }
+.viz-btn:hover, .viz-btn[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.viz-out { padding: 14px; overflow-x: auto; }
+.viz[data-kind="mermaid"] .viz-out { display: flex; justify-content: center; }
+.viz-out svg { max-width: 100%; height: auto; }
+.viz-wait { color: var(--muted); font-size: 13px; padding: 18px 0; text-align: center; width: 100%; }
+.viz.writing .viz-wait::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--acc); animation: pulse 1s infinite; vertical-align: middle; }
+.viz-title { font-size: 14px; font-weight: 600; margin: 0 0 10px 2px; }
+.viz-canvas { position: relative; height: 280px; }
+.viz-err { font-size: 13px; color: var(--warn); }
+.viz-code pre { margin: 0; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--code-bg); font: 12.5px/1.55 var(--mono); overflow-x: auto; }
+.viz-table { margin-top: 12px; overflow-x: auto; }
+.viz-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.viz-table th, .viz-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viz-table th:first-child, .viz-table thead th { text-align: left; color: var(--text-2); font-weight: 500; }
+@media (max-width: 600px) { .viz-canvas { height: 230px; } }

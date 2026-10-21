@@ -263,6 +263,7 @@
 
   // ---------- Hooks from the page ----------
   window.yaiAfterFill = (el, visible, done) => {
+    if (done) window.yaiViz?.render(el);
     window.yaiCanvasAfterFill?.(el, visible, done);
     window.yaiVoiceAfterFill?.(el, visible, done);
   };
