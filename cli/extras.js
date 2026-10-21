@@ -61,7 +61,7 @@ module.exports = function create(d) {
     for (const line of String(text).split("\n")) w(line);
   };
   const relPath = (abs) => T.rel(ctx, abs);
-  // The model that can see images (Qwen 3.8 27B on the cloud GPU), which also plans and reviews in /duo.
+  // The model that can see images (yAI Q3.8 Max, Qwen 3.8 27B on the cloud GPU), which also plans and reviews in /duo.
   const visionModel = () => state.models.find((m) => m.vision && /cloud/.test(m.id)) || state.models.find((m) => m.vision);
   const partnerModel = () => state.models.find((m) => m.id !== state.model && /cloud/.test(m.id) && m.vision);
 
@@ -131,7 +131,7 @@ module.exports = function create(d) {
   // ---------- /look: a vision model reviews the page ----------
   async function look(arg) {
     const vm = visionModel();
-    if (!vm) return print(c.yellow("   /look needs a model that can see images (Qwen 3.8 27B), and none is available right now."));
+    if (!vm) return print(c.yellow("   /look needs a model that can see images (yAI Q3.8 Max), and none is available right now."));
     const { where, focus } = splitTarget(arg);
     let t;
     try {
@@ -294,7 +294,7 @@ module.exports = function create(d) {
   function toggleDuo(arg) {
     const want = /^(on|off)$/i.test(arg) ? arg.toLowerCase() === "on" : !state.duo;
     const p = partnerModel();
-    if (want && !p) return print(c.yellow("   /duo needs a second cloud model (Qwen 3.8 27B) to plan and review, and it isn't available right now."));
+    if (want && !p) return print(c.yellow("   /duo needs a second cloud model (yAI Q3.8 Max) to plan and review, and it isn't available right now."));
     state.duo = want;
     ui.note(want
       ? `${c.accent("◆")} ${c.ink(`duo on`)} ${c.dim(`· ${p.label} plans each request and reviews the changes; ${d.modelLabel()} writes the code`)}`
@@ -500,7 +500,7 @@ module.exports = function create(d) {
     if (!msg) return print(c.red("   The model didn't write a message."));
     for (;;) {
       print("");
-      ui.frame(msg.split("\n").map((l) => " " + c.ink(l)), { indent: 3, inner: Math.min(ui.columns() - 8, 90) });
+      ui.frame(msg.split("\n").map((l) => " " + c.ink(l)), { indent: 3, inner: ui.width() - 5 });
       const a = ((await d.question(ui.choices([["Y", "Commit"], ["E", "Edit"], ["N", "Cancel"]], "Y"))) || "").trim().toLowerCase();
       if (a === "n" || a === "no") return print(c.dim("   Not committed; the changes are still staged."));
       if (a === "e" || a === "edit") {

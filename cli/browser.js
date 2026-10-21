@@ -100,11 +100,19 @@ async function launch({ width = 1280, height = 720 } = {}) {
     // Chrome writes the port it picked into DevToolsActivePort.
     const portFile = path.join(profile, "DevToolsActivePort");
     const until = Date.now() + 20000;
-    while (!fs.existsSync(portFile) || !fs.readFileSync(portFile, "utf8").trim()) {
+    // On Windows the file can be locked for a moment while Chrome writes it (EBUSY), so a failed read just waits.
+    const readPort = () => {
+      try {
+        return fs.readFileSync(portFile, "utf8").split("\n")[0].trim();
+      } catch {
+        return "";
+      }
+    };
+    let port;
+    while (!(port = readPort())) {
       if (Date.now() > until) throw new Error("The browser didn't start.");
       await new Promise((r) => setTimeout(r, 100));
     }
-    const port = fs.readFileSync(portFile, "utf8").split("\n")[0].trim();
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     const page = targets.find((t) => t.type === "page");
     const ws = new WebSocket(page.webSocketDebuggerUrl);

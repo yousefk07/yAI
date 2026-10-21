@@ -109,7 +109,8 @@ const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");
 const vis = (s) => stripAnsi(s).length;
 const pad = (s, n) => s + " ".repeat(Math.max(0, n - vis(s)));
 const columns = () => process.stdout.columns || 100;
-const width = () => Math.min(columns() - 1, 110);
+// The width everything is drawn to: the terminal's, less a margin, up to 120 columns on a full-screen window.
+const width = () => Math.max(40, Math.min(columns() - 2, 120));
 
 // Cut from the middle, so both ends stay readable: a command's name and a path's file name.
 function middle(s, n) {
@@ -202,7 +203,7 @@ function rawPrint(text) {
 
 // A box in the theme's border style. `rows` are already-coloured strings; `fill` is an optional
 // background per row ("panel" / "add" / "del").
-function frame(rows, { indent = 1, inner = Math.min(columns() - indent - 3, 100) } = {}) {
+function frame(rows, { indent = 1, inner = width() - indent - 2 } = {}) {
   const b = theme.box;
   const sp = " ".repeat(indent);
   print(sp + c.line(b.tl + b.h.repeat(inner) + b.tr));
@@ -251,7 +252,7 @@ function markdownWriter() {
   };
 }
 // The width replies are wrapped at, so the indent under ● still fits.
-const textWidth = () => Math.max(40, Math.min(columns(), 112) - 6);
+const textWidth = () => Math.max(36, width() - 4);
 
 // The user's message, on the panel background: "› fix the billing tests".
 function userLine(text) {
@@ -362,7 +363,7 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
   ops.forEach((o, i) => {
     if (o.t !== " ") for (let k = Math.max(0, i - 3); k <= Math.min(ops.length - 1, i + 3); k++) show[k] = true;
   });
-  const inner = Math.min(columns() - 8, 100);
+  const inner = width() - 7;
   const num = String(ops.length ? Math.max(...ops.map((o) => o.an || o.bn || 0)) : 1).length;
   const room = Math.max(10, inner - num - 5);
   const counts = created ? c.faint(`new · ${added} line${added === 1 ? "" : "s"}`) : `${c.addfg("+" + added)} ${c.delfg("−" + removed)}`;
@@ -403,7 +404,7 @@ function choices(list, def) {
 // The design's start screen: "yAI• Code" and the version on the left, a rule, then label / value rows
 // (model, project, context …); under the box the tips and recent sessions are printed by index.js.
 function welcome({ version, rows }) {
-  const inner = Math.min(columns() - 4, 100);
+  const inner = width() - 3;
   const leftW = 31;
   const logo = `${c.ink("y")}${c.bold(c.ink("AI"))}${c.accent("•")} ${c.dim("Code")}`;
   const left = ["", logo, c.faint(`v${version}`), c.faint("your models, your terminal"), ""];
@@ -428,7 +429,7 @@ function welcome({ version, rows }) {
 // headings, the options with a › on the chosen one (on the soft purple band), and a hint at the bottom.
 // Returns the lines; index.js prints them and redraws them in place as the arrow keys move.
 function selectLines({ title, note: titleNote = "", detail, header, options, selected, hint }) {
-  const inner = Math.min(columns() - 9, 96);
+  const inner = width() - 7;
   const b = theme.box;
   const edge = (s) => c.accent(s);
   const row = (s, fill) => {

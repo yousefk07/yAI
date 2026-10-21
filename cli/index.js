@@ -290,12 +290,12 @@ const HELP_GROUPS = [
   ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
   ["Look & make", [["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
-  ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"]]],
+  ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"]]],
   ["Account", [["/login", "sign in to yAI"], ["/logout", "sign out"], ["/theme", "colours"], ["/config url", "use another yAI site"], ["/exit", "quit"]]],
   ["Keys", [["@", "mention a file or folder"], ["!", "run a shell command"], ["shift+tab", "cycle the approval mode"], ["esc", "interrupt yAI"]]],
 ];
 function showHelp() {
-  const inner = Math.min(ui.columns() - 4, 112);
+  const inner = ui.width() - 3;
   const cols = inner >= 108 ? 3 : inner >= 72 ? 2 : 1;
   const colW = Math.floor((inner - 2) / cols);
   const keyW = 12;
@@ -359,6 +359,29 @@ function recentSessions(n = 3) {
     if (out.length >= n) break;
   }
   return out;
+}
+
+// /web <question>: searches the web (through the site, which uses its search API), shows the results, and has yAI
+// answer from them with [n] citations, reading a page with web_fetch when a snippet isn't enough.
+async function webCommand(q) {
+  if (!q) return print(c.yellow("   Usage: /web <what to look up>   e.g. /web what's new in Node.js 24"));
+  if (!state.user) await ensureLogin();
+  print("");
+  ui.resetSections();
+  ui.toolHeader("Web search", q);
+  spinner.start("searching");
+  let results;
+  try {
+    results = await ctx.webSearch(q);
+  } catch (err) {
+    spinner.stop();
+    return ui.toolResult(err.message, { color: c.red });
+  }
+  spinner.stop();
+  if (!results.length) return ui.toolResult("no results", { color: c.yellow });
+  ui.toolResult(results.map((r, i) => `[${i + 1}] ${ui.middle(r.title || r.url, 70)}  ${r.site || ""}`).join("\n"), { summary: `${results.length} results` });
+  const block = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet || ""}`).join("\n\n");
+  await runAgent(`${q}\n\n<web_results>\n${block}\n</web_results>\n\nAnswer from these web results; web_fetch a page if a snippet isn't enough. Cite them like [1] after the sentences that use them, and end with the links you used.`);
 }
 
 // ---------- system prompt ----------
@@ -1271,39 +1294,97 @@ const HELP = [
   ["/commit [note]", "Write a commit message for your changes and commit"],
   ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
-  ["/duo", "Two models: Qwen 3.8 27B plans and reviews, the coder writes"],
+  ["/duo", "Two models: yAI Q3.8 Max plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
   ["/bench [model]", "Run the 6-task coding benchmark (44 tests) on a model; scores go to the leaderboard"],
   ["/mcp [add|remove|restart]", "MCP servers and their tools (also read from .mcp.json)"],
   ["/tasks [stop n]", "Commands yAI left running in the background (dev servers, watchers)"],
+  ["/web <question>", "Search the web and answer from the results, with sources"],
   ["/image [16:9] [@photo] <prompt>", "Make an image, or edit a photo; saved in yai-media/"],
   ["/video [16:9] <prompt>", "Make a 5-second video with sound; saved in yai-media/"],
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/theme", "/clear", "/compact", "/init", "/status", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
 async function chooseTheme(arg) {
+  let key;
   if (!arg) {
-    print("");
-    THEME_KEYS.forEach((k, i) => {
-      const t = ui.THEMES[k];
-      const mark = k === ui.themeKey ? c.accent("◆") : " ";
-      print(` ${mark} ${String(i + 1)}. ${c.bold(c.ink(t.name.padEnd(13)))} ${c.dim(t.note)}`);
+    const i = await select({
+      title: "Theme", note: "the whole conversation is redrawn in it",
+      options: THEME_KEYS.map((k) => `${ui.THEMES[k].name.padEnd(14)}${ui.THEMES[k].note}${k === ui.themeKey ? "  (current)" : ""}`),
+      selected: Math.max(0, THEME_KEYS.indexOf(ui.themeKey)),
     });
-    arg = ((await question(c.dim(" Pick a theme (number or name, Enter to keep): "))) || "").trim();
-    if (!arg) return;
+    if (i < 0) return;
+    key = THEME_KEYS[i];
+  } else {
+    const q = arg.toLowerCase();
+    key = THEME_KEYS[Number(q) - 1] || THEME_KEYS.find((k) => k === q || ui.THEMES[k].name.toLowerCase().replace(/^yai /, "").startsWith(q.replace(/^yai /, "")));
+    if (!key) return print(c.yellow(`No theme matches "${arg}". Try dark, light, midnight, blue, paper or amber.`));
   }
-  const q = arg.toLowerCase();
-  const key = THEME_KEYS[Number(q) - 1] || THEME_KEYS.find((k) => k === q || ui.THEMES[k].name.toLowerCase().startsWith(q));
-  if (!key) return print(c.yellow(`No theme matches "${arg}". Try dark, light, midnight, blue, paper or amber.`));
   ui.setTheme(key);
   api.cfg.theme = key;
   api.save();
+  // Text already on screen keeps the old colours, so the screen is cleared and the conversation redrawn in the new
+  // theme (Yousef 2026-10-20: "if u change theme … it changes all the theme of the previous chats").
+  redrawTranscript();
   ui.note(`${c.green("✓")} ${c.ink("Theme: " + ui.THEMES[key].name)}`);
+}
+
+// The welcome box's rows (model, project, notes, account).
+function welcomeRows() {
+  const git = gitStatus();
+  const cur = state.models.find((m) => m.id === state.model);
+  const where = !cur ? "" : cur.id === "kimi-k3-ultra" ? "hosted" : cur.cloud || /cloud/.test(cur.id) ? "cloud GPU" : "your PC";
+  const rows = [["model", modelLabel(), cur ? c.faint(`· ${where} · ${Math.round((cur.context || 8192) / 1000)}k context`) : ""]];
+  rows.push(["project", shortPath(root), git ? c.faint(`· ${git.branch}${git.modified ? ` · ${git.modified} modified` : ""}`) : ""]);
+  const notes = ["YAI.md", "CLAUDE.md", "AGENTS.md"].find((n) => fs.existsSync(path.join(root, n)));
+  if (notes) rows.push(["context", notes, c.faint(`· ${fs.readFileSync(path.join(root, notes), "utf8").split("\n").length} lines`)]);
+  else rows.push(["context", "no notes yet", c.faint("· /init writes YAI.md")]);
+  rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
+  return rows;
+}
+
+// Clears the screen (and scrollback) and prints the welcome box and this conversation again: your messages, yAI's
+// words and a row for each step it took (tool output itself isn't kept, so steps show without their results).
+const STEP_NAMES = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Edit", write_file: "Create", run: "Run", web_search: "Web search", web_fetch: "Fetch", task_output: "Task output", task_stop: "Stop task" };
+function redrawTranscript() {
+  if (!process.stdout.isTTY || state.printMode) return;
+  process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+  ui.resetSections();
+  ui.welcome({ version: VERSION, rows: welcomeRows() });
+  for (const m of state.messages) {
+    if (typeof m.content !== "string") continue;
+    if (m.role === "user") {
+      if (m.content.startsWith("<tool_result")) continue;
+      if (m.content.startsWith("This conversation continues from")) {
+        print("");
+        ui.note(c.faint("(the conversation before this was summarised by /compact)"));
+        continue;
+      }
+      print("");
+      ui.resetSections();
+      ui.userLine(m.content.split(/\n\n<(?:file|folder) path=/)[0]);
+      continue;
+    }
+    const call = parseToolCall(m.content);
+    const at = m.content.search(/(^|\n)[ \t]*<tool[\s>]/);
+    const prose = call && at >= 0 ? m.content.slice(0, at) : m.content;
+    if (prose.trim()) {
+      const write = ui.markdownWriter();
+      for (const line of prose.trim().split("\n")) write(line);
+    }
+    if (call && call.name && !call.cutOff) {
+      const a = call.args || {};
+      const name = call.name.startsWith("mcp__") ? `MCP ${call.name.split("__")[1]}` : STEP_NAMES[call.name] || call.name;
+      ui.toolHeader(name, a.path || a.command || a.pattern || a.query || a.url || a.id || "");
+      ui.toolResult("");
+    }
+  }
+  print("");
 }
 
 // ---------- /undo ----------
@@ -1579,6 +1660,8 @@ async function command(line) {
       return BENCH.bench(arg);
     case "/mcp":
       return mcpCommand(arg);
+    case "/web":
+      return webCommand(arg);
     case "/tasks":
       return tasksCommand(arg);
     case "/undo":
@@ -1734,15 +1817,7 @@ async function main() {
   }
 
   // The welcome box (the design's start screen): model, project, instructions, account.
-  const git = gitStatus();
-  const cur = state.models.find((m) => m.id === state.model);
-  const where = !cur ? "" : cur.id === "kimi-k3-ultra" ? "hosted" : cur.cloud || /cloud/.test(cur.id) ? "cloud GPU" : "your PC";
-  const rows = [["model", modelLabel(), cur ? c.faint(`· ${where} · ${Math.round((cur.context || 8192) / 1000)}k context`) : ""]];
-  rows.push(["project", shortPath(root), git ? c.faint(`· ${git.branch}${git.modified ? ` · ${git.modified} modified` : ""}`) : ""]);
-  const notes = ["YAI.md", "CLAUDE.md", "AGENTS.md"].find((n) => fs.existsSync(path.join(root, n)));
-  if (notes) rows.push(["context", notes, c.faint(`· ${fs.readFileSync(path.join(root, notes), "utf8").split("\n").length} lines`)]);
-  else rows.push(["context", "no notes yet", c.faint("· /init writes YAI.md")]);
-  rows.push(["account", state.user || "signed out", state.localOffline ? c.yellow("· PC offline, cloud models only") : ""]);
+  const rows = welcomeRows();
   if (prewarm()) rows.push(["gpu", "waking up", c.faint("· in the background while you type")]);
   ui.welcome({ version: VERSION, rows });
 
