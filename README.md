@@ -1,14 +1,17 @@
 # yAI
 
-A ChatGPT-style web app that runs AI models on my own hardware: small models on my laptop's GPU, and a
-27B model, an image generator and a video generator on serverless cloud GPUs that only run while someone is using them.
+A ChatGPT-style web app and terminal coding agent. Three hosted frontier models answer instantly and are billed per
+token against a daily allowance per person; a coding model, an image generator and a video generator run on serverless
+cloud GPUs that only exist while someone is using them; and two small models run on my laptop's GPU.
 
 ![yAI chat interface](docs/screenshot.png)
 
 | Model | Where it runs | Speed |
 |---|---|---|
-| **yAI Q3.8 Max** (Qwen 3.8 27B, FP8, reads images) | Modal serverless vLLM, 48 GB L40S | ~34 tokens/s |
-| **yAI 3 Coder** (Qwen3 Coder 30B; yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S | not measured yet (only 3B of its 30B parameters work on each token) |
+| **yAI Ultra Flash** (DeepSeek V4.1 Flash, reads images; the default) | Modal shared endpoint, $0.30 / $1.20 per million tokens in / out | no waiting |
+| **yAI Ultra** (Kimi K3, reads images) | Modal shared endpoint, $3 / $15 per million tokens | no waiting |
+| **yAI Q3.8 Max** (Qwen3.8 Max, 2.4T parameters, 95B active) | Modal shared endpoint, $2 / $6 per million tokens | no waiting |
+| **yAI 3 Coder** (Qwen3 Coder 30B; yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S (the only chat model on a cloud GPU) | wakes in a minute or two after a quiet spell |
 | yAI Q3.5 (Qwen 3.5 4B Uncensored) and yAI P4 (Phi 4 Mini) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
 | **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
 | **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
@@ -16,8 +19,8 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 ## Features
 
 - **Streaming chat** with Markdown, tables, code blocks and LaTeX math (KaTeX)
-- **Hybrid routing**: local models when the PC is on; the cloud model is always available and becomes the
-  default automatically when the PC is offline
+- **Hybrid routing**: the hosted models are always available (yAI Ultra Flash is the default); the local models
+  show up when the PC is on. The hosted models' cost per reply counts toward one daily allowance per person
 - **Make Image / Make Video**: text → image, photo editing (image → image), text → video and photo → video,
   with per-user daily limits; only sexual content involving minors or real people is blocked
 - **Accounts** with saved chat history and images. yAI is invite-only: everything (chat, cloud models, images, video) needs an account, and people request an access code from the sign-in page to create one
@@ -67,7 +70,8 @@ A ChatGPT-style web app that runs AI models on my own hardware: small models on 
 ## How it works
 
 ```
-                         ┌─▶ RunPod serverless: Qwen 3.8 27B (vLLM)       scales to zero when idle
+                         ┌─▶ Modal shared endpoints: Kimi K3, DeepSeek V4.1 Flash, Qwen3.8 Max   billed per token
+                         ├─▶ Modal serverless GPU: Qwen3 Coder 30B (vLLM)                       scales to zero when idle
 Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Image 2.1, MiniMax H3 (ComfyUI)
    (UI + /api functions) ├─▶ Upstash Redis: accounts, chats, images, videos, activity log
                          └─▶ Cloudflare Tunnel ─▶ bridge.js on the PC ─▶ LM Studio (local models)
@@ -78,8 +82,10 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 - **Image and video jobs are polled.** `/api/image` starts a RunPod job and gives the browser a signed token
   for it. The browser polls until the result is ready, so a slow video never hits a function time limit.
   Workflows live in `workflows/` (ComfyUI "Export (API)" format, with `$prompt` and `$image` placeholders).
-- **Cloud GPUs scale to zero.** A conversation costs about $0.05 and an image well under a cent. After a quiet
-  period the first request wakes a GPU (up to a minute or two), and the UI shows a timer while it does.
+- **Hosted models are billed per token.** Each reply's cost is added to the person's daily allowance (default $2,
+  `ULTRA_DAILY_USD`, changeable per person on /people); yAI Ultra Flash makes it go about ten times further than yAI Ultra.
+- **Cloud GPUs scale to zero.** The coder, images and videos run on GPUs that start when needed; after a quiet period
+  the first request wakes one (up to a minute or two), and the UI shows a timer while it does.
 - **`bridge.js`** runs on the PC. It only listens on localhost, requires a shared bearer token, and only allows
   the chat, model-list and warm-up routes. It also runs one shared warm-up per model, so several users picking
   the same model load it once.
@@ -88,7 +94,7 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 
 ### yAI Code (terminal agent)
 
-A Claude Code–style agent for the terminal that uses the same models as the site, plus **yAI 3 Coder** (Qwen3 Coder 30B), which only yAI Code can use and is its default. yAI Code offers yAI 3 Coder, yAI Ultra, yAI Q3.8 Max, yAI Q3.5 and yAI P4. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
+A Claude Code–style agent for the terminal that uses the same models as the site, plus **yAI 3 Coder** (Qwen3 Coder 30B), which only yAI Code can use. yAI Code offers yAI Ultra Flash (its default), yAI Ultra, yAI Q3.8 Max, yAI 3 Coder, yAI Q3.5 and yAI P4. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
 
 ```powershell
 cd path\to\yAI
@@ -151,14 +157,13 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 |---|---|
 | `LMSTUDIO_URL`, `BRIDGE_TOKEN` | Tunnel URL + `/v1`, and the shared secret for the bridge |
 | `RUNPOD_API_KEY` | RunPod API key for the cloud endpoints |
-| `RUNPOD_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen 3.8 27B (shown as yAI Q3.8 Max) as `qwen3.8-27b-cloud` |
 | `RUNPOD_CODER_ENDPOINT_ID` | Serverless vLLM endpoint serving Qwen3 Coder 30B (shown as yAI 3 Coder) as `qwen3-coder` (yAI Code only; the website lists it greyed out) |
 | `RUNPOD_CODER_CONTEXT` | Optional: the coder endpoint's `MAX_MODEL_LEN` if it isn't 32768, so yAI Code sizes conversations to it |
 | `MODAL_API_KEY` | The key the Modal chat servers check (the `VLLM_API_KEY` in the `yai-vllm` Modal secret) |
 | `MODAL_CODER_URL` | Modal URL of the coder server (`modal deploy modal/llm.py` prints it); when set, yAI 3 Coder runs on Modal instead of RunPod |
-| `MODAL_MAX_URL` | Modal URL of the Qwen 3.8 27B server; when set, it runs on Modal instead of RunPod |
 | `MODAL_ULTRA_URL` | Modal shared endpoint for yAI Ultra (Kimi K3, billed per token, no cold start) |
 | `MODAL_ULTRA_KEY` | Its proxy token, as `wk-….ws-…` (sent as a Bearer token) |
+| `MODAL_QMAX_URL` | Modal shared endpoint for yAI Q3.8 Max (Qwen3.8 Max, billed per token, same daily allowance); `MODAL_QMAX_KEY` only if its proxy token differs from `MODAL_ULTRA_KEY` |
 | `MODAL_FLASH_URL` | Modal shared endpoint for yAI Ultra Flash (DeepSeek V4.1 Flash, billed per token, shares yAI Ultra's daily allowance) |
 | `MODAL_FLASH_KEY` | Optional: its proxy token, if not the same as `MODAL_ULTRA_KEY` |
 | `ULTRA_DAILY_USD` | Optional: how much yAI Ultra each person can use per day (default 2) |

@@ -339,7 +339,7 @@ function showHelp() {
 const padVis = (s, n) => s + " ".repeat(Math.max(0, n - ui.stripAnsi(s).length));
 
 // ---------- /model: a table to pick from ----------
-const SPEED = { "kimi-k3-ultra": "~48 tok/s", "deepseek-v4.1-flash": "fast", "qwen3.8-27b-cloud": "~34 tok/s", "qwen3-coder-30b-cloud": "~60 tok/s" };
+const SPEED = { "kimi-k3-ultra": "~48 tok/s", "deepseek-v4.1-flash": "fast", "qwen3-coder-30b-cloud": "~60 tok/s" };
 async function modelPicker() {
   let ultraLeft = "";
   try {
@@ -1492,7 +1492,7 @@ const HELP = [
   ["/commit [note]", "Write a commit message for your changes and commit"],
   ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
-  ["/duo", "Two models: yAI Q3.8 Max plans and reviews, the coder writes"],
+  ["/duo", "Two models: yAI Q3.8 Max (or another hosted model) plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
   ["/bench [model]", "Run the 6-task coding benchmark (44 tests) on a model; scores go to the leaderboard"],

@@ -1,4 +1,4 @@
-"""yAI's chat models on Modal (serverless GPUs that scale to zero): an OpenAI-compatible vLLM server per model.
+"""yAI 3 Coder on Modal (serverless GPUs that scale to zero): an OpenAI-compatible vLLM server per model.
 
     modal deploy modal/llm.py
 
@@ -6,8 +6,7 @@ Each function becomes a URL like https://<workspace>--yai-llm-coder.modal.run; t
 Model weights live in a Modal Volume, so a cold start loads them from disk instead of downloading them again.
 Image and video generation stay on RunPod (lib/images.js).
 
-Settings (environment variables when deploying):
-    YAI_MAX_MODEL   Hugging Face repo of the Qwen 3.8 27B 4-bit model served as qwen3.8-27b-cloud (required for `max`)
+yAI Q3.8 Max moved to a Modal shared endpoint billed per token (2026-10-21), so the coder is the only model here.
 """
 
 import os
@@ -54,15 +53,3 @@ def serve(model: str, name: str, max_len: int, extra: list[str] | None = None) -
 def coder():
     serve("Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8", "qwen3-coder", 65536)
 
-
-# Qwen 3.8 27B Max (4-bit, reads images): the website's strongest model, and /look, /review and /duo in yAI Code.
-@app.function(image=image, gpu="L40S", volumes=VOLUMES, secrets=SECRETS, scaledown_window=IDLE_SECONDS, timeout=60 * 60)
-@modal.concurrent(max_inputs=16)
-@modal.web_server(port=PORT, startup_timeout=15 * 60)
-def max():
-    model = os.environ.get("YAI_MAX_MODEL", "")
-    if not model:
-        raise RuntimeError("Set YAI_MAX_MODEL to the Hugging Face repo of the Qwen 3.8 27B model, then deploy again.")
-    # Its hybrid (linear-attention) layers need one cache block per running request, and only ~186 fit beside the
-    # model on an L40S; vLLM's default of 256 at once made every start fail.
-    serve(model, "qwen3.8-27b-cloud", 24000, ["--limit-mm-per-prompt", '{"image": 8}', "--max-num-seqs", "64"])

@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.82",
+      "date": "2026-10-21",
+      "title": "A much bigger yAI Q3.8 Max",
+      "items": [
+        {
+          "area": "Models",
+          "title": "yAI Q3.8 Max is now Qwen3.8 Max",
+          "text": "The 2.4-trillion-parameter Qwen3.8 Max replaces the 27B model. It answers right away instead of waiting for a cloud GPU to wake, and like yAI Ultra it counts toward your daily allowance (about half of Ultra's price). It reads text only; for images use yAI Ultra or yAI Ultra Flash."
+        }
+      ]
+    },
+    {
       "version": "1.0.81",
       "date": "2026-10-21",
       "title": "yAI on your phone, as an app",

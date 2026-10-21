@@ -62,7 +62,7 @@ module.exports = function create(d) {
   };
   const relPath = (abs) => T.rel(ctx, abs);
   // Models that can see images, best first: yAI Ultra (always running, so no GPU to wake; each look costs a few cents
-  // of the daily allowance), then yAI Q3.8 Max on the cloud GPU, then any other. If one fails (Ultra's daily allowance
+  // of the daily allowance), then yAI Ultra Flash, then any other. If one fails (Ultra's daily allowance
   // used up, say), the next is asked.
   const visionModels = () => {
     const v = state.models.filter((m) => m.vision);
@@ -83,7 +83,8 @@ module.exports = function create(d) {
     }
     throw lastErr || new Error("No model that can see images is available right now.");
   }
-  const partnerModel = () => state.models.find((m) => m.id !== state.model && /cloud/.test(m.id) && m.vision);
+  // /duo's partner: yAI Q3.8 Max, else another hosted model (per token, no GPU to wake).
+  const partnerModel = () => state.models.find((m) => m.id !== state.model && m.id === "qwen3.8-max") || state.models.find((m) => m.id !== state.model && m.price);
 
   // One request to a model with no tools (planning, reviewing, describing, commit messages).
   async function oneShot({ model, system, messages, signal }) {
@@ -150,7 +151,7 @@ module.exports = function create(d) {
 
   // ---------- /look: a vision model reviews the page ----------
   async function look(arg) {
-    if (!visionModel()) return print(c.yellow("   /look needs a model that can see images (yAI Ultra or yAI Q3.8 Max), and none is available right now."));
+    if (!visionModel()) return print(c.yellow("   /look needs a model that can see images (yAI Ultra or yAI Ultra Flash), and none is available right now."));
     let vm;
     const { where, focus } = splitTarget(arg);
     let t;
@@ -242,7 +243,7 @@ module.exports = function create(d) {
     "Say what the rebuild should change, concretely (e.g. 'the header should be 72px tall with a white background'). If they already " +
     "match closely, reply with exactly: MATCH";
   async function clone(arg, pasted = []) {
-    if (!visionModel()) return print(c.yellow("   /clone needs a model that can see images (yAI Ultra or yAI Q3.8 Max), and none is available right now."));
+    if (!visionModel()) return print(c.yellow("   /clone needs a model that can see images (yAI Ultra or yAI Ultra Flash), and none is available right now."));
     let notes = String(arg || "").trim();
     let img = null, mime = "image/png", label = "";
     const tagged = notes.match(/\[image (\d+)\]/);
@@ -420,7 +421,7 @@ module.exports = function create(d) {
   function toggleDuo(arg) {
     const want = /^(on|off)$/i.test(arg) ? arg.toLowerCase() === "on" : !state.duo;
     const p = partnerModel();
-    if (want && !p) return print(c.yellow("   /duo needs a second cloud model (yAI Q3.8 Max) to plan and review, and it isn't available right now."));
+    if (want && !p) return print(c.yellow("   /duo needs a second hosted model (yAI Q3.8 Max or yAI Ultra) to plan and review, and none is available right now."));
     state.duo = want;
     ui.note(want
       ? `${c.accent("◆")} ${c.ink(`duo on`)} ${c.dim(`· ${p.label} plans each request and reviews the changes; ${d.modelLabel()} writes the code`)}`
