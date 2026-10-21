@@ -32,9 +32,9 @@ function googleCard(tag, attrs, body, done) {
     `<div class="g-actions">${done ? '<button type="button" class="btn-primary g-save">Add to Google Calendar</button>' : '<span class="muted">Writing…</span>'}</div></div>`;
 }
 
-// Connections (2026-10-21): <yai-action tool="spotify.create_playlist">{json args}</yai-action> becomes a card with a
+// Connections (2026-10-21): <yai-action tool="github.create_issue">{json args}</yai-action> becomes a card with a
 // "Do it" button (connections.js runs it). The JSON is shown as plain lines, never as HTML.
-const ACTION_NAMES = { "spotify.create_playlist": "Make a Spotify playlist", "github.create_issue": "Open a GitHub issue", "github.comment": "Comment on GitHub", "github.create_pr": "Open a pull request", "drive.create_doc": "Save as a Google Doc", "webhook.send": "Send to a webhook" };
+const ACTION_NAMES = { "github.create_issue": "Open a GitHub issue", "github.comment": "Comment on GitHub", "github.create_pr": "Open a pull request", "webhook.send": "Send to a webhook" };
 function actionCard(attrs, body, done) {
   const tool = attrsOf(attrs).tool || "";
   let args = {};

@@ -1,9 +1,9 @@
-// Connections (2026-10-21): the panel where people connect GitHub, Google Drive, Spotify, LEARN and webhooks, and see
+// Connections (2026-10-21): the panel where people connect GitHub, LEARN and webhooks, and see
 // what's always on (weather, maps, papers, YouTube). yAI uses them on its own when a question needs them; anything that
 // changes something comes as a card with a button (<yai-action> in md.js), run here after the person presses it.
 (function () {
   const GROUPS = [
-    ["Your accounts", ["github", "drive", "spotify", "learn", "webhooks"]],
+    ["Your accounts", ["github", "learn", "webhooks"]],
     ["Always on", ["weather", "maps", "arxiv", "scholar", "youtube"]],
     ["Set up by the site", ["wolfram", "uw"]],
   ];
@@ -13,7 +13,7 @@
     dlg = document.createElement("dialog");
     dlg.className = "conn-dialog";
     dlg.setAttribute("aria-label", "Connections");
-    dlg.innerHTML = `<div class="conn-head"><div><h2>Connections</h2><p class="muted">yAI uses these on its own when a question needs them. Anything that changes something (a playlist, an issue, a Doc, a webhook) shows a button and waits for you.</p></div><button type="button" class="btn-ghost conn-close" aria-label="Close">✕</button></div><div class="conn-body"><div class="muted">Loading…</div></div>`;
+    dlg.innerHTML = `<div class="conn-head"><div><h2>Connections</h2><p class="muted">yAI uses these on its own when a question needs them. Anything that changes something (a GitHub issue or comment, a webhook message) shows a button and waits for you.</p></div><button type="button" class="btn-ghost conn-close" aria-label="Close">✕</button></div><div class="conn-body"><div class="muted">Loading…</div></div>`;
     document.body.appendChild(dlg);
     dlg.querySelector(".conn-close").addEventListener("click", () => dlg.close());
     dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
@@ -31,7 +31,6 @@
     const state = s.connected ? `<span class="conn-on">${s.kind === "open" || s.kind === "key" ? "On" : "Connected"}</span>${s.who ? ` · ${escapeHtml(s.who)}` : ""}` : `<span class="muted">${escapeHtml(s.needs || "Not connected")}</span>`;
     let action = "";
     if (s.kind === "oauth" && s.ready) action = s.connected ? `<button type="button" class="btn-ghost" data-act="disconnect" data-id="${s.id}">Disconnect</button>` : `<button type="button" class="btn-primary" data-act="connect" data-id="${s.id}">Connect</button>`;
-    if (s.kind === "google" && s.ready && !s.connected) action = `<button type="button" class="btn-primary" data-act="google">${s.who ? "Reconnect Google" : "Connect Google"}</button>`;
     let extra = "";
     if (s.id === "learn") {
       extra = `<form class="conn-form" data-form="learn"><input type="url" name="url" placeholder="${s.connected ? "Saved · paste a new link to replace it" : "https://learn.uwaterloo.ca/d2l/le/calendar/feed/user/feed.ics?token=…"}" autocomplete="off" aria-label="LEARN calendar link"><button type="submit" class="btn-primary">Save</button>${s.connected ? '<button type="button" class="btn-ghost" data-act="disconnect" data-id="learn">Remove</button>' : ""}</form>` +
@@ -70,7 +69,6 @@
     const act = b.dataset.act;
     try {
       if (act === "connect") { location.href = `/api/hub?op=${b.dataset.id}-connect`; return; }
-      if (act === "google") { location.href = "/api/hub?op=google-connect"; return; }
       b.disabled = true;
       if (act === "disconnect") await api(`/api/hub?op=connections&service=${encodeURIComponent(b.dataset.id)}`, { method: "DELETE" });
       if (act === "hook-del") await saveSettings({ webhooks: (settings.webhooks || []).filter((h) => h.id !== b.dataset.hid).map((h) => ({ id: h.id, name: h.name })) });
@@ -137,7 +135,7 @@
   if (p.get("connected")) {
     const id = p.get("connected"), ok = p.get("result") === "ok";
     history.replaceState(null, "", "/");
-    const name = { github: "GitHub", spotify: "Spotify" }[id] || id;
+    const name = { github: "GitHub" }[id] || id;
     setTimeout(() => { toast(ok ? `${name} connected.` : p.get("result") === "cancelled" ? `${name} wasn't connected.` : `Couldn't connect ${name}. Try again.`); if (ok) open(); }, 800);
   }
   document.getElementById("connectionsBtn")?.addEventListener("click", () => { document.getElementById("accountMenu").hidden = true; open(); });

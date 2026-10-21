@@ -273,7 +273,7 @@ const tools = {
     kind: "ask",
   },
   // The services connected on the yAI website (2026-10-21, connections): weather, maps, Wolfram Alpha, arXiv, Semantic
-  // Scholar, YouTube, the user's GitHub, Drive, Spotify, LEARN and webhooks. Ones that change something ask first.
+  // Scholar, YouTube, the user's GitHub, LEARN and webhooks. Ones that change something ask first.
   service: {
     params: ["name", "args"],
     describe: 'Use a connected service listed under "# Connected services": <name> is the tool name (e.g. weather.forecast), <args> a JSON object of its arguments.',

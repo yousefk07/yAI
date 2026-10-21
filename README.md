@@ -220,9 +220,8 @@ For local development without Vercel: `npm start`, then open http://127.0.0.1:30
 | `SESSION_SECRET` | Signs user and admin sessions |
 | `ADMIN_ACCOUNTS` | Comma-separated usernames with admin access (they also get the People and limits page) |
 | `ELEVENLABS_API_KEY` / `OPENAI_API_KEY` | Optional: natural voices and transcription for voice mode (ElevenLabs is used if both are set) |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional: calendar and email. A Google Cloud OAuth client (Web application) with the redirect URI `https://<site>/api/hub?op=google-callback`, the Calendar and Gmail APIs enabled, and the people who use it added as test users. Connections also use it for Google Drive and Docs: enable the Google Drive API too; people reconnect Google once to allow Drive |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional: calendar and email. A Google Cloud OAuth client (Web application) with the redirect URI `https://<site>/api/hub?op=google-callback`, the Calendar and Gmail APIs enabled, and the people who use it added as test users |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Optional: the GitHub connection (repos, PRs, issues; yAI Code's /pr and /issues). A GitHub OAuth App (Settings → Developer settings → OAuth Apps) with the callback URL `https://<site>/api/hub?op=github-callback` |
-| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Optional: the Spotify connection. An app at developer.spotify.com with the redirect URI `https://<site>/api/hub?op=spotify-callback`; while it's in development mode, add each person's Spotify email under User Management |
 | `WOLFRAM_APP_ID` | Optional: Wolfram Alpha (exact maths and data). A free AppID from developer.wolframalpha.com (the LLM API) |
 | `UW_API_KEY` | Optional: UWaterloo course details, from the UW Open Data API (openapi.data.uwaterloo.ca) |
 | `YOUTUBE_API_KEY`, `S2_API_KEY` | Optional: YouTube search (transcripts need no key) and a Semantic Scholar key (without one it falls back to OpenAlex when busy) |

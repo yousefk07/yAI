@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.111",
+      "date": "2026-10-21",
+      "title": "Fewer connections",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Spotify and Google Drive removed",
+          "text": "The Spotify and Google Drive and Docs connections are gone; GitHub, LEARN, webhooks, weather, maps, Wolfram Alpha, papers and YouTube stay. Google sign-in goes back to asking only for calendar and email."
+        }
+      ]
+    },
+    {
       "version": "1.0.110",
       "date": "2026-10-21",
       "title": "Connections",

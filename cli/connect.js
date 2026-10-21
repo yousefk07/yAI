@@ -1,5 +1,5 @@
 "use strict";
-// Connections in yAI Code (2026-10-21): the services connected on the website (GitHub, Drive, Spotify, LEARN,
+// Connections in yAI Code (2026-10-21): the services connected on the website (GitHub, LEARN,
 // weather, maps, Wolfram Alpha, arXiv, Semantic Scholar, YouTube, webhooks) reach the model through the service
 // tool, and these commands use them:
 //
@@ -31,7 +31,7 @@ module.exports = function create(d) {
     const list = tools();
     if (!list.length) return "";
     return "\n\n# Connected services\nThe user connected these on the yAI website. Call them with the service tool: <name> is the name below, <args> a JSON object. " +
-      "Use them when they fit (live weather, directions, exact maths with wolfram.ask, papers, a YouTube transcript, the user's GitHub repos and issues, Drive files, LEARN due dates). " +
+      "Use them when they fit (live weather, directions, exact maths with wolfram.ask, papers, a YouTube transcript, the user's GitHub repos and issues, LEARN due dates). " +
       "The ones marked (asks first) change something; the user approves each call.\n" +
       list.map((t) => `- ${t.name} ${JSON.stringify(t.params || {})}: ${t.desc}${t.write ? " (asks first)" : ""}`).join("\n");
   }
