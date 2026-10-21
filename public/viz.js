@@ -50,8 +50,12 @@
       });
     }
     const { svg } = await window.mermaid.render(`yai-mm-${++seq}`, src);
-    box.querySelector(".viz-out").innerHTML = svg;
+    const out = box.querySelector(".viz-out");
+    out.innerHTML = svg;
     box.dataset.svg = svg;
+    // A wide diagram on a phone would shrink to unreadable text; it keeps at least 70% of its size and scrolls instead.
+    const el = out.querySelector("svg"), natural = parseFloat(el?.style.maxWidth) || 0, room = out.clientWidth - 28;
+    if (el && natural > room * 1.25) { el.style.width = Math.round(natural * 0.7) + "px"; el.style.maxWidth = "none"; out.classList.add("wide"); }
   }
 
   // ---------- charts ----------

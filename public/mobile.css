@@ -49,6 +49,9 @@ body.m-page .shell { height: calc(100dvh - 58px - env(safe-area-inset-bottom)); 
 .m-searchbar { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); height: 42px; margin: 0 16px 16px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--muted); font: 400 15px var(--sans); text-align: left; }
 .m-chips { display: flex; gap: 8px; padding: 0 16px 20px; overflow-x: auto; scrollbar-width: none; }
 .m-chips::-webkit-scrollbar { display: none; }
+.m-chips button span, .m-bigbtn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-chips button { max-width: 72vw; }
+.m-bigbtn { padding: 0 18px; }
 .m-chips button { height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: none; color: var(--text-2); font: 400 14px var(--sans); }
 .m-label { padding: 0 20px 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
 .m-sections .m-label { padding: 0 6px 6px; }
@@ -81,7 +84,7 @@ body.m-page .shell { height: calc(100dvh - 58px - env(safe-area-inset-bottom)); 
 .m-switch.on { background: var(--acc); }
 .m-switch.on i { transform: translateX(18px); }
 .m-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
-.m-seg button { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: 400 13px var(--sans); }
+.m-seg button { height: 36px; padding: 0 14px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: 400 13px var(--sans); }
 .m-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 
 /* ---------- projects ---------- */
@@ -93,7 +96,7 @@ body.m-page .shell { height: calc(100dvh - 58px - env(safe-area-inset-bottom)); 
 .m-card-ic { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); }
 .m-card-meta { font-size: 13px; color: var(--muted); }
 .m-proj-head { display: flex; flex-direction: column; gap: 4px; padding: 4px 20px 18px; }
-.m-proj-head h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.03em; }
+.m-proj-head h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; overflow-wrap: anywhere; }
 .m-proj-head small { font-size: 14px; color: var(--muted); }
 .m-files { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
 .m-file { width: 128px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.89",
+      "date": "2026-10-21",
+      "title": "Phone fixes",
+      "items": [
+        {
+          "area": "Phone",
+          "title": "No more surprise keyboard",
+          "text": "Turning on a tool from the + menu (search, deep research, study, canvas) or tapping a start suggestion no longer pops the keyboard; only tapping the message box does."
+        },
+        {
+          "area": "Phone",
+          "title": "Tidier layouts",
+          "text": "Wide diagrams stay readable and scroll sideways, long project names are cut off neatly instead of wrapping, and the theme buttons are easier to tap."
+        }
+      ]
+    },
+    {
       "version": "1.0.88",
       "date": "2026-10-21",
       "title": "Scheduled tasks, diagrams and charts",

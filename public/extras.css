@@ -211,6 +211,7 @@
 .viz-out { padding: 14px; overflow-x: auto; }
 .viz[data-kind="mermaid"] .viz-out { display: flex; justify-content: center; }
 .viz-out svg { max-width: 100%; height: auto; }
+.viz[data-kind="mermaid"] .viz-out.wide { justify-content: flex-start; }
 .viz-wait { color: var(--muted); font-size: 13px; padding: 18px 0; text-align: center; width: 100%; }
 .viz.writing .viz-wait::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--acc); animation: pulse 1s infinite; vertical-align: middle; }
 .viz-title { font-size: 14px; font-weight: 600; margin: 0 0 10px 2px; }

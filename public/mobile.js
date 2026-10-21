@@ -4,6 +4,13 @@
 // Desktop is untouched: everything here only runs while <body> has the m-app class.
 (function () {
   const PHONE = matchMedia("(max-width: 700px)");
+  // The desktop page puts the cursor back in the message box after nearly every button (a tool, a mode, a project).
+  // On a phone that pops the keyboard over what you were doing, so there only a tap on the box, or a suggestion that
+  // starts the message for you (focusInput), opens it.
+  const box = document.getElementById("input");
+  const realFocus = box.focus.bind(box);
+  box.focus = (...a) => { if (!document.body.classList.contains("m-app")) realFocus(...a); };
+  const focusInput = () => realFocus();
   const esc = (s) => escapeHtml(String(s ?? ""));
   const ico = (d, size = 22, sw = 1.8) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
   const I = {
@@ -134,7 +141,7 @@
       else if (b.dataset.s === "image" && !$("imageMode").hidden) setMode("image");
       else if (b.dataset.s === "code") { input.value = "Write "; autosize(); }
       renderPills();
-      input.focus();
+      if (b.dataset.s === "code") focusInput();
     });
     $("mPills").addEventListener("click", (e) => {
       const b = e.target.closest("[data-off]");
@@ -243,7 +250,7 @@
       <div class="m-head"><div class="m-logo"><span>y</span><b>AI</b><i></i></div><button type="button" class="m-avatar" data-go="you">${esc(initials(user))}</button></div>
       <h1 class="m-big">Chats</h1>
       <button type="button" class="m-searchbar" id="mSearch">${ico(I.search, 17)}Search chats</button>
-      ${projects.length ? `<div class="m-chips">${projects.map((p) => `<button type="button" data-proj="${esc(p.id)}">${ico(I.folder, 15, 1.7)}${esc(p.name)}</button>`).join("")}</div>` : ""}
+      ${projects.length ? `<div class="m-chips">${projects.map((p) => `<button type="button" data-proj="${esc(p.id)}">${ico(I.folder, 15, 1.7)}<span>${esc(p.name)}</span></button>`).join("")}</div>` : ""}
       <div class="m-list">${chatList.length ? Object.entries(groups).filter(([, l]) => l.length).map(([name, l]) => `
         <div class="m-group"><div class="m-label">${name}</div>${l.map((c) => `
           <button type="button" class="m-row" data-chat="${esc(c.id)}"><span class="m-row-top"><b>${esc(c.title)}</b><small>${esc(when(c.updatedAt))}</small></span>${c.projectId && projName(c.projectId) ? `<span class="m-row-sub">${ico(I.folder, 12, 1.8)}${esc(projName(c.projectId))}</span>` : ""}</button>`).join("")}</div>`).join("")
@@ -445,7 +452,7 @@
           ${d?.files?.length ? `<div><div class="m-label">Files</div><div class="m-files">${d.files.map((f) => `<span class="m-file"><i>${esc((f.name.split(".").pop() || "txt").slice(0, 4).toUpperCase())}</i>${esc(f.name)}</span>`).join("")}</div></div>` : ""}
           <div><div class="m-label">Chats</div>${chats.length ? chats.map((c) => `<button type="button" class="m-row m-row-flat" data-chat="${esc(c.id)}"><span class="m-row-top"><b>${esc(c.title)}</b><small>${esc(when(c.updatedAt))}</small></span></button>`).join("") : '<p class="m-empty">No chats in this project yet.</p>'}</div>
         </div>
-        <button type="button" class="m-bigbtn" id="mProjChat">${ico(I.plus, 18, 2)}New chat in ${esc(p.name)}</button>`;
+        <button type="button" class="m-bigbtn" id="mProjChat">${ico(I.plus, 18, 2)}<span>New chat in ${esc(p.name)}</span></button>`;
       $("mProjEdit").onclick = () => openProjectDialog(p.id);
       $("mProjChat").onclick = () => { buzz(); activeProject = { id: p.id, name: p.name }; startNewChat(); renderProjects(); setView("chat"); };
     };
