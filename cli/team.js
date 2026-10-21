@@ -60,6 +60,27 @@ module.exports = function create(d) {
     ].join("\n");
   }
 
+  // The integration (admin) agent's brief: it doesn't build a piece, it checks that the pieces fit together.
+  function integrationBrief(task, all) {
+    const workers = all.filter((a) => !a.integration);
+    return [
+      `You are the integration (admin) agent on a team of ${workers.length} agents working at the same time in this project. The team's overall task: ${task}`,
+      "",
+      "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
+      "(1) every file that is imported or required exists, and every imported name is actually exported;",
+      "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
+      "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
+      "(4) the agents' changes don't contradict each other (two files defining the same thing differently).",
+      "",
+      ...workers.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}.`),
+      "",
+      "The other agents are still editing while you work, so files may change under you: this is a READ-ONLY check — do not edit any files. Re-read a file before you judge it, and name the file and line for every problem you find. If a file looks unfinished, it may simply still be in progress; say so rather than flagging it as broken.",
+      "",
+      "Don't commit, push or change git history, and don't start servers that keep running.",
+      "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
+    ].join("\n");
+  }
+
   // ---------- running the agents ----------
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.text = []; a.cost = 0; a.asks = [];
@@ -74,9 +95,9 @@ module.exports = function create(d) {
       let e;
       try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") {
-        a.send({ type: "mode", mode: "acceptEdits" });
+        a.send({ type: "mode", mode: a.integration ? "plan" : "acceptEdits" });
         if (e.model !== state.model) a.send({ type: "model", id: state.model });
-        a.send({ type: "prompt", text: brief(task, a, all) });
+        a.send({ type: "prompt", text: a.integration ? integrationBrief(task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
       else if (e.type === "status" && e.text) a.step = String(e.text);
       else if (e.type === "step") a.step = `${e.verb} ${e.arg}`.trim();
@@ -138,14 +159,16 @@ module.exports = function create(d) {
       ui.note(`${c.accent("◆")} ${c.ink("This one doesn't split well, so yAI does it on its own.")}`);
       return d.runAgent(task);
     }
+    // The admin agent joins the team: it doesn't build a piece, it checks that the pieces fit together (read-only).
+    agents.push({ name: "integration", task: "check that all the agents' work fits together", files: [], integration: true });
     print("");
-    ui.note(`${c.accent("◆")} ${c.ink(`The lead split it into ${agents.length} parts`)} ${c.dim(`· they run at the same time, with ${d.modelLabel()}`)}`);
+    ui.note(`${c.accent("◆")} ${c.ink(`The lead split it into ${agents.length - 1} parts`)} ${c.dim(`· they run at the same time, with ${d.modelLabel()}, plus an integration agent that checks the pieces fit`)} `);
     for (const a of agents) {
-      print(`     ${c.accent("•")} ${c.ink(a.name)} ${c.dim("· " + clip(a.task, Math.max(30, ui.width() - a.name.length - 12)))}`);
+      print(`     ${c.accent(a.integration ? "◆" : "•")} ${c.ink(a.name)} ${c.dim("· " + clip(a.task, Math.max(30, ui.width() - a.name.length - 12)))}`);
       if (a.files.length) print(`       ${c.faint(clip(a.files.join(", "), ui.width() - 10))}`);
     }
     print("");
-    const go = await d.select({ title: `Start ${agents.length} agents?`, note: "edits are made without asking; commands still ask", options: ["Start", "Cancel"] });
+    const go = await d.select({ title: `Start ${agents.length} agents?`, note: "edits are made without asking; commands still ask; the integration agent is read-only", options: ["Start", "Cancel"] });
     if (go !== 0) return print(c.dim("   Cancelled."));
 
     // 2. They run; the board redraws while they work. Esc stops them all.
@@ -210,23 +233,24 @@ module.exports = function create(d) {
       d.syncMute();
     }
 
-    // 3. The reports.
+    // 3. The reports. The integration (admin) agent's verdict comes last, as the team's sign-off.
     const cost = agents.reduce((s, a) => s + a.cost, 0);
     state.cost.session += cost;
     const files = new Set(agents.flatMap((a) => [...a.changed]));
+    const ordered = [...agents.filter((a) => !a.integration), ...agents.filter((a) => a.integration)];
     print("");
     ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed${cost ? ` · $${cost.toFixed(3)}` : ""}`)}`);
-    for (const a of agents) {
+    for (const a of ordered) {
       print("");
-      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)} ${c.faint(a.changed.size ? [...a.changed].join(", ") : "no files changed")}`);
+      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.integration ? c.dim(" (admin)") : ""} ${c.faint(a.integration ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed")}`);
       const said = a.text.join("\n").trim() || a.error || "";
       for (const l of said.split("\n").filter((x) => x.trim()).slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
     }
     print("");
     print(c.dim("   Their reports are in this conversation now: ask a follow-up, or /review to check the change as a whole."));
     state.pendingContext.push(
-      `I ran /team: ${agents.length} agents worked on this at the same time: "${task}". Their reports:\n\n` +
-      agents.map((a) => `## ${a.name} (${a.state})\nPart: ${a.task}\nFiles changed: ${a.changed.size ? [...a.changed].join(", ") : "none"}\n${(a.text.join("\n").trim() || a.error || "(no report)").slice(-3000)}`).join("\n\n") +
+      `I ran /team: ${agents.length - 1} agents worked on this at the same time, plus an integration (admin) agent that checked their work fits together: "${task}". Their reports:\n\n` +
+      ordered.map((a) => `## ${a.name}${a.integration ? " (integration/admin agent, read-only)" : ""} (${a.state})\nPart: ${a.task}\nFiles changed: ${a.changed.size ? [...a.changed].join(", ") : "none"}\n${(a.text.join("\n").trim() || a.error || "(no report)").slice(-3000)}`).join("\n\n") +
       "\n\nThe files may have changed since you last read them; re-read before editing.",
     );
   }

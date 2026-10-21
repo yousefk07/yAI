@@ -38,7 +38,7 @@ const VERSION = (() => {
   } catch {}
   return require("../package.json").version || "1.0.0";
 })();
-const MODES = ["default", "acceptEdits", "plan"];
+const MODES = ["default", "acceptEdits", "yolo", "plan"];
 const MAX_STEPS = 50; // tool calls per request before yAI stops to check in
 // Share of the model's window at which old tool output is dropped, and at which the conversation is
 // summarized automatically so a task never stops at 100%.
@@ -546,7 +546,7 @@ function topLevel() {
 function envContext() {
   const branch = gitBranch();
   const repo = branch ? `git branch: ${branch}` : nestedRepos().length ? `not a git repository; these folders in it are: ${nestedRepos().join(", ")} (run git there with git -C <folder> ...)` : "not a git repository";
-  const mode = state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command";
+  const mode = state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "yolo" ? "edits, commands and deletions are all applied automatically" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command";
   return `<environment>\n- Repository: ${repo}\n- Permission mode: ${mode}\n- Top-level files: ${topLevel() || "(empty folder)"}\n</environment>`;
 }
 // How to write a tool call. DeepSeek (yAI Ultra Flash) is taught its own DSML format, the one it was trained on:
@@ -693,7 +693,7 @@ function toolBudget() {
 }
 
 // The line above the prompt: "main ● 2 modified   ctx 23%   approvals: ask        ⇧⇥ plan mode   /undo".
-const MODE_NAMES = { default: "ask before running", acceptEdits: "auto-approve edits", plan: "plan · read-only" };
+const MODE_NAMES = { default: "ask before running", acceptEdits: "auto-approve edits", yolo: "auto-approve everything", plan: "plan · read-only" };
 const shortPath = (p) => { const h = os.homedir(); return p.toLowerCase().startsWith(h.toLowerCase()) ? "~" + p.slice(h.length).replace(/\\/g, "/") : p; };
 function footerLine() {
   const left = [`${c.green("●")} ${c.dim(modelLabel())}`, c.faint(ui.middle(shortPath(root), 36))];
@@ -786,7 +786,7 @@ function showPlaceholder() {
 // Under the input: the keys that work now (or the /command suggestions while one is being typed). Drawn with moves
 // relative to the cursor, so it stays right when the screen scrolls; readline wipes it on some edits, so every
 // key press draws it again.
-const MODE_WORDS = { default: "asks before changes", acceptEdits: "auto-accept edits", plan: "plan · read-only" };
+const MODE_WORDS = { default: "asks before changes", acceptEdits: "auto-accept edits", yolo: "auto-accept everything", plan: "plan · read-only" };
 const sugg = { sel: 0, closed: null };
 function suggestions() {
   const line = rl ? rl.line : "";
@@ -1468,7 +1468,7 @@ async function execTool(call) {
           return { output: "Not allowed: read-only mode. Only MCP tools marked read-only can run." };
         }
         const allowedMcp = project().mcpAllowed || [];
-        if (!state.printMode && !allowedMcp.includes(call.name)) {
+        if (!state.printMode && state.mode !== "yolo" && !allowedMcp.includes(call.name)) {
           ui.cancelRow();
           const ans = await askPermission("Use this MCP tool?", "Yes, and don't ask again for this tool", `${tool.server} · ${tool.tool}`, {
             title: "Can I use this tool?", explain: `It comes from the ${tool.server} MCP server, and it may change things outside this folder.`, tag: "MCP", tagFill: "soft",
@@ -1543,7 +1543,7 @@ async function execTool(call) {
       if (plan.before === plan.after) return { output: "No change: the new content is the same as the old." };
       const name = path.basename(plan.abs);
       const counts = T.showEdit(ctx, plan) || { added: 0, removed: 0 };
-      if (state.mode !== "acceptEdits") {
+      if (state.mode !== "acceptEdits" && state.mode !== "yolo") {
         state.pendingEdit = plan; // the phone and VS Code show the change itself
         const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply this edit to ${name}?`, "Yes, and apply edits without asking", "", {
           title: plan.created ? `Can I create ${name}?` : `Can I change ${name}?`,
@@ -1575,7 +1575,7 @@ async function execTool(call) {
       ui.toolResult("Not allowed here", { color: c.yellow });
       return { output: "Running commands isn't allowed in this mode." };
     }
-    if (!allowed && !(state.printMode && state.allowCommands)) {
+    if (!allowed && state.mode !== "yolo" && !(state.printMode && state.allowCommands)) {
       // The question shows the command, so the waiting step row is dropped and redrawn after.
       ui.cancelRow();
       const prefix = commandPrefix(command);
@@ -2410,9 +2410,9 @@ async function command(line) {
     case "/model":
       return chooseModel(arg);
     case "/mode": {
-      const want = { default: "default", ask: "default", accept: "acceptEdits", edits: "acceptEdits", auto: "acceptEdits", "auto-edit": "acceptEdits", plan: "plan" }[arg.toLowerCase()];
+      const want = { default: "default", ask: "default", accept: "acceptEdits", edits: "acceptEdits", auto: "acceptEdits", "auto-edit": "acceptEdits", yolo: "yolo", all: "yolo", everything: "yolo", plan: "plan" }[arg.toLowerCase()];
       state.mode = want || MODES[(MODES.indexOf(state.mode) + 1) % MODES.length];
-      return print(c.dim(`   mode: ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}`));
+      return print(c.dim(`   mode: ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", yolo: "yolo · auto-accepts edits, commands and deletions", plan: "plan · read-only" }[state.mode]}`));
     }
     case "/clear":
     case "/new":
@@ -2480,7 +2480,7 @@ async function command(line) {
       print(`  Account   ${state.user ? c.green(state.user) : c.red("signed out")} ${c.dim("· " + api.baseUrl())}`);
       print(`  Model     ${modelLabel()}${state.localOffline ? c.yellow(" · PC offline, cloud only") : ""}`);
       print(`  Folder    ${root}`);
-      print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", plan: "plan · read-only" }[state.mode]}${state.tutor ? " · tutor" : ""}${state.duo ? " · duo" : ""}`);
+      print(`  Mode      ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", yolo: "yolo · auto-accepts edits, commands and deletions", plan: "plan · read-only" }[state.mode]}${state.tutor ? " · tutor" : ""}${state.duo ? " · duo" : ""}`);
       print(`  Context   ~${kTokens(tokens)} tokens in ${state.messages.length} messages`);
       print(`  Usage     ↓ ${kTokens(state.usage.out)} tokens generated this session`);
       if (state.cost.session > 0) print(`  Cost      $${state.cost.session.toFixed(3)} of yAI Ultra this session${state.cost.todayUsd != null ? ` · $${state.cost.todayUsd.toFixed(2)} of $${state.cost.limitUsd} today` : ""}`);
@@ -2665,11 +2665,11 @@ async function remoteMode() {
       if (!task) continue;
       R.current = task;
       const before = state.mode;
-      state.mode = ["default", "acceptEdits", "plan"].includes(task.mode) ? task.mode : "default";
+      state.mode = ["default", "acceptEdits", "yolo", "plan"].includes(task.mode) ? task.mode : "default";
       await push(task, [{ t: "out", text: `› ${task.text}\n` }], "running");
       print("");
       ui.userLine(task.text);
-      ui.note(c.dim(`from your phone · ${{ default: "asks before changes", acceptEdits: "edits without asking", plan: "plan only" }[state.mode]}`));
+      ui.note(c.dim(`from your phone · ${{ default: "asks before changes", acceptEdits: "edits without asking", yolo: "auto-accepts everything", plan: "plan only" }[state.mode]}`));
       // What yai prints goes to the phone too, in batches.
       const write = process.stdout.write.bind(process.stdout);
       let buf = "";
