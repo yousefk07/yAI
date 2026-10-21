@@ -1,7 +1,7 @@
 // The yAI sidebar on the pages beside the chat (/arena, /usage), so they look and move like the chat page
 // (2026-10-20 redesign): projects and chats link into the chat (/?project=…, /?chat=…), the sidebar collapses to a
 // rail on desktop and is a drawer on phones. The page provides <div class="shell" id="shell"> with its .app inside,
-// a #sideToggle button in its top bar, and <body data-page="arena|usage|study|people|developers|remote|changelog">. Exposes window.yaiSide.me (a promise of
+// a #sideToggle button in its top bar, and <body data-page="arena|usage|study|people|developers|remote|scheduled|changelog">. Exposes window.yaiSide.me (a promise of
 // { user, admin }).
 (function () {
   const page = document.body.dataset.page || "";
@@ -33,6 +33,7 @@
     code: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 10l3 2.5L7 15M13 15h4"/></svg>',
     usage: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>',
     study: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5"/></svg>',
+    clock: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 3h6"/></svg>',
     phone: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/></svg>',
   };
   const on = (p) => (page === p ? " active" : "");
@@ -66,6 +67,7 @@
         <a class="side-link" href="/?code=1">${I.code}<span class="grow">yAI Code</span><span class="side-tag">CLI</span></a>
         <a class="side-link${on("usage")}" href="/usage">${I.usage}<span class="grow">Your usage</span></a>
         <a class="side-link${on("study")}" href="/study">${I.study}<span class="grow">Study</span></a>
+        <a class="side-link${on("scheduled")}" href="/scheduled">${I.clock}<span class="grow">Scheduled</span></a>
         <a class="side-link${on("remote")}" href="/remote">${I.phone}<span class="grow">Run on your PC</span></a>
         <div class="side-me"><span class="avatar" id="sideAvatar"></span><div class="side-me-text"><b id="sideName"></b><small id="sideRole"></small></div></div>
       </div>

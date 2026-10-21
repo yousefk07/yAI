@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>Scheduled · yAI</title>
+  <meta name="description" content="Tasks yAI runs on its own at the times you pick, with a notification when they're done." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Scheduled tasks (2026-10-21, lib/schedule.js): "every weekday at 8, brief me on AI news". yAI runs it at the time,
+       saves the answer as a chat and sends a notification (lib/push.js, sw.js). */
+    .btn-primary { width: auto; padding: 0 16px; }
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    .panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row .grow { flex: 1; }
+    textarea, input[type="text"], input[type="time"], input[type="date"], select {
+      border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font: 14px var(--sans); min-width: 0;
+    }
+    textarea { width: 100%; min-height: 88px; resize: vertical; padding: 12px 14px; font-size: 15px; line-height: 1.5; border-radius: 12px; }
+    input[type="text"] { height: 38px; padding: 0 12px; flex: 1; }
+    input[type="time"], input[type="date"], select { height: 38px; padding: 0 10px; }
+    label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); }
+    .note { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .note.err { color: var(--bad); }
+    .notif { display: flex; align-items: center; gap: 12px; }
+    .notif .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+    .notif .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
+    .notif span { flex: 1; min-width: 0; font-size: 14px; }
+    .tasks { display: flex; flex-direction: column; }
+    .task { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-top: 1px solid var(--border); }
+    .task:first-child { border-top: 0; padding-top: 2px; }
+    .task .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .task b { font-weight: 600; font-size: 14.5px; overflow-wrap: anywhere; }
+    .task .when { font-size: 13px; color: var(--text-2); }
+    .task .last { font-size: 12.5px; color: var(--muted); }
+    .task .last a { color: var(--acc); }
+    .task .last.err { color: var(--bad); }
+    .task.off b, .task.off .when { opacity: 0.55; }
+    .task .acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+    .task .acts button { height: 32px; padding: 0 10px; font-size: 13px; }
+    .switch { width: 36px; height: 22px; border-radius: 11px; background: var(--border); position: relative; border: 0; padding: 0; flex: none; margin-top: 2px; }
+    .switch i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.15s; }
+    .switch[aria-checked="true"] { background: var(--acc); }
+    .switch[aria-checked="true"] i { left: 17px; }
+    .ideas { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ideas button { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--border); background: none; color: var(--text-2); font-size: 13px; }
+    .ideas button:hover { background: var(--hover); color: var(--text); }
+    .empty { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.55; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) {
+      .stage { padding: 4px 14px 24px; }
+      .head h1 { display: none; } .page-title { display: block; }
+    }
+    @media (max-width: 600px) {
+      .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; }
+      .task { flex-wrap: wrap; } .task .acts { width: 100%; justify-content: flex-start; padding-left: 48px; }
+      .when-row > * { flex: 1 1 40%; }
+    }
+  </style>
+</head>
+<body data-page="scheduled">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">Scheduled</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap">
+          <div class="head"><h1>Scheduled</h1><p>Tasks yAI runs on its own at the times you pick. Each answer is saved as a chat (marked ⏰) and you get a notification. They count toward your daily allowance like any other chat.</p></div>
+
+          <section class="panel">
+            <h2>Notifications</h2>
+            <div class="notif"><i class="dot" id="notifDot"></i><span id="notifText">Checking…</span>
+              <button type="button" class="btn-ghost" id="notifTest" hidden>Send a test</button>
+              <button type="button" class="btn-primary" id="notifBtn" hidden>Turn on</button></div>
+            <p class="note" id="notifNote"></p>
+          </section>
+
+          <section class="panel" id="formPanel">
+            <div class="row"><h2 class="grow" id="formTitle">New task</h2><button type="button" class="btn-ghost" id="cancelEdit" hidden>Cancel</button></div>
+            <textarea id="prompt" maxlength="4000" placeholder="What should yAI do? e.g. Give me a short briefing on the biggest AI news since yesterday, with links."></textarea>
+            <div class="ideas" id="ideas">
+              <button type="button" data-t="Morning news" data-p="Give me a short briefing on the most important news since yesterday: world, tech and business. Bullet points with links." data-w="1">Morning news</button>
+              <button type="button" data-t="AI news" data-p="What were the biggest AI announcements and releases in the last day? Short bullets with links." data-w="1">AI news</button>
+              <button type="button" data-t="Word of the day" data-p="Teach me one useful, slightly unusual English word: meaning, pronunciation, and two example sentences.">Word of the day</button>
+              <button type="button" data-t="Weekly plan" data-p="Help me plan a productive week: ask nothing, just give a simple Monday-to-Friday template with one focus per day and a short Sunday-evening checklist." data-k="weekly" data-d="0">Weekly plan</button>
+            </div>
+            <div class="row"><input type="text" id="title" maxlength="80" placeholder="Name (optional)" aria-label="Name" /></div>
+            <div class="row when-row">
+              <select id="kind" aria-label="How often">
+                <option value="daily">Every day</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekly">Every week</option>
+                <option value="once">Once</option>
+              </select>
+              <select id="day" aria-label="Day" hidden>
+                <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option>
+                <option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+              </select>
+              <input type="date" id="date" aria-label="Date" hidden />
+              <input type="time" id="time" value="08:00" aria-label="Time" />
+              <select id="model" aria-label="Model">
+                <option value="deepseek-v4.1-flash">yAI Ultra Flash</option>
+                <option value="qwen3.8-max">yAI Q3.8 Max</option>
+                <option value="kimi-k3-ultra">yAI Ultra</option>
+              </select>
+            </div>
+            <div class="row">
+              <label class="check"><input type="checkbox" id="web" /> Search the web first</label>
+              <span class="grow"></span>
+              <button type="button" class="btn-primary" id="save">Schedule it</button>
+            </div>
+            <p class="note err" id="formErr"></p>
+          </section>
+
+          <section class="panel">
+            <h2>Your tasks</h2>
+            <div class="tasks" id="tasks"><p class="empty">Loading…</p></div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/side.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const MODEL = { "deepseek-v4.1-flash": "Ultra Flash", "qwen3.8-max": "Q3.8 Max", "kimi-k3-ultra": "Ultra" };
+    let tasks = [], editing = null;
+
+    async function hub(op, opts = {}) {
+      const r = await fetch(`/api/hub?op=${op}`, { cache: "no-store", ...opts, headers: { "Content-Type": "application/json" } });
+      if (r.status === 401) { location.href = "/"; throw new Error("Log in"); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      return d;
+    }
+    const clock = (hhmm) => new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    function whenText(t) {
+      const s = t.schedule, at = clock(s.time);
+      const base = s.kind === "daily" ? `Every day at ${at}` : s.kind === "weekdays" ? `Weekdays at ${at}` : s.kind === "weekly" ? `${DAYS[s.day]}s at ${at}`
+        : `Once, ${new Date(`${s.date}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} at ${at}`;
+      return base + (t.tz !== tz ? ` (${t.tz})` : "");
+    }
+    function nextText(ms) {
+      if (!ms) return "";
+      const d = new Date(ms), today = new Date();
+      const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
+      const day = d.toDateString() === today.toDateString() ? "today" : d.toDateString() === tomorrow.toDateString() ? "tomorrow" : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+      return `next ${day} at ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    }
+    const ago = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+
+    // ---------- the list ----------
+    async function load() {
+      try { tasks = (await hub("schedules")).tasks; } catch (err) { $("tasks").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+      $("tasks").innerHTML = tasks.length ? tasks.map((t) => `<div class="task${t.enabled ? "" : " off"}" data-id="${esc(t.id)}">
+          <button type="button" class="switch" role="switch" aria-checked="${t.enabled}" aria-label="On" data-act="toggle"><i></i></button>
+          <div class="body"><b>${esc(t.title)}</b>
+            <span class="when">${esc(whenText(t))} · ${MODEL[t.model] || t.model}${t.web ? " · web" : ""}${t.enabled && t.nextRun ? ` · ${nextText(t.nextRun)}` : t.enabled ? "" : " · off"}</span>
+            ${t.lastRun ? `<span class="last${t.lastStatus === "error" ? " err" : ""}">Last ran ${ago(t.lastRun)}${t.lastStatus === "error" ? " (it failed)" : ""} · <a href="/?chat=${encodeURIComponent(t.lastChatId)}">open the result</a></span>` : ""}
+          </div>
+          <div class="acts"><button type="button" class="btn-ghost" data-act="run">Run now</button><button type="button" class="btn-ghost" data-act="edit">Edit</button><button type="button" class="btn-ghost" data-act="delete">Delete</button></div>
+        </div>`).join("")
+        : '<p class="empty">Nothing scheduled yet. Write a task above, pick a time, and yAI does it then, every time.</p>';
+    }
+    $("tasks").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-act]"); if (!b) return;
+      const t = tasks.find((x) => x.id === b.closest(".task").dataset.id); if (!t) return;
+      const act = b.dataset.act;
+      if (act === "edit") return startEdit(t);
+      if (act === "delete") { if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Sure?"; setTimeout(() => { delete b.dataset.sure; b.textContent = "Delete"; }, 3000); return; }
+        await hub(`schedule&id=${encodeURIComponent(t.id)}`, { method: "DELETE" }).catch(() => {}); return load(); }
+      if (act === "toggle") {
+        await hub("schedule", { method: "PUT", body: JSON.stringify({ ...t, enabled: !t.enabled }) }).catch((err) => alertErr(err)); return load();
+      }
+      if (act === "run") {
+        b.disabled = true; b.textContent = "Running…";
+        try { const { task } = await hub(`schedule-run&id=${encodeURIComponent(t.id)}`, { method: "POST" }); location.href = `/?chat=${encodeURIComponent(task.lastChatId)}`; }
+        catch (err) { b.disabled = false; b.textContent = "Run now"; alertErr(err); }
+      }
+    });
+    const alertErr = (err) => { $("formErr").textContent = err.message; };
+
+    // ---------- the form ----------
+    function syncKind() {
+      const k = $("kind").value;
+      $("day").hidden = k !== "weekly";
+      $("date").hidden = k !== "once";
+      if (k === "once" && !$("date").value) $("date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    }
+    $("kind").addEventListener("change", syncKind);
+    $("ideas").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      $("prompt").value = b.dataset.p; $("title").value = b.dataset.t; $("web").checked = !!b.dataset.w;
+      if (b.dataset.k) { $("kind").value = b.dataset.k; $("day").value = b.dataset.d; $("time").value = "18:00"; } else { $("kind").value = "daily"; $("time").value = "08:00"; }
+      syncKind();
+    });
+    function startEdit(t) {
+      editing = t.id;
+      $("prompt").value = t.prompt; $("title").value = t.title; $("kind").value = t.schedule.kind; $("time").value = t.schedule.time;
+      if (t.schedule.kind === "weekly") $("day").value = String(t.schedule.day);
+      if (t.schedule.kind === "once") $("date").value = t.schedule.date;
+      $("model").value = t.model; $("web").checked = t.web;
+      $("formTitle").textContent = "Edit task"; $("save").textContent = "Save"; $("cancelEdit").hidden = false; $("ideas").hidden = true;
+      syncKind();
+      $("formPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("prompt").focus();
+    }
+    function resetForm() {
+      editing = null;
+      $("prompt").value = ""; $("title").value = ""; $("kind").value = "daily"; $("time").value = "08:00"; $("web").checked = false; $("model").value = "deepseek-v4.1-flash";
+      $("formTitle").textContent = "New task"; $("save").textContent = "Schedule it"; $("cancelEdit").hidden = true; $("ideas").hidden = false; $("formErr").textContent = "";
+      syncKind();
+    }
+    $("cancelEdit").addEventListener("click", resetForm);
+    $("save").addEventListener("click", async () => {
+      const old = tasks.find((t) => t.id === editing);
+      const kind = $("kind").value;
+      const body = {
+        ...(editing && { id: editing }), title: $("title").value, prompt: $("prompt").value, model: $("model").value, web: $("web").checked,
+        enabled: old ? old.enabled : true, tz: kind === "once" || !old ? tz : old.tz,
+        schedule: { kind, time: $("time").value || "08:00", ...(kind === "weekly" && { day: Number($("day").value) }), ...(kind === "once" && { date: $("date").value }) },
+      };
+      $("save").disabled = true; $("formErr").textContent = "";
+      try { await hub("schedule", { method: "PUT", body: JSON.stringify(body) }); resetForm(); await load(); if (!notifOn) $("notifNote").textContent = "Turn on notifications above to hear when it's done."; }
+      catch (err) { $("formErr").textContent = err.message; }
+      $("save").disabled = false;
+    });
+
+    // ---------- notifications ----------
+    let notifOn = false;
+    const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+    const urlKey = (b64) => { const s = atob((b64 + "===".slice((b64.length + 3) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
+    async function reg() { await navigator.serviceWorker.register("/sw.js").catch(() => {}); return navigator.serviceWorker.ready; }
+    async function showNotif() {
+      if (!supported) {
+        const ios = /iPhone|iPad/.test(navigator.userAgent) && !matchMedia("(display-mode: standalone)").matches;
+        $("notifText").textContent = ios ? "On iPhone, add yAI to your Home Screen first (Share › Add to Home Screen), then open it from there." : "This browser can't show notifications. The results still appear in your chats.";
+        return;
+      }
+      const sub = await (await reg()).pushManager.getSubscription().catch(() => null);
+      notifOn = !!sub && Notification.permission === "granted";
+      $("notifDot").classList.toggle("on", notifOn);
+      $("notifText").textContent = notifOn ? "On for this device" : Notification.permission === "denied" ? "Blocked in this browser's site settings" : "Off on this device";
+      $("notifBtn").hidden = Notification.permission === "denied";
+      $("notifBtn").textContent = notifOn ? "Turn off" : "Turn on";
+      $("notifBtn").className = notifOn ? "btn-ghost" : "btn-primary";
+      $("notifTest").hidden = !notifOn;
+    }
+    $("notifBtn").addEventListener("click", async () => {
+      $("notifNote").textContent = "";
+      const r = await reg();
+      try {
+        const sub = await r.pushManager.getSubscription();
+        if (sub && notifOn) {
+          await hub(`push-subscribe&endpoint=${encodeURIComponent(sub.endpoint)}`, { method: "DELETE" }).catch(() => {});
+          await sub.unsubscribe();
+        } else {
+          if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications weren't allowed.");
+          const { publicKey } = await hub("push-key");
+          const fresh = sub || await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlKey(publicKey) });
+          await hub("push-subscribe", { method: "POST", body: JSON.stringify({ subscription: fresh.toJSON() }) });
+        }
+      } catch (err) { $("notifNote").textContent = err.message; }
+      showNotif();
+    });
+    $("notifTest").addEventListener("click", async () => {
+      $("notifNote").textContent = "";
+      try { await hub("push-test", { method: "POST" }); $("notifNote").textContent = "Sent. It should pop up in a few seconds."; }
+      catch (err) { $("notifNote").textContent = err.message; }
+    });
+
+    syncKind();
+    load();
+    showNotif();
+    setInterval(load, 60000);
+  </script>
+</body>
+</html>

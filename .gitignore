@@ -9,3 +9,4 @@ CLAUDE.md
 .claude/
 .agents/
 skills-lock.json
+modal/__pycache__/

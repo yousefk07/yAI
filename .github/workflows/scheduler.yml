@@ -1,0 +1,16 @@
+# Scheduled tasks (lib/schedule.js): knocks on the site every 5 minutes so the tasks that are due run.
+# GitHub may start a run a few minutes late when it's busy; tasks then run a little after their time.
+# If CRON_SECRET is set on Vercel, add the same value as a repository secret with that name.
+name: scheduler
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: >
+          curl -fsS --max-time 150 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          "${{ vars.YAI_URL || 'https://yousef-llmai.vercel.app' }}/api/hub?op=tick"

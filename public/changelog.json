@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.88",
+      "date": "2026-10-21",
+      "title": "Scheduled tasks, diagrams and charts",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Scheduled tasks",
+          "text": "Tell yAI to do something every day, on weekdays, every week or once, at a time you pick (for example a morning news briefing with web search). Each result is saved as a chat marked ⏰ and sent to your phone or browser as a notification. Find it under Scheduled in the sidebar."
+        },
+        {
+          "area": "Chat",
+          "title": "Diagrams and charts in answers",
+          "text": "When a picture explains it better, answers include diagrams (flows, sequences, timelines) and charts (bar, line, area, pie, scatter) with a table view and a download button."
+        },
+        {
+          "area": "Models",
+          "title": "Prompt caching",
+          "text": "The repeated part of a conversation is cached by the model, so follow-up messages are faster and cost up to 80% less from your daily allowance. Your usage page shows the tokens served from cache."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fits your window",
+          "text": "Resizing the terminal redraws at the new width, and file searches and reads show a spinner with a timer."
+        }
+      ]
+    },
+    {
       "version": "1.0.82",
       "date": "2026-10-21",
       "title": "A much bigger yAI Q3.8 Max",
