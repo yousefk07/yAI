@@ -125,6 +125,51 @@ yai
 - Paths are locked to the folder you started in. Sign-in is stored in `~/.yai/config.json` (30-day session).
 - The server only accepts the agent's system prompt from signed-in users (`agent: true` in `/api/chat`).
 
+## Calculator (in `test/`)
+
+A small calculator used to try yAI Code's team mode. It has no dependencies and is not part of the website.
+
+| File | What it is |
+|---|---|
+| `test/calculator.js` | The core logic: a `Calculator` class (CommonJS) |
+| `test/calculator.test.js` | Unit tests for the class, using Node's built-in `assert` |
+| `test/calculator.html` | A self-contained calculator UI (open it in a browser) |
+
+### The `Calculator` class
+
+```js
+const Calculator = require('./test/calculator.js');
+
+const c = new Calculator();
+c.add(2, 3);        // 5
+c.subtract(10, 4);  // 6
+c.multiply(3, 7);   // 21
+c.divide(20, 5);    // 4
+c.divide(1, 0);     // throws Error('Division by zero')
+```
+
+- `add(a, b)`, `subtract(a, b)`, `multiply(a, b)`, `divide(a, b)` each return the numeric result.
+- Every call pushes `{ op, a, b, result }` onto `c.history` (`op` is `'add'`, `'subtract'`, `'multiply'` or `'divide'`).
+- `divide(a, 0)` throws `Error('Division by zero')` and records nothing.
+- `clearHistory()` empties `c.history`.
+
+### Running the tests
+
+```
+node test/calculator.test.js
+```
+
+Each test prints `PASS:` or `FAIL:`, then a `n passed, m failed` summary. The process exits with code 1 if any test failed, so it works in CI.
+
+### The HTML calculator
+
+Open `test/calculator.html` in a browser (double-click it, or `start test/calculator.html` on Windows). It is one
+self-contained file with inline CSS and JavaScript, and it does **not** import `calculator.js` — the four operations
+are re-implemented inside its `<script>` tag, with the same division-by-zero guard.
+
+- Click the buttons, or use the keyboard: digits, `.`, `+` `-` `*` `/`, **Enter** or `=` to calculate, **Esc** or **C** to clear.
+- Dividing by zero shows `Error` and resets the calculator.
+
 ## Security
 
 - Passwords are hashed with **scrypt**; sessions are **HMAC-signed, HttpOnly** cookies, with separate keys for
