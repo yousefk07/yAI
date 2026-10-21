@@ -50,7 +50,7 @@
     .model-row b { font-weight: 500; }
     .model-row span { font-variant-numeric: tabular-nums; color: var(--text-2); }
     .model-row .meter i { background: var(--text-2); }
-    .totals { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px 24px; }
+    .totals { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 16px 24px; }
     .totals b { display: block; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
     .totals small { font-size: 12.5px; color: var(--muted); }
     .empty { color: var(--muted); font-size: 14px; }
@@ -182,7 +182,7 @@
         ? list.map(([m, n]) => `<div class="model-row"><div><b>${esc(m)}</b><span>${num(n)}</span></div><div class="meter"><i style="width:${(n / top) * 100}%"></i></div></div>`).join("")
         : '<p class="empty">Nothing in the last 30 days yet.</p>';
       const x = data.total;
-      $("totals").innerHTML = [[num(msgs(x)), "Messages"], [short((x.tokensIn || 0) + (x.tokensOut || 0)), "Tokens"], [num(x.images), "Images"], [num(x.videos), "Videos"], [num(x.searches), "Searches"], [usd(x.ultraMicros), "On yAI Ultra"]]
+      $("totals").innerHTML = [[num(msgs(x)), "Messages"], [short((x.tokensIn || 0) + (x.tokensOut || 0)), "Tokens"], [num(x.images), "Images"], [num(x.videos), "Videos"], [num(x.searches), "Searches"], [short(x.cachedTokens), "Tokens from cache"], [usd(x.ultraMicros), "On hosted models"]]
         .map(([v, l]) => `<div><b>${v}</b><small>${l}</small></div>`).join("");
     }
 

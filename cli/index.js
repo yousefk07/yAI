@@ -426,6 +426,14 @@ function topLevel() {
   return names.join("  ");
 }
 
+// What changes while yAI works (prompt caching, 2026-10-21): sent at the end of each request, not in the system prompt,
+// so the system prompt and the conversation before it stay the same from one request to the next.
+function envContext() {
+  const branch = gitBranch();
+  const repo = branch ? `git branch: ${branch}` : nestedRepos().length ? `not a git repository; these folders in it are: ${nestedRepos().join(", ")} (run git there with git -C <folder> ...)` : "not a git repository";
+  const mode = state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command";
+  return `<environment>\n- Repository: ${repo}\n- Permission mode: ${mode}\n- Top-level files: ${topLevel() || "(empty folder)"}\n</environment>`;
+}
 function systemPrompt() {
   const shell = process.platform === "win32"
     ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
@@ -433,15 +441,14 @@ function systemPrompt() {
   const toolDocs = Object.entries(T.tools)
     .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
     .join("\n");
-  const branch = gitBranch();
   return `You are yAI Code, a coding agent working in the user's terminal. You help with software tasks in their project: you read, search and edit files and run commands.
 
 # Environment
-- Project folder: ${root}${branch ? ` (git branch: ${branch})` : nestedRepos().length ? ` (not a git repository; these folders in it are: ${nestedRepos().join(", ")} — run git there with git -C <folder> ...)` : ""}
+- Project folder: ${root}
 - Shell: ${shell}
 - Date: ${new Date().toDateString()}
-- Permission mode: ${state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command"}
-- Top-level files: ${topLevel() || "(empty folder)"}
+- The git branch, the permission mode and the top-level files change as you work, so they come at the end of the latest
+  message, in <environment>; always follow the newest one.
 All paths are relative to the project folder. You cannot access anything outside it.
 
 # Tools
@@ -918,6 +925,7 @@ async function callModel() {
       messages: state.messages,
       model: state.model,
       system: systemPrompt(),
+      context: envContext(),
       conversationId: state.conversationId,
       signal: local.signal,
       onStatus: (status) => {
