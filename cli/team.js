@@ -64,7 +64,7 @@ module.exports = function create(d) {
   function integrationBrief(task, all) {
     const workers = all.filter((a) => !a.integration);
     return [
-      `You are the integration (admin) agent on a team of ${workers.length} agents working at the same time in this project. The team's overall task: ${task}`,
+      `You are the integration (admin) agent on a team of ${workers.length} agents who worked at the same time in this project. They have now finished. The team's overall task: ${task}`,
       "",
       "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
       "(1) every file that is imported or required exists, and every imported name is actually exported;",
@@ -72,9 +72,9 @@ module.exports = function create(d) {
       "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
       "(4) the agents' changes don't contradict each other (two files defining the same thing differently).",
       "",
-      ...workers.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}.`),
+      ...workers.map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`),
       "",
-      "The other agents are still editing while you work, so files may change under you: this is a READ-ONLY check — do not edit any files. Re-read a file before you judge it, and name the file and line for every problem you find. If a file looks unfinished, it may simply still be in progress; say so rather than flagging it as broken.",
+      "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
       "",
       "Don't commit, push or change git history, and don't start servers that keep running.",
       "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
@@ -85,7 +85,7 @@ module.exports = function create(d) {
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.text = []; a.cost = 0; a.asks = [];
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark" }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", ...(a.integration && { YAI_REPORT_ONLY: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -95,7 +95,7 @@ module.exports = function create(d) {
       let e;
       try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") {
-        a.send({ type: "mode", mode: a.integration ? "plan" : "acceptEdits" });
+        a.send({ type: "mode", mode: a.integration ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         if (e.model !== state.model) a.send({ type: "model", id: state.model });
         a.send({ type: "prompt", text: a.integration ? integrationBrief(task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
@@ -121,7 +121,7 @@ module.exports = function create(d) {
     });
   }
 
-  const ICON = { done: () => c.green("✓"), failed: () => c.red("✗"), stopped: () => c.yellow("■") };
+  const ICON = { done: () => c.green("✓"), failed: () => c.red("✗"), stopped: () => c.yellow("■"), waiting: () => c.faint("○") };
   function boardLines(agents, tick) {
     const w = ui.width();
     const nameW = Math.max(...agents.map((a) => a.name.length));
@@ -162,7 +162,7 @@ module.exports = function create(d) {
     // The admin agent joins the team: it doesn't build a piece, it checks that the pieces fit together (read-only).
     agents.push({ name: "integration", task: "check that all the agents' work fits together", files: [], integration: true });
     print("");
-    ui.note(`${c.accent("◆")} ${c.ink(`The lead split it into ${agents.length - 1} parts`)} ${c.dim(`· they run at the same time, with ${d.modelLabel()}, plus an integration agent that checks the pieces fit`)} `);
+    ui.note(`${c.accent("◆")} ${c.ink(`The lead split it into ${agents.length - 1} parts`)} ${c.dim(`· they run at the same time, with ${d.modelLabel()}; then an integration agent checks the pieces fit`)} `);
     for (const a of agents) {
       print(`     ${c.accent(a.integration ? "◆" : "•")} ${c.ink(a.name)} ${c.dim("· " + clip(a.task, Math.max(30, ui.width() - a.name.length - 12)))}`);
       if (a.files.length) print(`       ${c.faint(clip(a.files.join(", "), ui.width() - 10))}`);
@@ -201,13 +201,19 @@ module.exports = function create(d) {
       for (const a of agents) { a.send?.({ type: "stop" }); setTimeout(() => a.child && a.child.exitCode === null && a.child.kill(), 3000); }
     });
     const started = Date.now();
-    agents.forEach((a) => startAgent(a, task, agents));
+    // The builders start now; the integration agent waits for them, so it checks finished work, not files half-written.
+    const checker = agents.find((a) => a.integration);
+    agents.forEach((a) => (a.integration ? Object.assign(a, { state: "waiting", step: "starts when the others finish", started: Date.now(), changed: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => { draw(); report(); }, 120);
         let asking = false;
         wake = async () => {
           if (over) return;
+          if (checker && checker.state === "waiting" && agents.every((a) => a.integration || (["done", "failed", "stopped"].includes(a.state) && !a.asks.length))) {
+            if (state.interrupted) { checker.state = "stopped"; checker.ended = Date.now(); }
+            else startAgent(checker, task, agents);
+          }
           if (agents.every((a) => ["done", "failed", "stopped"].includes(a.state) && !a.asks.length)) { clearInterval(timer); draw(); over = true; return resolve(); }
           if (asking) return;
           const a = agents.find((x) => x.asks.length);

@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.101",
+      "date": "2026-10-21",
+      "title": "yAI searches on its own",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Searches the web when it needs to",
+          "text": "Without pressing Search, yAI checks whether your question needs the web (news, prices, anything recent or obscure, or when you ask it to look something up) and searches on its own, with sources as usual. Coding, maths and writing questions go straight to the answer."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Yolo mode",
+          "text": "Shift+Tab now also offers auto-accept everything: edits, commands and deletions run without asking (/mode yolo). In /team the builders follow it too."
+        },
+        {
+          "area": "yAI Code",
+          "title": "An integration agent in /team",
+          "text": "After the agents finish, an integration agent checks, read-only, that their pieces fit together: imports exist, names and routes match, nothing is left half-wired. Its verdict comes last in the report."
+        },
+        {
+          "area": "yAI Code",
+          "title": "A plan you can trust",
+          "text": "The plan's progress now counts finished steps, not tool calls, never goes backwards, and is complete when a task ends well."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Ultra Flash tool calls",
+          "text": "yAI Ultra Flash now writes its tool calls in its own native format, so steps are no longer thrown away as unfinished."
+        }
+      ]
+    },
+    {
       "version": "1.0.97",
       "date": "2026-10-21",
       "title": "A steadier yAI Code",

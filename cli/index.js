@@ -1229,12 +1229,17 @@ async function callModel() {
     // The plan the model keeps (see LOOK.PLAN_RULES): shown in the card at the bottom, not in the words.
     if (state.task) {
       const d = /<done>\s*(\d+)\s*<\/done>/.exec(line);
-      if (d && state.plan) state.plan.done = Number(d[1]);
+      // A step number past the end of the plan (a model counting its tool calls) is ignored, and progress never goes
+      // backwards (2026-10-21: plans of 4 steps were marked "13 done").
+      if (d && state.plan) {
+        const n = Number(d[1]);
+        if (n <= state.plan.steps.length && n >= state.plan.done) state.plan.done = Math.min(n, state.plan.steps.length);
+      }
       if (/<offer-fix\s*\/?>/.test(line)) state.task.offerFix = true;
       line = line.replace(/<done>\s*\d+\s*<\/done>|<offer-fix\s*\/?>/g, "");
       if (inPlan || /<plan>/.test(line)) {
         const body = line.replace(/<\/?plan>/g, "");
-        if (/<plan>/.test(line)) { inPlan = true; state.plan = { steps: [], done: state.plan && state.plan.done > 0 ? state.plan.done : 0 }; }
+        if (/<plan>/.test(line)) { inPlan = true; state.plan = { steps: [], done: 0 }; }
         const m = /^\s*\d+[.)]\s+(.+)/.exec(body);
         if (m) state.plan.steps.push(m[1].trim());
         if (/<\/plan>/.test(line)) inPlan = false;
@@ -1761,6 +1766,8 @@ async function runAgent(content) {
     const took = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
     state.lastStats = out ? `↓ ${kTokens(out)} tok · ${Math.round(out / Math.max(1, secs))} tok/s · ${took}` : `done in ${took}`;
     state.task.over = true; // the plan panel closes, so the summary gets the full width
+    // a task that ended well finished its plan, whatever the model last marked
+    if (state.plan && !state.task.failure && !state.task.offerFix) state.plan.done = state.plan.steps.length;
     if (!state.interrupted) finishTask({ took, secs: took.replace("s", " s"), out, cost: state.cost.session - costStart, undoStart });
     if (state.mode === "plan" && !state.printMode && !state.interrupted) planReady = true;
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
@@ -1776,7 +1783,8 @@ async function runAgent(content) {
     syncMute();
     saveSession();
   }
-  if (planReady) await approvePlan();
+  // (a read-only checker in /team only reports; it has no plan to carry out)
+  if (planReady && !process.env.YAI_REPORT_ONLY) await approvePlan();
 }
 
 // After a request (v2): a failure gets a card that says what failed, with keys to fix it, see the fix first or leave it;

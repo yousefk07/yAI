@@ -223,7 +223,9 @@ module.exports = function create({ ui }) {
   const PLAN_RULES =
     "\n\n# Plan\nFor a task that takes more than two steps, start your first reply with a short plan in plain words, like this:\n" +
     "<plan>\n1. Read server.py and the tests\n2. Add the /health route\n3. Write and run a test\n4. Summarise what changed\n</plan>\n" +
-    "Use 2 to 6 steps. Each time you finish a step, start your next reply with <done>N</done>, where N is how many steps are finished. " +
+    "Use 2 to 6 steps; a step usually takes several tool calls. When a whole step of the plan is finished (not after every tool call), " +
+    "start your next reply with <done>N</done>, where N is the number of plan steps finished so far: 1 after the first step, and never more " +
+    "than the number of steps in the plan. Don't count tool calls. " +
     "Skip the plan for questions and one-step tasks.\n\n# When something fails\nWhen a command or test fails and you can't simply fix it with one more try, " +
     "stop and explain it in one or two plain sentences first (what went wrong, without jargon), then say what you'd change and how big the change is, " +
     "and end that reply with <offer-fix/> on its own line. Don't make the fix until the user says so.";
