@@ -549,25 +549,37 @@ function envContext() {
   const mode = state.tutor ? "TUTOR (you may read files and run commands such as tests; editing files is off)" : state.mode === "plan" ? "PLAN (read-only: investigate, then present a plan; do not edit or run anything)" : state.mode === "acceptEdits" ? "edits are applied automatically" : "the user approves each edit and command";
   return `<environment>\n- Repository: ${repo}\n- Permission mode: ${mode}\n- Top-level files: ${topLevel() || "(empty folder)"}\n</environment>`;
 }
-function systemPrompt() {
-  const shell = process.platform === "win32"
-    ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
-    : `bash on ${os.type()}`;
-  const toolDocs = Object.entries(T.tools)
-    .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
-    .join("\n");
-  return `You are yAI Code, a coding agent working in the user's terminal. You help with software tasks in their project: you read, search and edit files and run commands.
+// How to write a tool call. DeepSeek (yAI Ultra Flash) is taught its own DSML format, the one it was trained on:
+// asked for yAI's <tool> blocks it kept mixing the two (2026-10-21). Everyone else gets the <tool> blocks.
+function toolFormat() {
+  if (/^deepseek/i.test(state.model)) {
+    const D = "｜DSML｜";
+    return `To use a tool, end your message with one tool call in your native DSML format, each tag on its own line:
 
-# Environment
-- Project folder: ${root}
-- Shell: ${shell}
-- Date: ${new Date().toDateString()}
-- The git branch, the permission mode and the top-level files change as you work, so they come at the end of the latest
-  message, in <environment>; always follow the newest one.
-All paths are relative to the project folder. You cannot access anything outside it.
+<${D}tool_calls>
+<${D}invoke name="read_file">
+<${D}parameter name="path" string="true">src/app.js</${D}parameter>
+</${D}invoke>
+</${D}tool_calls>
 
-# Tools
-To use a tool, end your message with a block in exactly this format, each tag on its own line:
+Then stop writing. The result comes back in the next message inside <tool_result>. One tool per message. Use only this
+format for tool calls (never <tool> tags), never put a tool call inside a code fence, and never write a <tool_result>.
+
+Values go inside the parameter as-is, without escaping, and multi-line values are fine:
+
+<${D}tool_calls>
+<${D}invoke name="edit_file">
+<${D}parameter name="path" string="true">src/app.js</${D}parameter>
+<${D}parameter name="old" string="true">function add(a, b) {
+  return a - b;
+}</${D}parameter>
+<${D}parameter name="new" string="true">function add(a, b) {
+  return a + b;
+}</${D}parameter>
+</${D}invoke>
+</${D}tool_calls>`;
+  }
+  return `To use a tool, end your message with a block in exactly this format, each tag on its own line:
 
 <tool name="read_file">
 <path>src/app.js</path>
@@ -589,7 +601,27 @@ function add(a, b) {
   return a + b;
 }
 </new>
-</tool>
+</tool>`;
+}
+function systemPrompt() {
+  const shell = process.platform === "win32"
+    ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
+    : `bash on ${os.type()}`;
+  const toolDocs = Object.entries(T.tools)
+    .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
+    .join("\n");
+  return `You are yAI Code, a coding agent working in the user's terminal. You help with software tasks in their project: you read, search and edit files and run commands.
+
+# Environment
+- Project folder: ${root}
+- Shell: ${shell}
+- Date: ${new Date().toDateString()}
+- The git branch, the permission mode and the top-level files change as you work, so they come at the end of the latest
+  message, in <environment>; always follow the newest one.
+All paths are relative to the project folder. You cannot access anything outside it.
+
+# Tools
+${toolFormat()}
 
 Available tools:
 ${toolDocs}
@@ -1081,7 +1113,9 @@ function parseToolCall(text) {
   const attrs = {};
   for (const m of (head[3] || "").matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[m[1]] = m[2] ?? m[3];
   const rest = text.slice(head.index + head[0].length);
-  let end = rest.search(/\n[ \t]*<\/tool>/);
+  // the last </tool> on a line of its own ends the call: file text inside it may mention </tool> itself
+  const ends = [...rest.matchAll(/\n[ \t]*<\/tool>/g)];
+  let end = ends.length ? ends[ends.length - 1].index : -1;
   if (end < 0) end = rest.lastIndexOf("</tool>");
   // yAI Ultra Flash sometimes ends its reply exactly where </tool> would go (2026-10-21: two read_file calls in a
   // row were sent back as "not finished"). If every argument it opened is closed and the reply ends on a closing
@@ -1133,6 +1167,13 @@ function parseToolCall(text) {
     const bare = body.replace(/<\/?[\w-]+>/g, "").trim().replace(new RegExp(`^(?:${names})\\s*[=:]\\s*`, "i"), "");
     const unquoted = /^(["'])[\s\S]*\1$/.test(bare) && !bare.slice(1, -1).includes(bare[0]) ? bare.slice(1, -1) : bare;
     if (unquoted && !unquoted.includes("\n")) args[first] = unquoted;
+  }
+  // Short values (a path, a pattern, a glob, a number) are one line: lines that are only a stray tag (</pattern>,
+  // </search>, a DSML closer) are dropped, as in a scrambled call seen 2026-10-21 (<glob>x</pattern><pattern>y</glob>).
+  for (const k of Object.keys(args)) {
+    if (/^(content|new|old|command|questions)$/.test(k)) continue;
+    const kept = String(args[k]).split("\n").map((l) => l.trim()).filter((l) => l && !/^<\/?(?:｜DSML｜[^>]*|[\w-]+)>$/.test(l));
+    args[k] = kept[0] || "";
   }
   if (unclosed) return { name, args, raw: text.trimEnd() + "\n</tool>" };
   const endTag = text.indexOf("</tool>", head.index + head[0].length + end);
@@ -1306,34 +1347,42 @@ async function callModel() {
 // In practice it mixes its markup with yAI's (seen 2026-10-21 in real replies): a DSML invoke holding <path>…</path>
 // tags, <｜DSML｜ parameter name="path"> closed by </path>, a <tool name="run"> holding <parameter name="command"> and
 // closed by </｜DSML｜ invoke>, a DSML invoke closed by </tool>. So any opener and any closer are accepted.
-const DSML_START = /<｜DSML｜\s*(?:function_)?calls>|<｜DSML｜\s*invoke\b/;
-const DS_MARK = /<｜DSML｜|<parameter\s+name\s*=/;
-const CALL_END = /<\/｜DSML｜\s*(?:invoke|(?:function_)?calls)>|<\/tool>/;
+// The DSML grammar (vLLM's DeepSeek V3.2/V4 parsers): <｜DSML｜tool_calls> (V3.2: function_calls) holding
+// <｜DSML｜invoke name="…"> with <｜DSML｜parameter name="…" string="true|false">…</｜DSML｜parameter>; V4.1 Flash puts
+// spaces inside the tags (<｜DSML｜ invoke …>), which broke vLLM's own V4 parser too (2026-10).
+// A reply can be DSML only by its closers (it opened with yAI's <tool name="write_file"> and closed with
+// </｜DSML｜ parameter></｜DSML｜ invoke>, 2026-10-21), so closers count as DSML too. A </tool> only ends a call on a
+// line of its own, so file text that mentions </tool> doesn't end it early.
+const DSML_START = /<｜DSML｜\s*(?:function_|tool_)?calls>|<｜DSML｜\s*invoke\b/;
+const DS_MARK = /<\/?｜DSML｜|<parameter\s+name\s*=/;
+const DSML_END = /<\/｜DSML｜\s*(?:invoke|(?:function_|tool_)?calls)>/;
+const CALL_END = /<\/｜DSML｜\s*(?:invoke|(?:function_|tool_)?calls)>|(?:^|\n)[ \t]*<\/tool>/;
 function fromDeepSeek(text) {
   if (!DS_MARK.test(text)) return text;
   const head = /<｜DSML｜\s*invoke\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>/.exec(text);
-  const calls = text.search(/<｜DSML｜\s*(?:function_)?calls>/);
+  const calls = text.search(/<｜DSML｜\s*(?:function_|tool_)?calls>/);
   if (!head) return calls >= 0 ? text.slice(0, calls).trimEnd() : text;
   const name = head[1] || head[3];
   const headAt = head.index + (head[2] || "").length;
   const before = text.slice(0, calls >= 0 && calls < headAt ? calls : headAt).trimEnd();
   let body = text.slice(head.index + head[0].length);
-  const end = CALL_END.exec(body);
+  const end = DSML_END.exec(body) || /(?:^|\n)[ \t]*<\/tool>/.exec(body);
   if (end) body = body.slice(0, end.index);
   // Arguments: <｜DSML｜ parameter name="k">, <parameter name="k"> or <k>, each closed by any of their closers. The
   // quotes are optional: in long sessions it writes <｜DSML｜ parameter name="path> (2026-10-21), and a missed opener
   // made the file text's own tags (a <model> in code) look like arguments.
   const OPEN = /<｜DSML｜\s*parameter\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|<parameter\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|<([a-z_][\w-]*)>/g;
   const args = [];
-  let m, cut = false;
+  let m, cut = false, cutKey = "";
   while ((m = OPEN.exec(body))) {
     const key = m[1] || m[2] || m[3];
+    cutKey = key;
     const from = OPEN.lastIndex;
     let stop = -1, len = 0;
-    for (const c of ["</｜DSML｜ parameter>", "</｜DSML｜parameter>", "</parameter>", `</${key}>`]) {
-      const i = body.indexOf(c, from);
-      if (i >= 0 && (stop < 0 || i < stop)) { stop = i; len = c.length; }
-    }
+    const closer = new RegExp(`<\\/｜DSML｜\\s*parameter>|<\\/parameter>|<\\/${key}>`, "g");
+    closer.lastIndex = from;
+    const cm = closer.exec(body);
+    if (cm) { stop = cm.index; len = cm[0].length; }
     if (stop < 0) {
       if (!end) { cut = true; break; } // the reply ended inside this argument
       stop = body.length;
@@ -1345,7 +1394,8 @@ function fromDeepSeek(text) {
   }
   // No argument tags: the arguments may be written as JSON inside the call.
   const json = !args.length && /^\s*\{[\s\S]*\}\s*$/.test(body) ? body.trim() : "";
-  return `${before}\n\n<tool name="${name}">\n${args.join("\n") || json}${end && !cut ? "\n</tool>" : ""}`;
+  // cut off inside an argument: its opening tag stays, unclosed, so parseToolCall sees the call isn't finished
+  return `${before}\n\n<tool name="${name}">\n${args.join("\n") || json}${cut ? `\n<${cutKey}>\n` : end ? "\n</tool>" : ""}`;
 }
 
 // Kimi K3 (yAI Ultra) writes tool calls in its own format even when asked for <tool> blocks:
@@ -1631,7 +1681,7 @@ async function runAgent(content) {
         if (announcesStep(text) && nudges < 2) {
           nudges++;
           ui.note(c.dim("· it stopped before the step it described · continuing"));
-          pushUser("Go ahead: make that tool call now (the <tool> block), without repeating what you're about to do.");
+          pushUser("Go ahead: make that tool call now, without repeating what you're about to do.");
           continue;
         }
         // /duo: the partner reviews what changed, and anything it finds goes back to the coder once.
@@ -1659,8 +1709,8 @@ async function runAgent(content) {
         }
         result = {
           output: long
-            ? `Error: your ${call.name} call was cut off before </tool> because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
-            : `Error: your ${call.name} call isn't finished: it never reached </tool>, so nothing happened. Write the whole step again, with every tag opened and closed (for edit_file: <path>, then <old>…</old>, then <new>…</new>), ending with </tool> on its own line.`,
+            ? `Error: your ${call.name} call was cut off before it was closed because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with append set to true for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
+            : `Error: your ${call.name} call isn't finished: it was never closed, so nothing happened. Write the whole step again in the tool-call format from your instructions, with every tag opened and closed (for edit_file: path, then old, then new) and the call closed at the end.`,
         };
         ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);
       } else {
