@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.97",
+      "date": "2026-10-21",
+      "title": "A steadier yAI Code",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "No more jumping screen",
+          "text": "Typing (backspace included) only redraws what changed, inside one update, and nothing touches the window's last column, so a wide symbol can't push a row over and make the whole screen jump."
+        },
+        {
+          "area": "yAI Code",
+          "title": "/team tidies up",
+          "text": "The agents' board no longer comes back under the reports after the team is done."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Resizing",
+          "text": "After the window gets narrower, boxes and right-aligned rows are cut at the edge instead of breaking into pieces."
+        }
+      ]
+    },
+    {
       "version": "1.0.96",
       "date": "2026-10-21",
       "title": "yAI Code asks before it guesses",

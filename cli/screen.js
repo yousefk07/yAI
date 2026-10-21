@@ -51,7 +51,8 @@ module.exports = function create({ ui }) {
   }
   // Words wrap; drawn lines (boxes, cards, bands with a background) are cut instead, so a box printed when the window
   // was wider doesn't fall apart when the plan panel opens.
-  const drawn = (t) => /[│╭╰╮╯─━]|\x1b\[48;/.test(t);
+  // (rows laid out in columns, with a gap of spaces before something pushed to the right, count as drawn too)
+  const drawn = (t) => /[│╭╰╮╯─━]|\x1b\[48;/.test(t) || /\S {4,}\S/.test(ui.stripAnsi(t).trim());
   const rowsOf = (entry, w) => {
     if (!entry.wrapped || entry.wrapped.w !== w) entry.wrapped = { w, rows: drawn(entry.text) && ui.vis(entry.text) > w ? [wrap(entry.text, w)[0] + "\x1b[0m"] : wrap(entry.text, w) };
     return entry.wrapped.rows;
@@ -67,7 +68,9 @@ module.exports = function create({ ui }) {
   function render() {
     pending = false;
     if (!on) return;
-    const cols = process.stdout.columns || 100, rows = process.stdout.rows || 30;
+    // One column is left empty: a symbol some fonts draw two cells wide (◆, ●) can't push a row past the edge, and
+    // nothing is ever written in the bottom-right corner (which makes some consoles scroll).
+    const cols = (process.stdout.columns || 100) - 1, rows = process.stdout.rows || 30;
     const screen = [];
     // header and its rule
     screen.push(fit(parts.header(cols), cols));
@@ -119,9 +122,22 @@ module.exports = function create({ ui }) {
     // the cursor goes where you type
     const caretRow = screen.length - bottom.length + 1 + Math.min(box.length - 1, Math.floor((inp.cursor || 0) / room) - first);
     const caretCol = 1 + 1 + 2 + ((inp.cursor || 0) % room) + 1;
-    out("\x1b[?25l\x1b[H" + screen.slice(0, rows).map((l) => l + "\x1b[0m\x1b[K").join("\r\n") + "\x1b[J" +
-      (inp.caret === false ? "" : `\x1b[${caretRow + 1};${caretCol}H\x1b[?25h`));
+    // Only the rows that changed are written, each at its own place (so one that wraps can't shift the rest), inside
+    // a synchronized update so the terminal shows the whole frame at once.
+    const frame = screen.slice(0, rows);
+    while (frame.length < rows) frame.push("");
+    if (shown_.cols !== cols || shown_.rows !== rows) { shown_ = { cols, rows, lines: [] }; out("\x1b[2J"); }
+    let w = "";
+    frame.forEach((l, i) => {
+      if (shown_.lines[i] === l) return;
+      w += `\x1b[${i + 1};1H\x1b[0m${l}\x1b[0m\x1b[K`;
+    });
+    shown_.lines = frame;
+    const caret = inp.caret === false ? "\x1b[?25l" : `\x1b[${caretRow + 1};${caretCol}H\x1b[?25h`;
+    if (w || caret !== shown_.caret) out("\x1b[?2026h\x1b[?25l" + w + caret + "\x1b[?2026l");
+    shown_.caret = caret;
   }
+  let shown_ = { cols: 0, rows: 0, lines: [] }; // what's on the screen now, row by row
   const soon = () => { if (on && !pending) { pending = true; setImmediate(render); } };
 
   return {
@@ -160,7 +176,7 @@ module.exports = function create({ ui }) {
     now: render,
     // the conversation pane's width, for lines printed into it
     width() {
-      const cols = process.stdout.columns || 100;
+      const cols = (process.stdout.columns || 100) - 1; // as in render()
       const panel = cols >= 100 && parts.panel();
       return Math.min(140, cols - 4 - (panel ? Math.min(40, Math.max(32, Math.floor(cols * 0.28))) + 3 : 0));
     },

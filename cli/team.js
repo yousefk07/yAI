@@ -154,10 +154,12 @@ module.exports = function create(d) {
     state.abort = new AbortController();
     d.syncMute();
     const tty = process.stdout.isTTY && !state.stdio;
-    let drawn = 0, tick = 0, wake = () => {};
+    let drawn = 0, tick = 0, wake = () => {}, over = false;
     d.wake = () => wake();
     const draw = () => {
-      if (!tty) return;
+      // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
+      // mustn't draw it again under the reports
+      if (!tty || over) return;
       const lines = boardLines(agents, tick++);
       if (ui.screen) return ui.screen.setExtra(["", ...lines]); // the full-window app keeps the board at the end
       if (drawn) process.stdout.write(`\x1b[${drawn}A`);
@@ -182,7 +184,8 @@ module.exports = function create(d) {
         const timer = setInterval(() => { draw(); report(); }, 120);
         let asking = false;
         wake = async () => {
-          if (agents.every((a) => ["done", "failed", "stopped"].includes(a.state) && !a.asks.length)) { clearInterval(timer); draw(); return resolve(); }
+          if (over) return;
+          if (agents.every((a) => ["done", "failed", "stopped"].includes(a.state) && !a.asks.length)) { clearInterval(timer); draw(); over = true; return resolve(); }
           if (asking) return;
           const a = agents.find((x) => x.asks.length);
           if (!a) return;
