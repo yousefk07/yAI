@@ -727,3 +727,39 @@ a.menu-item { text-decoration: none; }
 
 @media (max-width: 900px) { #newKey { display: none; } }
 .logo-word .lw { display: inline-flex; }
+
+/* Data analysis, deep research and memory (2026-10-20) */
+.run-code {
+  height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: var(--acc-soft); color: var(--acc-ink); font: 500 12.5px var(--sans);
+}
+.run-code:hover { filter: brightness(0.97); }
+.run-code:disabled { opacity: 0.55; }
+.run-box { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.run-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.run-head .py { font: 500 11px var(--mono); color: var(--acc-ink); background: var(--acc-soft); padding: 2px 6px; border-radius: 5px; }
+.run-head .bad { color: var(--bad); font-weight: 500; }
+.run-head .spin { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--acc); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.run-out { margin: 0; max-height: 320px; overflow: auto; font: 400 12.5px/1.6 var(--mono); color: var(--text); white-space: pre; }
+.run-out.err { color: var(--bad); white-space: pre-wrap; }
+.run-fig { margin: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.run-fig img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+.research-steps { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-left: 2px solid var(--acc-soft); font-size: 13px; color: var(--muted); }
+.research-steps div { display: flex; align-items: center; gap: 8px; }
+.research-steps div::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+.research-steps .now { color: var(--text-2); }
+.research-steps .now::before { width: 10px; height: 10px; background: none; border: 2px solid var(--border-strong); border-top-color: var(--acc); animation: spin 0.8s linear infinite; }
+.research-steps .done::before { background: var(--acc); }
+.remembered { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+.mem-toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.mem-toggle input { width: 16px; height: 16px; accent-color: var(--acc); }
+.mem-toggle small { margin-left: auto; color: var(--muted); font-size: 12.5px; }
+.mem-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.mem-item { display: flex; align-items: center; gap: 10px; padding: 8px 6px 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 14px; line-height: 1.4; }
+.mem-item span { flex: 1; min-width: 0; }
+.mem-empty { margin: 0; font-size: 13.5px; color: var(--muted); }
+.mem-add { display: flex; gap: 8px; }
+.mem-add input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.mem-add input:focus { border-color: var(--acc); }
+.mem-add .btn-plain { height: 40px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text); font-weight: 500; }
+.mem-add .btn-plain:hover { background: var(--hover); }

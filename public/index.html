@@ -171,6 +171,7 @@
               <a href="/admin" role="menuitem" class="menu-item" id="adminLink" hidden>Admin</a>
               <a href="/usage" role="menuitem" class="menu-item">Your usage</a>
               <a href="/arena" role="menuitem" class="menu-item">Model arena</a>
+              <button type="button" role="menuitem" class="menu-item" id="memoryBtn">Memory</button>
               <button type="button" role="menuitem" class="menu-item menu-danger" id="clearChatsBtn">Clear chat history</button>
               <button type="button" role="menuitem" class="menu-item" id="logoutBtn">Log out</button>
             </div>
@@ -203,12 +204,16 @@
           <div id="tray" class="tray" hidden></div>
           <textarea id="input" rows="1" placeholder="Ask anything" aria-label="Message"></textarea>
           <div class="composer-bar">
-            <button id="attach" class="icon-btn" type="button" aria-label="Attach image or PDF" title="Attach image or PDF">
+            <button id="attach" class="icon-btn" type="button" aria-label="Attach an image, PDF or data file" title="Attach an image, PDF or data file (CSV, Excel, JSON)">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             </button>
             <button id="webMode" class="mode-btn" type="button" aria-pressed="false" title="Search the web and answer with sources">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
               <span>Search</span>
+            </button>
+            <button id="researchMode" class="mode-btn" type="button" aria-pressed="false" title="Deep research: several rounds of searching and reading, then a report with sources">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h4"/><circle cx="17.5" cy="17.5" r="0.1"/></svg>
+              <span>Research</span>
             </button>
             <button id="imageMode" class="mode-btn" type="button" aria-pressed="false" title="Create an image, or attach a photo to edit it" hidden>
               <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 17.5l5-5 4 4 2.5-2.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
@@ -223,7 +228,7 @@
               <button type="button" role="radio" data-aspect="16:9" title="Wide"><span class="ar" style="width:15px;height:9px"></span><span class="ar-label">16:9</span></button>
               <button type="button" role="radio" data-aspect="9:16" title="Tall"><span class="ar" style="width:9px;height:15px"></span><span class="ar-label">9:16</span></button>
             </div>
-            <input id="fileInput" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
+            <input id="fileInput" type="file" accept="image/*,application/pdf,.pdf,.csv,.tsv,.xlsx,.xls,.json" multiple hidden />
             <span class="composer-hint hide-sm">Enter to send · Shift + Enter for a new line</span>
             <button id="send" class="send" type="submit" aria-label="Send" disabled>
               <svg class="icon-send" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -276,6 +281,29 @@
   </dialog>
 
   <!-- Projects: files and instructions that go with every chat started in the project (Yousef 2026-10-20) -->
+  <!-- Memory: what yAI remembers about you across chats (2026-10-20) -->
+  <dialog id="memDialog" class="code-dialog proj-dialog" aria-labelledby="memTitle">
+    <div class="pd-head">
+      <div>
+        <h2 id="memTitle">Memory</h2>
+        <p>Things yAI remembers about you across chats. It adds them on its own when you mention something lasting, and you can change them here.</p>
+      </div>
+      <button type="button" class="icon-btn" id="memClose" aria-label="Close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="pd-body">
+      <label class="mem-toggle"><input type="checkbox" id="memOn" /> <span>Remember things about me</span><small id="memCount"></small></label>
+      <div id="memList" class="mem-list"></div>
+      <div class="mem-add"><input id="memInput" maxlength="300" placeholder="Add something, e.g. I'm a second-year engineering student" /><button type="button" class="btn-plain" id="memAddBtn">Add</button></div>
+    </div>
+    <p id="memError" class="pd-error" role="alert"></p>
+    <div class="pd-foot">
+      <button type="button" class="proj-delete" id="memClear">Forget everything</button>
+      <button type="button" class="btn-primary" id="memDone">Done</button>
+    </div>
+  </dialog>
+
   <dialog id="projDialog" class="code-dialog proj-dialog" aria-labelledby="projTitle">
     <div class="pd-head">
       <div>
@@ -329,6 +357,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js" crossorigin="anonymous"></script>
   <script src="/md.js"></script>
+  <script src="/data.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const messagesEl = $("messages"), input = $("input"), sendBtn = $("send");
@@ -840,15 +869,18 @@
       for (const file of list) {
         const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
         const isImage = file.type.startsWith("image/");
-        const item = { id: uuid(), kind: isPdf ? "pdf" : "image", name: file.name || "Pasted image", status: "loading" };
-        if (!isPdf && !isImage) fail(item, "Only images and PDFs");
-        else if (file.size > 30e6) fail(item, "Too large (30 MB max)");
+        const isData = !isPdf && !isImage && yaiData.isDataFile(file);
+        const item = { id: uuid(), kind: isPdf ? "pdf" : isData ? "data" : "image", name: file.name || "Pasted image", status: "loading" };
+        if (!isPdf && !isImage && !isData) fail(item, "Images, PDFs and data files (CSV, Excel, JSON)");
+        else if (isData && mode !== "chat") fail(item, "Data files work in chat");
+        else if (isData && file.size > 50e6) fail(item, "Too large (50 MB max)");
+        else if (!isData && file.size > 30e6) fail(item, "Too large (30 MB max)");
         else if (mode !== "chat" && isPdf) fail(item, `Attach a photo to ${mode === "video" ? "animate" : "edit"}`);
         else if (mode !== "chat" && imageCount() >= 1) fail(item, "One photo at a time");
         else if (isImage && imageCount() >= MAX_IMAGES) fail(item, `${MAX_IMAGES} images max`);
         pending.push(item);
         if (item.status === "loading") {
-          (isPdf ? readPdf(file, item) : readImage(file, item))
+          (isPdf ? readPdf(file, item) : isData ? readData(file, item) : readImage(file, item))
             .catch((err) => fail(item, err.message || "Couldn't read file"))
             .finally(renderTray);
         }
@@ -948,17 +980,19 @@
       item.status = "ready";
     }
 
+    const dataExt = (name) => (name.match(/\.(\w+)$/)?.[1] || "DATA").slice(0, 4).toUpperCase();
     const chipSub = (p) =>
       p.status === "loading" ? "Reading…" :
       p.status === "error" ? p.error :
       p.kind === "image" ? "Image" :
+      p.kind === "data" ? `${p.rows.toLocaleString()} rows × ${p.cols} columns · ${p.varName}` :
       `${p.pages} page${p.pages === 1 ? "" : "s"}${p.scans ? " · scanned" : p.truncated ? " · partly read" : ""}`;
 
     function renderTray() {
       tray.hidden = !pending.length;
       tray.innerHTML = pending.map((p) => `
         <div class="chip ${p.status}" data-id="${p.id}">
-          ${p.thumb ? `<img src="${p.thumb}" alt="">` : `<div class="chip-icon">${p.kind === "pdf" ? "PDF" : "IMG"}</div>`}
+          ${p.thumb ? `<img src="${p.thumb}" alt="">` : `<div class="chip-icon">${p.kind === "pdf" ? "PDF" : p.kind === "data" ? dataExt(p.name) : "IMG"}</div>`}
           <div class="chip-text">
             <div class="chip-name">${escapeHtml(p.name)}</div>
             <div class="chip-sub">${escapeHtml(chipSub(p))}</div>
@@ -988,8 +1022,16 @@
         let text = m.content || "";
         const atts = m.attachments || [];
         const images = [];
+        if (atts.some((a) => a.kind === "data")) {
+          for (const a of atts.filter((a) => a.kind === "data")) {
+            text += yaiData.hasFiles()
+              ? `\n\n[Data file "${a.name}" is loaded as the DataFrame \`${a.varName}\`: ${a.rows} rows × ${a.cols} columns. Columns: ${(a.columns || []).join(", ")}` + (i === lastWithFiles && a.head ? `\nFirst rows:\n${a.head}` : "") + "]"
+              : `\n\n[Data file "${a.name}" was attached earlier but isn't loaded any more (the page was reloaded). Ask me to attach it again to analyse it.]`;
+          }
+        }
+        if (i === history.length - 1 && yaiData.hasFiles()) text += DATA_HOWTO;
         if (i === lastWithFiles) {
-          for (const a of atts) {
+          for (const a of atts.filter((a) => a.kind !== "data")) {
             if (a.text) text += `\n\n[Attached PDF "${a.name}", ${a.pages} pages${a.truncated ? "; only the first part is included" : ""}]\n${a.text}`;
             else if (a.images?.length) {
               images.push(...a.images);
@@ -997,7 +1039,8 @@
             } else text += `\n\n[The attachment "${a.name}" is no longer available]`;
           }
         } else if (atts.length) {
-          text += `\n\n[Earlier attachment(s), no longer available: ${atts.map((a) => a.name).join(", ")}]`;
+          const gone = atts.filter((a) => a.kind !== "data");
+          if (gone.length) text += `\n\n[Earlier attachment(s), no longer available: ${gone.map((a) => a.name).join(", ")}]`;
         }
         if (!images.length) return { role: "user", content: text };
         return {
@@ -1020,7 +1063,9 @@
 
     function attachmentsHtml(atts = []) {
       if (!atts.length) return "";
-      return `<div class="att-row">${atts.map((a) => a.kind === "pdf"
+      return `<div class="att-row">${atts.map((a) => a.kind === "data"
+        ? `<div class="att-file"><div class="chip-icon">${dataExt(a.name)}</div><div class="chip-text"><div class="chip-name">${escapeHtml(a.name)}</div><div class="chip-sub">${(a.rows || 0).toLocaleString()} rows × ${a.cols} columns · ${escapeHtml(a.varName || "")}</div></div></div>`
+        : a.kind === "pdf"
         ? `<div class="att-file">${a.thumb ? `<img src="${a.thumb}" alt="">` : '<div class="chip-icon">PDF</div>'}<div class="chip-text"><div class="chip-name">${escapeHtml(a.name)}</div><div class="chip-sub">PDF · ${a.pages || "?"} pages</div></div></div>`
         : `<img class="att-img" src="${a.images?.[0] || a.thumb}" alt="${escapeHtml(a.name)}">`).join("")}</div>`;
     }
@@ -1083,9 +1128,15 @@
     function renderHistory() {
       messagesEl.innerHTML = "";
       for (const m of chat.history) {
-        if (m.role === "user") addUser(m.content, m.attachments);
+        if (m.role === "user") { if (!m.hidden) addUser(m.content, m.attachments); }
         else if (m.image || m.video) renderMedia(addAssistant(), m);
-        else fillAssistant(addAssistant(), m.content, true, m.stats, m.sources);
+        else {
+          const el = addAssistant();
+          if (m.research) el.dataset.research = "1";
+          fillAssistant(el, m.content, true, m.stats, m.sources);
+          if (m.run) renderRun(el, m.run);
+          if (m.remembered?.length) renderRemembered(el, m.remembered);
+        }
       }
       updateWelcome();
       scrollToBottom(true);
@@ -1127,19 +1178,27 @@
       el.querySelector(".body").appendChild(e);
     }
 
-    async function send(question, files = []) {
+    async function send(question, files = [], opts = {}) {
       const attachments = files.map((f) => ({
         kind: f.kind, name: f.name, thumb: f.thumb, pages: f.pages,
         truncated: f.truncated, text: f.text, images: f.images,
+        ...(f.kind === "data" && { varName: f.varName, rows: f.rows, cols: f.cols, columns: f.columns, head: f.head }),
       }));
-      chat.history.push({ role: "user", content: question, ...(attachments.length && { attachments }) });
+      chat.history.push({ role: "user", content: question, ...(attachments.length && { attachments }), ...(opts.hidden && { hidden: true }) });
       chat.projectId = activeProject?.id;
       saveChat();
-      addUser(question, attachments);
+      if (!opts.hidden) addUser(question, attachments);
       const el = addAssistant();
       let answer = "";
       let sources = null;
-      const searching = webSearch;
+      let remembered = null;
+      const researching = researchOn && !opts.hidden;
+      const searching = webSearch && !researching && !opts.hidden;
+      const steps = [];
+      if (researching) {
+        el.dataset.research = "1";
+        el.querySelector(".content").innerHTML = '<div class="searching">Researching</div>';
+      }
       if (searching) el.querySelector(".content").innerHTML = '<div class="searching">Searching the web</div>';
       const stats = { out: 0, in: 0, tps: 0, ms: 0 };
       const startedAt = performance.now();
@@ -1158,6 +1217,7 @@
           conversationId: chat.id,
           projectId: chat.projectId,
           webSearch: searching || undefined,
+          research: researching || undefined,
           attachments: attachments.map(({ kind, name, thumb, pages }) => ({ kind, name, thumb, pages })),
         });
         if (body.length > MAX_REQUEST_BYTES) throw new Error("Those attachments are too large to send together. Try fewer or smaller files.");
@@ -1183,6 +1243,11 @@
             const msg = JSON.parse(ev.slice(6));
             if (msg.error) throw new Error(msg.error);
             if (msg.content) answer += msg.content;
+            if (msg.status && researching && msg.status !== "thinking") {
+              steps.push(msg.status);
+              renderSteps(el, steps, false);
+            }
+            if (msg.memory?.length) { remembered = msg.memory.map((m) => m.text); renderRemembered(el, remembered); }
             if (msg.sources) {
               sources = msg.sources;
               renderSources(el, sources);
@@ -1219,14 +1284,27 @@
         }
         stats.ms = Math.round(performance.now() - startedAt);
         fillAssistant(el, answer, true, stats, sources);
+        if (steps.length) renderSteps(el, steps, true);
         const clean = splitThinking(answer).visible.trim();
-        if (clean) chat.history.push({ role: "assistant", content: clean, ...(stats.out && { stats }), ...(sources && { sources }) });
+        if (clean) chat.history.push({ role: "assistant", content: clean, ...(stats.out && { stats }), ...(sources && { sources }), ...(researching && { research: true }), ...(remembered && { remembered }) });
         else chat.history.pop(); // drop the unanswered question so the next turn stays valid
         saveChat();
         controller = null;
         setBusy(false);
         input.focus();
+        // Python in the answer while data is loaded: run it here and send the output back for an explanation.
+        if (clean && yaiData.hasFiles() && /```(?:python|py)\b/i.test(clean)) analyseAnswer(el, chat.history[chat.history.length - 1], opts.depth || 0);
       }
+    }
+    function renderRemembered(el, items) {
+      let note = el.querySelector(".remembered");
+      if (!note) {
+        note = document.createElement("div");
+        note.className = "remembered";
+        el.querySelector(".body").insertBefore(note, el.querySelector(".actions"));
+      }
+      note.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6c0 2.3 1.3 3.6 2.3 4.6.6.6.7 1.2.7 1.9V17h6v-1.5c0-.7.1-1.3.7-1.9 1-1 2.3-2.3 2.3-4.6a6 6 0 0 0-6-6zM10 20h4"/></svg>Remembered: ${items.map(escapeHtml).join(" · ")}`;
+      note.title = "Change what yAI remembers in your account menu > Memory";
     }
 
     // ---------- Image and video generation (cloud GPUs) ----------
@@ -1245,6 +1323,8 @@
       $("imageMode").setAttribute("aria-pressed", String(mode === "image"));
       $("videoMode").setAttribute("aria-pressed", String(mode === "video"));
       $("webMode").hidden = mode !== "chat";
+      $("researchMode").hidden = mode !== "chat";
+      if (mode !== "chat" && researchOn) { researchOn = false; syncResearch(); }
       // Media modes take at most one photo: drop PDFs and extra images.
       if (mode !== "chat") {
         let kept = 0;
@@ -1252,8 +1332,8 @@
         renderTray();
       }
       $("attach").disabled = (mode === "image" && !features.imageEdit) || mode === "video"; // photo → video is off for now
-      $("fileInput").accept = mode === "chat" ? "image/*,application/pdf,.pdf" : "image/*";
-      $("attach").title = mode === "image" ? "Attach a photo to edit" : mode === "video" ? "Attach a photo to animate" : "Attach image or PDF";
+      $("fileInput").accept = mode === "chat" ? "image/*,application/pdf,.pdf,.csv,.tsv,.xlsx,.xls,.json" : "image/*";
+      $("attach").title = mode === "image" ? "Attach a photo to edit" : mode === "video" ? "Attach a photo to animate" : "Attach an image, PDF or data file (CSV, Excel, JSON)";
       input.placeholder =
         mode === "image" ? (features.imageEdit ? "Describe an image, or attach a photo and say how to change it" : "Describe an image to create")
         : mode === "video" ? "Describe a video to create"
@@ -1463,6 +1543,7 @@
       controller?.abort();
       chat = newChatObj();
       pending = [];
+      yaiData.clear();
       renderTray();
       saveChat();
       renderHistory();
@@ -1489,6 +1570,144 @@
     });
     syncWebMode();
 
+    // ---------- Deep research (2026-10-20): a Research toggle; the steps show while it works ----------
+    var researchOn = false; // var: setMode can run before this line
+    function syncResearch() {
+      $("researchMode").setAttribute("aria-pressed", String(researchOn));
+      if (mode === "chat") input.placeholder = researchOn ? "What should yAI research?" : messagesEl.children.length ? "Ask a follow-up…" : "Ask anything";
+    }
+    $("researchMode").addEventListener("click", () => {
+      researchOn = !researchOn;
+      // Research does its own searching, so the plain Search toggle goes off.
+      if (researchOn && webSearch) { webSearch = false; store.set("webSearch", false); syncWebMode(); }
+      syncResearch();
+      input.focus();
+    });
+    $("webMode").addEventListener("click", () => { if (webSearch && researchOn) { researchOn = false; syncResearch(); } });
+    function renderSteps(el, steps, done) {
+      let box = el.querySelector(".research-steps");
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "research-steps";
+        el.querySelector(".body").prepend(box);
+      }
+      box.innerHTML = steps.map((s, i) => `<div class="${done || i < steps.length - 1 ? "done" : "now"}">${escapeHtml(s)}</div>`).join("");
+    }
+
+    // ---------- Data analysis (2026-10-20): Python runs in the browser (data.js), its output goes back to the model ----------
+    const DATA_HOWTO = "\n\n(To analyse the data, write Python in one ```python block. pandas (pd), numpy (np) and matplotlib.pyplot (plt) are imported and the files are already loaded as DataFrames, with the names given above. print() what you compute and draw charts with plt; they're shown automatically. The code runs in my browser and I'll send you its output.)";
+    const PY_BLOCK = /```(?:python|py)[^\n]*\n([\s\S]*?)```/gi;
+    async function readData(file, item) {
+      const info = await yaiData.load(file);
+      Object.assign(item, { varName: info.varName, rows: info.rows, cols: info.cols, columns: info.columns, head: info.head, status: "ready" });
+    }
+    // Charts are kept as JPEGs so saved chats stay small.
+    async function shrinkChart(src) {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      return toJpeg(img, img.naturalWidth, img.naturalHeight, 1100, 0.86);
+    }
+    function renderRun(el, run) {
+      let box = el.querySelector(".run-box");
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "run-box";
+        el.querySelector(".body").insertBefore(box, el.querySelector(".sources") || el.querySelector(".actions"));
+      }
+      if (run.running) {
+        box.innerHTML = '<div class="run-head"><span class="spin"></span>Running the code in your browser…</div>';
+        return;
+      }
+      const out = run.error || run.stdout || "";
+      box.innerHTML = `<div class="run-head"><span class="py">Python</span>ran in your browser${run.ms ? ` · ${(run.ms / 1000).toFixed(1)} s` : ""}${run.error ? ' · <b class="bad">failed</b>' : ""}</div>` +
+        (out.trim() ? `<pre class="run-out${run.error ? " err" : ""}">${escapeHtml(out.trim())}</pre>` : "") +
+        (run.images || []).map((src, i) => `<figure class="run-fig"><img src="${src}" alt="Chart ${i + 1}"><a class="action download" href="${src}" download="chart-${i + 1}.jpg">Download chart</a></figure>`).join("");
+    }
+    async function runCode(el, code) {
+      renderRun(el, { running: true });
+      let r;
+      try {
+        r = await yaiData.run(code);
+      } catch (err) {
+        r = { stdout: "", images: [], error: err.message, ms: 0 };
+      }
+      const images = [];
+      for (const src of r.images || []) images.push(await shrinkChart(src).catch(() => src));
+      const run = { stdout: (r.stdout || "").slice(-6000), error: r.error || "", images, ms: r.ms };
+      renderRun(el, run);
+      return run;
+    }
+    // After an answer with Python in a chat that has data loaded: run it, show the result, and let the model explain it
+    // (at most two rounds, so a failing script can be fixed once).
+    async function analyseAnswer(el, msg, depth) {
+      const code = [...msg.content.matchAll(PY_BLOCK)].map((m) => m[1]).join("\n\n");
+      if (!code.trim()) return;
+      const run = await runCode(el, code);
+      msg.run = run;
+      saveChat();
+      if (depth >= 2 || controller) return;
+      const out = (run.error || run.stdout || "(nothing was printed)").slice(-5000);
+      await send(`Output of your code (it ran in my browser):\n\`\`\`\n${out}\n\`\`\`` +
+        (run.images.length ? `\n${run.images.length} chart${run.images.length === 1 ? " was" : "s were"} drawn and shown to me.` : "") +
+        (run.error ? "\nIt failed. Fix the code in one new python block." : "\nNow explain briefly what the results show. Don't repeat the code; only write more if something is still missing."),
+        [], { hidden: true, depth: depth + 1 });
+    }
+    // The Run button on a Python code block: runs it (with the loaded data, if any) and shows the result.
+    messagesEl.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".run-code");
+      if (!btn) return;
+      e.stopImmediatePropagation();
+      const el = btn.closest(".msg");
+      btn.disabled = true;
+      await runCode(el, btn.closest(".code").querySelector("code").textContent);
+      btn.disabled = false;
+    }, true);
+
+    // ---------- Memory (2026-10-20): what yAI remembers about you, editable ----------
+    async function memoryCall(method, query = "", body) {
+      const r = await fetch(`/api/hub?op=memory${query}`, { method, headers: { "Content-Type": "application/json" }, ...(body && { body: JSON.stringify(body) }), cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+      return data;
+    }
+    function renderMemory(mem) {
+      $("memOn").checked = mem.enabled !== false;
+      $("memList").innerHTML = mem.items.length
+        ? mem.items.slice().reverse().map((m) => `<div class="mem-item"><span>${escapeHtml(m.text)}</span><button type="button" class="pf-x" data-id="${escapeHtml(m.id)}" aria-label="Forget this">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`).join("")
+        : '<p class="mem-empty">Nothing yet. Mention something lasting about yourself in a chat, or add it below.</p>';
+      $("memCount").textContent = mem.items.length ? `${mem.items.length} remembered` : "";
+    }
+    async function openMemory() {
+      $("accountMenu").hidden = true;
+      $("memError").textContent = "";
+      $("memDialog").showModal();
+      try { renderMemory(await memoryCall("GET")); } catch (err) { $("memError").textContent = err.message; }
+    }
+    $("memoryBtn").addEventListener("click", openMemory);
+    $("memDone").addEventListener("click", () => $("memDialog").close());
+    $("memClose").addEventListener("click", () => $("memDialog").close());
+    $("memOn").addEventListener("change", async () => {
+      try { renderMemory(await memoryCall("PUT", "", { enabled: $("memOn").checked })); } catch (err) { $("memError").textContent = err.message; }
+    });
+    $("memList").addEventListener("click", async (e) => {
+      const x = e.target.closest(".pf-x");
+      if (!x) return;
+      try { renderMemory(await memoryCall("DELETE", `&id=${encodeURIComponent(x.dataset.id)}`)); } catch (err) { $("memError").textContent = err.message; }
+    });
+    async function addMemory() {
+      const text = $("memInput").value.trim();
+      if (!text) return;
+      try { renderMemory(await memoryCall("POST", "", { text })); $("memInput").value = ""; } catch (err) { $("memError").textContent = err.message; }
+    }
+    $("memAddBtn").addEventListener("click", addMemory);
+    $("memInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addMemory(); } });
+    $("memClear").addEventListener("click", async () => {
+      if (!confirm("Forget everything yAI remembers about you?")) return;
+      try { renderMemory(await memoryCall("DELETE")); } catch (err) { $("memError").textContent = err.message; }
+    });
+
     // [1], [2] in an answer become links to that source (never inside code).
     function linkCitations(html, sources) {
       if (!sources?.length) return html;
@@ -1508,7 +1727,7 @@
         line.className = "searched";
         el.querySelector(".body").prepend(line);
       }
-      el.querySelector(".searched").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>Searched the web · ${list.length} source${list.length === 1 ? "" : "s"}`;
+      el.querySelector(".searched").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>${el.dataset.research ? "Deep research" : "Searched the web"} · ${list.length} source${list.length === 1 ? "" : "s"}`;
       if (!box) {
         box = document.createElement("div");
         box.className = "sources";
@@ -1548,26 +1767,34 @@
       const parts = ["HTML", css && "+ CSS", js && "+ JavaScript"].filter(Boolean).join(" ");
       return { note: `${parts} from this answer`, doc };
     }
+    // The page loads from a blob: URL rather than srcdoc (some browser extensions leave srcdoc frames blank).
+    // The sandbox (no allow-same-origin) still gives it an opaque origin, cut off from this site.
     let previewSrc = "";
+    let previewUrl = "";
+    function showPreview(doc) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = doc ? URL.createObjectURL(new Blob([doc], { type: "text/html" })) : "";
+      $("previewFrame").src = previewUrl || "about:blank";
+    }
     function openPreview(btn) {
       const { doc, note } = previewDoc(btn);
       previewSrc = doc;
       $("previewNote").textContent = note;
-      $("previewFrame").srcdoc = doc;
+      showPreview(doc);
       if (!$("previewDialog").open) $("previewDialog").showModal();
     }
     messagesEl.addEventListener("click", (e) => {
       const btn = e.target.closest(".preview-code");
       if (btn) openPreview(btn);
     });
-    $("previewReload").addEventListener("click", () => { $("previewFrame").srcdoc = previewSrc + " "; setTimeout(() => ($("previewFrame").srcdoc = previewSrc)); });
+    $("previewReload").addEventListener("click", () => showPreview(previewSrc));
     $("previewWide").addEventListener("click", () => {
       const phone = $("previewDialog").classList.toggle("phone");
       $("previewWide").textContent = phone ? "Full width" : "Phone";
     });
     $("previewClose").addEventListener("click", () => $("previewDialog").close());
     $("previewDialog").addEventListener("click", (e) => { if (e.target === $("previewDialog")) $("previewDialog").close(); });
-    $("previewDialog").addEventListener("close", () => { $("previewFrame").srcdoc = ""; });
+    $("previewDialog").addEventListener("close", () => showPreview(""));
 
     // ---------- Projects ----------
     let projects = [];        // [{ id, name, files, chars, updatedAt }]
