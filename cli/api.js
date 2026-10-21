@@ -175,12 +175,9 @@ async function downloadVideo(id, signal) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-// ---------- web search and /bench results (the site's /api/hub) ----------
+// ---------- web search (the site's /api/hub) ----------
 async function search(q) {
   return json(`/api/hub?op=search&q=${encodeURIComponent(q)}`);
-}
-async function postBench(result) {
-  return json("/api/hub?op=bench", { method: "POST", body: result });
 }
 
 // ---------- /share: publish a session at an unlisted link ----------
@@ -193,4 +190,4 @@ async function hub(op, { method = "GET", body, signal } = {}) {
   return json(`/api/hub?op=${op}`, { method, body, signal });
 }
 
-module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, postBench };
+module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search };

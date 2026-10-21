@@ -1,7 +1,7 @@
-// The yAI sidebar on the pages beside the chat (/arena, /usage), so they look and move like the chat page
+// The yAI sidebar on the pages beside the chat (/usage), so they look and move like the chat page
 // (2026-10-20 redesign): projects and chats link into the chat (/?project=…, /?chat=…), the sidebar collapses to a
 // rail on desktop and is a drawer on phones. The page provides <div class="shell" id="shell"> with its .app inside,
-// a #sideToggle button in its top bar, and <body data-page="arena|usage|study|people|developers|remote|scheduled|changelog">. Exposes window.yaiSide.me (a promise of
+// a #sideToggle button in its top bar, and <body data-page="usage|study|people|developers|remote|scheduled|changelog">. Exposes window.yaiSide.me (a promise of
 // { user, admin }).
 (function () {
   const page = document.body.dataset.page || "";
@@ -9,14 +9,14 @@
   try { const t = localStorage.getItem("yaiTheme"); if (t && t !== "system") document.documentElement.dataset.theme = t; } catch {}
   if (matchMedia("(max-width: 700px)").matches) {
     document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/mobile.css" />');
-    const tab = (href, key, label, d) => `<a href="${href}"${(page === "arena" && key === "arena") || (page === "usage" && key === "you") ? ' class="on"' : ""}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg><span>${label}</span></a>`;
+    const tab = (href, key, label, d) => `<a href="${href}"${page === "usage" && key === "you" ? ' class="on"' : ""}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg><span>${label}</span></a>`;
     document.body.classList.add("m-page");
     const vp = document.querySelector('meta[name="viewport"]');
     if (vp && !/maximum-scale/.test(vp.content)) vp.content += ", maximum-scale=1"; // no pinch or double-tap zoom, like an app
     document.body.insertAdjacentHTML("beforeend", `<nav id="mTabs" aria-label="yAI">${[
       tab("/", "home", "Chats", "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"),
       tab("/?tab=projects", "projects", "Projects", "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"),
-      tab("/arena", "arena", "Arena", "M5 3h6v6H5zM13 15h6v6h-6zM14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4"),
+
       tab("/?tab=you", "you", "You", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M4 21a8 8 0 0 1 16 0"),
     ].join("")}</nav>`);
   }
@@ -29,7 +29,6 @@
     plus: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
     folder: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
     chat: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"/></svg>',
-    arena: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4"/></svg>',
     code: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 10l3 2.5L7 15M13 15h4"/></svg>',
     usage: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>',
     study: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5"/></svg>',
@@ -47,7 +46,6 @@
       <button type="button" class="rail-btn" data-expand title="Chats" aria-label="Chats">${I.chat}</button>
       <span class="grow"></span>
       <a class="rail-btn${on("study")}" href="/study" title="Study" aria-label="Study">${I.study}</a>
-      <a class="rail-btn${on("arena")}" href="/arena" title="Model arena" aria-label="Model arena">${I.arena}</a>
       <a class="rail-btn${on("usage")}" href="/usage" title="Your usage" aria-label="Your usage">${I.usage}</a>
       <a class="rail-btn" href="/?code=1" title="yAI Code" aria-label="yAI Code">${I.code}</a>
     </nav>
@@ -63,7 +61,6 @@
         <nav class="chat-list" id="sideChats"></nav>
       </div>
       <div class="side-foot">
-        <a class="side-link${on("arena")}" href="/arena">${I.arena}<span class="grow">Model arena</span></a>
         <a class="side-link" href="/?code=1">${I.code}<span class="grow">yAI Code</span><span class="side-tag">CLI</span></a>
         <a class="side-link${on("usage")}" href="/usage">${I.usage}<span class="grow">Your usage</span></a>
         <a class="side-link${on("study")}" href="/study">${I.study}<span class="grow">Study</span></a>

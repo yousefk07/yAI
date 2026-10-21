@@ -59,8 +59,6 @@ cloud GPUs that only exist while someone is using them; and two small models run
   hit, blocked image prompts)
 - **What's new** (`/changelog`): the releases, numbered by build; a short "What's new" note shows once after an update
 - **Live previews**: HTML, SVG and JavaScript in an answer run in a sandboxed panel (the answer's CSS and JS blocks included)
-- **Model arena** (`/arena`): one question, two anonymous models side by side, a vote, an Elo leaderboard, and the
-  coding benchmark results from yAI Code's `/bench`
 - **Usage page** (`/usage`): your messages, images, videos, web searches and yAI Ultra spend against the daily
   limits, the last 30 days and all time; admins also see everyone
 - **Live status**: LM Studio's real model-load progress, and a timer while a cloud GPU wakes up
@@ -114,7 +112,7 @@ yai
 - `yai remote` (or `/remote`): listens for tasks sent from the site's Run on your PC page; edits and commands are approved on the phone
 - **VS Code**: the extension in `vscode/` (install `vscode/yai-code.vsix`) runs `yai --stdio` in a side panel; each edit opens as a VS Code diff to approve. See `vscode/README.md`
 - The version (`yai -v`, the start screen) is the build number, the count of changes pushed to yAI (`1.0.<n>`)
-- `/bench [model]` runs the coding benchmark (6 tasks, 44 tests, a fresh session and 5 minutes per task) and adds the score to the arena leaderboard
+- `/bench [model]` runs the coding benchmark (6 tasks, 44 tests, a fresh session and 5 minutes per task) and saves the score to `~/.yai/bench.json`
 - **Web**: yAI can `web_search` and `web_fetch` pages (including your own dev server on localhost) · `/web <question>` searches and answers from the results with [n] sources
 - **Screenshots**: Alt+V (or Ctrl+V, or `/paste`) puts the clipboard image in the prompt as `[image N]`; yAI Ultra looks at it
 - **Usage**: `/usage` shows today against the limits (Ultra $, images, videos, searches) and the last 30 days

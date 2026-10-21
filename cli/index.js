@@ -95,6 +95,16 @@ const X = require("./extras")({
   title: () => sessionTitle({ messages: state.messages }),
 });
 
+// /team: background agents that split the work (cli/team.js).
+const TEAM = require("./team")({
+  state, root, api, ui, X,
+  syncMute: () => syncMute(),
+  runAgent: (text) => runAgent(text),
+  select: (o) => select(o),
+  topLevel: () => topLevel(),
+  modelLabel: () => modelLabel(),
+});
+
 // /bench: the coding benchmark on any model (cli/bench.js).
 const BENCH = require("./bench")({ state, api, ui, syncMute: () => syncMute(), findModel: (q) => findModel(q), modelLabel: () => modelLabel() });
 
@@ -309,7 +319,7 @@ function select(opts) {
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
   ["Session", [["/clear", "start a new conversation"], ["/resume", "pick an earlier conversation"], ["/compact", "summarise (/compact <focus>)"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
-  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
+  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/team", "agents split the work"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
   ["Look & make", [["/clone", "rebuild a page from a screenshot"], ["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
   ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"], ["/remote", "take tasks from your phone"]]],
@@ -1018,11 +1028,11 @@ async function callModel() {
 // tags, <｜DSML｜ parameter name="path"> closed by </path>, a <tool name="run"> holding <parameter name="command"> and
 // closed by </｜DSML｜ invoke>, a DSML invoke closed by </tool>. So any opener and any closer are accepted.
 const DSML_START = /<｜DSML｜\s*(?:function_)?calls>|<｜DSML｜\s*invoke\b/;
-const DS_MARK = /<｜DSML｜|<parameter\s+name=/;
+const DS_MARK = /<｜DSML｜|<parameter\s+name\s*=/;
 const CALL_END = /<\/｜DSML｜\s*(?:invoke|(?:function_)?calls)>|<\/tool>/;
 function fromDeepSeek(text) {
   if (!DS_MARK.test(text)) return text;
-  const head = /<｜DSML｜\s*invoke\s+name="([\w-]+)"[^>]*>|(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>/.exec(text);
+  const head = /<｜DSML｜\s*invoke\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>/.exec(text);
   const calls = text.search(/<｜DSML｜\s*(?:function_)?calls>/);
   if (!head) return calls >= 0 ? text.slice(0, calls).trimEnd() : text;
   const name = head[1] || head[3];
@@ -1031,8 +1041,10 @@ function fromDeepSeek(text) {
   let body = text.slice(head.index + head[0].length);
   const end = CALL_END.exec(body);
   if (end) body = body.slice(0, end.index);
-  // Arguments: <｜DSML｜ parameter name="k">, <parameter name="k"> or <k>, each closed by any of their closers.
-  const OPEN = /<｜DSML｜\s*parameter\s+name="([\w-]+)"[^>]*>|<parameter\s+name="([\w-]+)"[^>]*>|<([a-z_][\w-]*)>/g;
+  // Arguments: <｜DSML｜ parameter name="k">, <parameter name="k"> or <k>, each closed by any of their closers. The
+  // quotes are optional: in long sessions it writes <｜DSML｜ parameter name="path> (2026-10-21), and a missed opener
+  // made the file text's own tags (a <model> in code) look like arguments.
+  const OPEN = /<｜DSML｜\s*parameter\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|<parameter\s+name\s*=\s*["']?([\w-]+)["']?[^>]*>|<([a-z_][\w-]*)>/g;
   const args = [];
   let m, cut = false;
   while ((m = OPEN.exec(body))) {
@@ -1553,6 +1565,7 @@ const HELP = [
   ["/commit [note]", "Write a commit message for your changes and commit"],
   ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
+  ["/team <task>", "A lead splits the task; 2 to 4 agents do the parts at the same time, each on its own files"],
   ["/duo", "Two models: yAI Q3.8 Max (or another hosted model) plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
@@ -1565,7 +1578,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -1937,6 +1950,8 @@ async function command(line) {
       return X.showcase(arg);
     case "/duo":
       return X.toggleDuo(arg);
+    case "/team":
+      return TEAM.team(arg);
     case "/tutor":
       return X.toggleTutor(arg);
     case "/share":

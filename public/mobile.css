@@ -237,15 +237,10 @@ body.m-app #mPrevBar { display: flex; gap: 8px; padding: 12px 12px calc(12px + e
 #mPrevBar button { flex: 1; height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: 500 15px var(--sans); }
 #mPrevBar .m-primary { border: 0; background: var(--acc); color: var(--acc-on); font-weight: 600; }
 
-/* ---------- Arena on the phone: A and B as side-by-side cards you swipe between ---------- */
-body.m-page .duel { display: flex !important; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
-body.m-page .duel::-webkit-scrollbar { display: none; }
-body.m-page .duel > .card { flex: 0 0 86%; min-width: 0; scroll-snap-align: start; border-radius: 18px; }
-
 /* ---------- App feel: the page itself never moves (2026-10-21) ----------
    On a phone only the content areas scroll (the chat, the lists, sheets). The document is pinned, so pulling up or
    down doesn't bounce the whole page or trigger pull-to-refresh, and nothing can push it sideways. Areas that need to
-   scroll sideways (code blocks, tables, chips, sources, arena cards) still do, inside themselves. */
+   scroll sideways (code blocks, tables, chips, sources) still do, inside themselves. */
 html:has(> body.m-app), html:has(> body.m-page) { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body.m-app, body.m-page {
   position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none;

@@ -1,5 +1,5 @@
 // yAI as a phone app (2026-10-21, Claude Design "yAI Mobile App"): on a phone, signed in, the chat page becomes an
-// app with four tabs (Chats, Projects, Arena, You), a chat screen with its own top bar and no tabs, bottom sheets for
+// app with three tabs (Chats, Projects, You), a chat screen with its own top bar and no tabs, bottom sheets for
 // the model and the tools, a full-screen live preview, swipe-from-the-edge to go back, and the phone's back button.
 // Desktop is untouched: everything here only runs while <body> has the m-app class.
 (function () {
@@ -16,7 +16,7 @@
   const I = {
     chat: "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z",
     folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-    arena: "M5 3h6v6H5zM13 15h6v6h-6zM14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4",
+
     you: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M4 21a8 8 0 0 1 16 0",
     search: "M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2",
     image: "M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1M4 16l5-5 9 9",
@@ -96,7 +96,7 @@
       <nav id="mTabs" aria-label="yAI">
         <button type="button" data-tab="home">${ico(I.chat, 23)}<span>Chats</span></button>
         <button type="button" data-tab="projects">${ico(I.folder, 23)}<span>Projects</span></button>
-        <a href="/arena" data-tab="arena">${ico(I.arena, 23)}<span>Arena</span></a>
+
         <button type="button" data-tab="you">${ico(I.you, 23)}<span>You</span></button>
       </nav>
       <div id="mSheet" hidden><button type="button" class="m-scrim" aria-label="Close"></button><div class="m-sheet" role="dialog" aria-modal="true"><span class="m-grab"></span><div id="mSheetBody"></div></div></div>

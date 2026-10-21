@@ -3,7 +3,7 @@
 // as yai-demo/bench) are copied to a temporary folder, and yAI Code works through each one on its own, the way
 // `yai -p "<task>" --accept-edits --allow-commands` would: a fresh session per task and 5 minutes at most. Then every
 // task's tests run. A test file the model changed is put back first and the task is flagged, so it can't pass by
-// editing the tests. The score goes to ~/.yai/bench.json and to the site's leaderboard (/arena → Leaderboard).
+// editing the tests. The score goes to ~/.yai/bench.json.
 
 const fs = require("fs");
 const os = require("os");
@@ -158,14 +158,6 @@ module.exports = function create({ state, api, ui, syncMute, findModel, modelLab
       all.push(result);
       fs.writeFileSync(file, JSON.stringify(all, null, 1));
     } catch {}
-    if (result.complete && !state.interrupted) {
-      try {
-        await api.postBench(result);
-        print(c.dim(`   on the leaderboard: ${api.baseUrl()}/arena#leaderboard`));
-      } catch (err) {
-        print(c.dim(`   couldn't add it to the leaderboard: ${err.message}`));
-      }
-    }
     print(c.dim(`   logs: ${logs}`));
     if (keep) print(c.dim(`   the model's work: ${path.join(work, "bench")}`));
     else fs.rm(work, { recursive: true, force: true }, () => {});

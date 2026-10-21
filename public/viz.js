@@ -53,9 +53,9 @@
     const out = box.querySelector(".viz-out");
     out.innerHTML = svg;
     box.dataset.svg = svg;
-    // A wide diagram on a phone would shrink to unreadable text; it keeps at least 70% of its size and scrolls instead.
+    // A wide diagram on a phone would shrink to unreadable text; it keeps 90% of its size (text near 13px) and scrolls instead.
     const el = out.querySelector("svg"), natural = parseFloat(el?.style.maxWidth) || 0, room = out.clientWidth - 28;
-    if (el && natural > room * 1.25) { el.style.width = Math.round(natural * 0.7) + "px"; el.style.maxWidth = "none"; out.classList.add("wide"); }
+    if (el && natural > room * 1.25) { el.style.width = Math.round(natural * 0.9) + "px"; el.style.maxWidth = "none"; out.classList.add("wide"); }
   }
 
   // ---------- charts ----------
@@ -167,5 +167,24 @@ const fmt = (v, unit) => {
       a.click();
     }
   });
+  // Light/dark switched: draw them again in the new colours (charts and diagrams bake their colours in).
+  let wasDark = null;
+  const redraw = () => {
+    const dark = isDark();
+    if (wasDark === null || dark === wasDark) return void (wasDark = dark);
+    wasDark = dark;
+    for (const box of document.querySelectorAll(".viz.ok, .viz.failed")) {
+      box.classList.remove("ok", "failed");
+      delete box.dataset.drawn;
+      box.querySelector(".viz-table")?.remove();
+      box.querySelector(".viz-table-btn, [data-act=table]")?.setAttribute("aria-pressed", "false");
+    }
+    render(document);
+  };
+  let t = 0;
+  const soon = () => { clearTimeout(t); t = setTimeout(redraw, 120); };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", soon);
+  new MutationObserver(soon).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+  addEventListener("load", () => { wasDark = isDark(); new MutationObserver(soon).observe(document.body, { attributes: true, attributeFilter: ["data-theme", "class"] }); });
   window.yaiViz = { render };
 })();

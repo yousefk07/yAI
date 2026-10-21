@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.90",
+      "date": "2026-10-21",
+      "title": "Agent teams in yAI Code",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "/team: agents that split the work",
+          "text": "A lead splits the task into 2 to 4 parts that touch different files, and the agents do them at the same time while a live board shows each one's step, time and cost. Commands still ask you first. Their reports land in your conversation."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fewer failed steps with yAI Ultra Flash",
+          "text": "In long sessions Ultra Flash sometimes wrote its tool calls slightly wrong (a missing quote), so steps failed with \"a path is required\" and had to be redone. Those calls are now understood the first time."
+        },
+        {
+          "area": "Website",
+          "title": "Model arena removed",
+          "text": "The arena and its leaderboard are gone; the phone app has three tabs: Chats, Projects and You."
+        },
+        {
+          "area": "Chat",
+          "title": "Diagrams, charts and formulas",
+          "text": "Charts and diagrams redraw in the right colours when you switch light or dark, wide diagrams stay readable on a phone, and a long formula shows a shadow where it scrolls."
+        }
+      ]
+    },
+    {
       "version": "1.0.89",
       "date": "2026-10-21",
       "title": "Phone fixes",
@@ -63,8 +90,8 @@
       "items": [
         {
           "area": "Phone",
-          "title": "Four tabs",
-          "text": "Chats, Projects, Arena and You, with the tabs out of the way inside a conversation."
+          "title": "Three tabs",
+          "text": "Chats, Projects and You, with the tabs out of the way inside a conversation."
         },
         {
           "area": "Phone",
@@ -74,7 +101,7 @@
         {
           "area": "Phone",
           "title": "Feels native",
-          "text": "Swipe from the left edge or use your phone's back button to go back, a full-screen live preview, swipeable arena cards, and a Settings screen with Light, Dark or System theme."
+          "text": "Swipe from the left edge or use your phone's back button to go back, a full-screen live preview, and a Settings screen with Light, Dark or System theme."
         }
       ]
     },
@@ -187,7 +214,7 @@
         {
           "area": "Website",
           "title": "A new look",
-          "text": "New colours and type, a sidebar that folds into a rail, and new arena and usage pages."
+          "text": "New colours and type, a sidebar that folds into a rail, and a new usage page."
         },
         {
           "area": "yAI Code",
@@ -223,8 +250,8 @@
         },
         {
           "area": "Website",
-          "title": "Model arena and usage page",
-          "text": "Compare models blind, and see what you've used."
+          "title": "Usage page",
+          "text": "See what you've used."
         }
       ]
     }

@@ -1,7 +1,7 @@
-/* yAI: shared styles for the chat, arena, usage and admin pages.
+/* yAI: shared styles for the chat, usage and admin pages.
    The 2026-10-20 redesign (Claude Design, "yAI Redesign"): warm off-whites and near-blacks, Geist for reading and
    Geist Mono for numbers, code and keys. Hierarchy comes from weight and spacing, not boxes. One accent, purple, used
-   only on send, active toggles, citations, the arena pick and limits near their cap. */
+   only on send, active toggles, citations and limits near their cap. */
 
 :root {
   --bg: #f8f8f6;
@@ -389,6 +389,16 @@ svg.mark { width: 22px; height: 22px; flex: none; display: block; }
 .content tr:last-child td { border-bottom: 0; }
 .content td { font-variant-numeric: tabular-nums; }
 .content .math { margin: 0 0 16px; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+/* A formula wider than the answer scrolls sideways; a soft shadow on the cut-off edge shows there is more
+   (the page-coloured covers move with the content, the shadows stay with the box, so each one shows only while
+   there is something to scroll to on that side). */
+.content .math {
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--text) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
 .content .katex { font-size: 1.08em; }
 .content .katex-display { margin: 0; }
 

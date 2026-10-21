@@ -92,9 +92,6 @@
       <a class="rail-btn" href="/study" title="Study" aria-label="Study">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5"/></svg>
       </a>
-      <a class="rail-btn" href="/arena" title="Model arena" aria-label="Model arena">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4"/></svg>
-      </a>
       <a class="rail-btn" href="/usage" title="Your usage" aria-label="Your usage">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>
       </a>
@@ -134,10 +131,6 @@
         <nav id="chatList" class="chat-list"></nav>
       </div>
       <div class="side-foot">
-        <a class="side-link" href="/arena">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4"/></svg>
-          <span class="grow">Model arena</span>
-        </a>
         <button type="button" class="side-link" id="codeBtn">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 10l3 2.5L7 15M13 15h4"/></svg>
           <span class="grow">yAI Code</span><span class="side-tag">CLI</span>
@@ -196,7 +189,6 @@
               <a href="/admin" role="menuitem" class="menu-item" id="adminLink" hidden>Admin</a>
               <a href="/people" role="menuitem" class="menu-item" id="peopleLink" hidden>People and limits</a>
               <a href="/usage" role="menuitem" class="menu-item">Your usage</a>
-              <a href="/arena" role="menuitem" class="menu-item">Model arena</a>
               <button type="button" role="menuitem" class="menu-item" id="memoryBtn">Memory</button>
               <button type="button" role="menuitem" class="menu-item" id="googleBtn">Connect Google</button>
               <a href="/developers" role="menuitem" class="menu-item">API keys</a>
@@ -2088,7 +2080,7 @@
       zone.classList.remove("over");
       addProjectFiles([...e.dataTransfer.files]);
     });
-    // /?chat=<id> and /?project=<id>: the arena and usage pages' sidebars link straight into a chat or a project.
+    // /?chat=<id> and /?project=<id>: the usage page's sidebar links straight into a chat or a project.
     async function openFromUrl() {
       const p = new URLSearchParams(location.search);
       const chatId = p.get("chat"), projectId = p.get("project");
