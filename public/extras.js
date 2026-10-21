@@ -51,6 +51,11 @@
     }
     renderTools();
   }
+  // The phone app's tools sheet (mobile.js) reads and sets these too.
+  window.yaiTools = {
+    state: () => ({ study: studyOn, canvas: yaiCanvas.toolOn(), google: googleOn && google.connected, googleConnected: google.connected, googleConfigured: google.configured }),
+    set: setTool,
+  };
   $("toolsBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     const open = $("toolsMenu").hidden;

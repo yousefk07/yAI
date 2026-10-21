@@ -5,6 +5,19 @@
 // { user, admin }).
 (function () {
   const page = document.body.dataset.page || "";
+  // The phone app (2026-10-21): the theme chosen in Settings, and the same bottom tabs as the chat page (mobile.css).
+  try { const t = localStorage.getItem("yaiTheme"); if (t && t !== "system") document.documentElement.dataset.theme = t; } catch {}
+  if (matchMedia("(max-width: 700px)").matches) {
+    document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/mobile.css" />');
+    const tab = (href, key, label, d) => `<a href="${href}"${(page === "arena" && key === "arena") || (page === "usage" && key === "you") ? ' class="on"' : ""}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg><span>${label}</span></a>`;
+    document.body.classList.add("m-page");
+    document.body.insertAdjacentHTML("beforeend", `<nav id="mTabs" aria-label="yAI">${[
+      tab("/", "home", "Chats", "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"),
+      tab("/?tab=projects", "projects", "Projects", "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"),
+      tab("/arena", "arena", "Arena", "M5 3h6v6H5zM13 15h6v6h-6zM14 4h4a2 2 0 0 1 2 2v4M10 20H6a2 2 0 0 1-2-2v-4"),
+      tab("/?tab=you", "you", "You", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M4 21a8 8 0 0 1 16 0"),
+    ].join("")}</nav>`);
+  }
   const shell = document.getElementById("shell");
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const get = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };

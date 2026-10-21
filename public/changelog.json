@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.81",
+      "date": "2026-10-21",
+      "title": "yAI on your phone, as an app",
+      "items": [
+        {
+          "area": "Phone",
+          "title": "Four tabs",
+          "text": "Chats, Projects, Arena and You, with the tabs out of the way inside a conversation."
+        },
+        {
+          "area": "Phone",
+          "title": "Sheets for models and tools",
+          "text": "Tap the model under the chat title to switch, and + for Camera, Photos, Files, Search, Research, Image, Video, Study, Canvas and Voice."
+        },
+        {
+          "area": "Phone",
+          "title": "Feels native",
+          "text": "Swipe from the left edge or use your phone's back button to go back, a full-screen live preview, swipeable arena cards, and a Settings screen with Light, Dark or System theme."
+        }
+      ]
+    },
+    {
       "version": "1.0.77",
       "date": "2026-10-21",
       "title": "yAI Ultra Flash",
