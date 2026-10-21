@@ -763,6 +763,7 @@
           o.dataset.desc = m.codeOnly ? "Only available in yAI Code" : m.desc || "";
           o.disabled = !!m.codeOnly;
           if (/-cloud$/.test(m.id)) o.dataset.cloud = "1";
+          if (m.price) o.dataset.price = "1"; // hosted, billed per token (Ultra, Ultra Flash, Q3.8 Max)
           modelSel.add(o);
         }
         buildModelMenu();

@@ -142,15 +142,29 @@ process.stdout.on("resize", () => rlOutput.emit("resize"));
 const FRAMES = ["◐", "◓", "◑", "◒"];
 const tok = (n) => (n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n));
 let spin = null;
+// The live area (2026-10-21, yAI Code v2): lines kept at the bottom while yAI works (the plan card), with the
+// working line under them. It is wiped before anything is printed and drawn again after, so it stays in place.
+let liveAbove = null; // () => string[]
+let liveRows = 0;     // rows the live area takes on screen now (the working line included)
+const setLive = (fn) => { liveAbove = fn; };
+function clearLive() {
+  if (!liveRows) return;
+  process.stdout.write((liveRows > 1 ? `\x1b[${liveRows - 1}A` : "") + "\r\x1b[J");
+  liveRows = 0;
+}
 
 function drawSpinner() {
   if (!spin) return;
   const secs = Math.round((Date.now() - spin.start) / 1000);
-  const meta = [`${secs}s`, spin.tokens ? `${tok(spin.tokens)} tokens` : "", spin.extra || ""].filter(Boolean).join(" · ");
-  const line = ` ${c.accent(FRAMES[spin.frame++ % FRAMES.length])} ${c.accent(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to interrupt")}`;
-  process.stdout.write("\r\x1b[K" + line);
+  const meta = [`${secs}s`, spin.tokens ? `↓ ${tok(spin.tokens)} tokens` : "", spin.extra || ""].filter(Boolean).join(" · ");
+  const line = ` ${c.accent(FRAMES[spin.frame++ % FRAMES.length])} ${c.ink(spin.text)}${c.faint(" · " + meta)}   ${c.faint("esc to pause")}`;
+  const above = (liveAbove && liveAbove()) || [];
+  clearLive();
+  process.stdout.write([...above, line].join("\n"));
+  liveRows = above.length + 1;
 }
-const word = (t) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : "thinking");
+// one word ("Reading") reads better lower-cased after the spinner; a sentence (a plan step) stays as written
+const word = (t) => (!t ? "thinking" : /\s/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
 
 const spinner = {
   hook: null, // (state) => void: { text, tokens, extra } while working, null when stopped (yai --stdio, yai remote)
@@ -183,7 +197,7 @@ const spinner = {
     if (!spin) return;
     clearInterval(spin.timer);
     spin = null;
-    process.stdout.write("\r\x1b[K");
+    clearLive();
   },
   get running() {
     return !!spin;
@@ -212,7 +226,7 @@ const setSink = (fn) => (sink = fn);
 function rawPrint(text) {
   if (sink) return sink({ type: "out", text: String(text) + "\n" });
   output = /^ {5}/.test(stripAnsi(text));
-  if (spin) process.stdout.write("\r\x1b[K");
+  if (spin) clearLive();
   process.stdout.write(text + "\n");
   if (spin) drawSpinner();
 }
@@ -519,6 +533,6 @@ function resetSections() {
 
 module.exports = {
   c, print, spinner, setSink, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
-  welcome, footer, frame, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
+  welcome, footer, frame, setLive, clearLive, pad, vis, clip, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };

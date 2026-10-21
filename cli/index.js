@@ -20,6 +20,7 @@ const api = require("./api");
 const ui = require("./ui");
 const T = require("./tools");
 const { c, print, spinner } = ui;
+const LOOK = require("./look")({ ui }); // the v2 look: status pill, key bar, plan card, approvals, summaries
 
 // The version is the build number: how many changes have been pushed to yAI so far (the site's What's new page uses the
 // same number). Read from git when yai runs from its own clone, otherwise from package.json.
@@ -69,6 +70,15 @@ const state = {
   askHook: null, // ({ title, detail, options, edit }) => Promise<index>: questions go to the phone (yai remote) or VS Code (--stdio)
   stdio: false, // run by the VS Code extension (yai --stdio)
   remote: null, // yai remote: listening for tasks from the phone
+  // v2 (2026-10-21): where things stand, for the status pill and the keys that work now:
+  // welcome · ready · finished · attention
+  phase: "welcome",
+  phaseLabel: "",
+  plan: null, // { steps: [...], done: n } written by the model while it works
+  task: null, // this request: { files: Map(path -> { a, d }), tests, failure, offerFix }
+  quick: {}, // single keys offered now (pressed alone): key -> () => void
+  prefix: "", // a starter picked on the start screen ("Fix this: ") goes in front of the next message
+  hint: "", // the input's placeholder for the next message
 };
 const projectKey = crypto.createHash("sha1").update(root.toLowerCase()).digest("hex").slice(0, 16);
 const project = () => ((api.cfg.projects ||= {})[projectKey] ||= { path: root, allowedCommands: [] });
@@ -279,14 +289,15 @@ function select(opts) {
   if (!process.stdout.isTTY) return Promise.resolve(0);
   spinner.stop();
   let sel = opts.selected || 0;
-  let lines = ui.selectLines({ ...opts, selected: sel });
+  const render = opts.render || ui.selectLines;
+  let lines = render({ ...opts, selected: sel });
   for (const l of lines) process.stdout.write(l + "\n");
   const wasMuted = ui.rlOutput.muted;
   ui.rlOutput.muted = true;
   state.selecting = true;
   return new Promise((resolve) => {
     const redraw = () => {
-      const next = ui.selectLines({ ...opts, selected: sel });
+      const next = render({ ...opts, selected: sel });
       process.stdout.write(`\x1b[${lines.length}A`);
       for (const l of next) process.stdout.write("\r\x1b[K" + l + "\n");
       lines = next;
@@ -305,8 +316,9 @@ function select(opts) {
       resolve(i);
     };
     const onKey = (s, key = {}) => {
-      if (key.name === "up" || key.name === "k") { sel = (sel + opts.options.length - 1) % opts.options.length; redraw(); }
-      else if (key.name === "down" || key.name === "j" || key.name === "tab") { sel = (sel + 1) % opts.options.length; redraw(); }
+      if (opts.keys && s && opts.keys.includes(s.toLowerCase())) { sel = opts.keys.indexOf(s.toLowerCase()); redraw(); return done(sel); }
+      if (key.name === "up" || key.name === "left" || (key.name === "k" && !opts.keys)) { sel = (sel + opts.options.length - 1) % opts.options.length; redraw(); }
+      else if (key.name === "down" || key.name === "right" || (key.name === "j" && !opts.keys) || key.name === "tab") { sel = (sel + 1) % opts.options.length; redraw(); }
       else if (key.name === "return" || key.name === "enter") done(sel);
       else if (key.name === "escape" || (key.ctrl && key.name === "c")) done(-1);
       else if (/^[1-9]$/.test(s || "") && Number(s) <= opts.options.length) { sel = Number(s) - 1; redraw(); done(sel); }
@@ -504,7 +516,7 @@ ${toolDocs}
 - If a tool returns an error, fix the cause and try again instead of repeating the same call.
 - Questions get answers, not edits. Don't change files the user didn't ask about.
 - Be brief. Before a tool call, write at most one short sentence. When the task is done, say what you changed in a few sentences, without a tool call.
-- Use Markdown sparingly; the user reads your replies in a terminal.${state.tutor ? X.TUTOR_PROMPT : ""}${projectNotes()}`;
+- Use Markdown sparingly; the user reads your replies in a terminal.${LOOK.PLAN_RULES}${state.tutor ? X.TUTOR_PROMPT : ""}${projectNotes()}`;
 }
 
 // ---------- readline, prompt and keys ----------
@@ -516,8 +528,9 @@ function syncMute() {
   ui.rlOutput.muted = state.busy && !state.asking;
 }
 
-// The prompt: "› ", with a faint hint while it's empty.
-const PLACEHOLDER = "Ask yAI, or / for commands";
+// The prompt: "› ", with a faint hint while it's empty (what it says depends on where things stand).
+const PLACEHOLDERS = { welcome: "Describe a task, or ask about the code", ready: "Ask a follow-up, or / for commands", finished: "Ask for a follow-up", attention: "Or tell me how you'd like to fix it" };
+const placeholder = () => state.hint || PLACEHOLDERS[state.phase] || PLACEHOLDERS.ready;
 function promptText() {
   return ` ${c.accent("›")} `;
 }
@@ -583,6 +596,11 @@ function ruleLine() {
   return " " + c.line("─".repeat(Math.max(4, ui.width() - hint.length - 3))) + " " + c.faint(hint);
 }
 
+function pillState() {
+  if (state.phase === "finished") return ["finished", state.phaseLabel || "Finished"];
+  if (state.phase === "attention") return ["attention", "Needs attention"];
+  return ["ready", "Ready"];
+}
 function showPrompt() {
   if (state.printMode) return;
   if (state.redrawWhenIdle) {
@@ -590,26 +608,57 @@ function showPrompt() {
     redrawTranscript();
   }
   print("");
-  print(footerLine());
-  print(ruleLine());
+  const [st, label] = pillState();
+  print(LOOK.statusRow({ project: path.basename(root), branch: gitBranch(), st, label }));
   rl.setPrompt(promptText());
   rl.prompt(true);
   showPlaceholder();
+  drawBelow();
 }
 function showPlaceholder() {
   if (!process.stdout.isTTY || rl.line) return;
-  process.stdout.write(c.faint(PLACEHOLDER) + `\x1b[${PLACEHOLDER.length}D`);
+  const p = placeholder();
+  process.stdout.write(c.faint(p) + `\x1b[${p.length}D`);
   state.placeholder = true;
+}
+// Under the input: the keys that work now (or the /command suggestions while one is being typed). Drawn with moves
+// relative to the cursor, so it stays right when the screen scrolls; readline wipes it on some edits, so every
+// key press draws it again.
+const MODE_WORDS = { default: "asks before changes", acceptEdits: "auto-accept edits", plan: "plan · read-only" };
+const sugg = { sel: 0, closed: null };
+function suggestions() {
+  const line = rl ? rl.line : "";
+  if (!/^\/\S*$/.test(line) || sugg.closed === line) return null;
+  const q = line.slice(1).toLowerCase();
+  const all = COMMAND_INFO();
+  const starts = all.filter(([n]) => n.slice(1).startsWith(q));
+  const inside = all.filter(([n, t, d]) => !starts.includes(all.find((x) => x[0] === n)) && q && (n + " " + t + " " + d).toLowerCase().includes(q));
+  return [...starts, ...inside].slice(0, 6);
+}
+function belowLines() {
+  const list = suggestions();
+  if (list) {
+    sugg.sel = Math.min(sugg.sel, Math.max(0, list.length - 1));
+    return LOOK.suggestionLines(list, sugg.sel, rl.line);
+  }
+  const keys = LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
+  return [LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() })];
+}
+function drawBelow() {
+  if (!process.stdout.isTTY || state.printMode || state.stdio || state.busy || state.selecting || state.asking || !rl) return;
+  const lines = belowLines();
+  const cols = process.stdout.columns || 100;
+  const total = Math.floor((3 + rl.line.length) / cols); // rows the input takes, after the first
+  const pos = rl.getCursorPos();
+  const down = Math.max(0, total - pos.rows);
+  process.stdout.write((down ? `\x1b[${down}B` : "") + "\r\n" + lines.map((l) => "\x1b[K" + l).join("\r\n") + "\x1b[J" +
+    `\x1b[${lines.length + down}A\x1b[${pos.cols + 1}G`);
 }
 
 function setMode(mode, { announce = true } = {}) {
   state.mode = mode;
-  if (announce && !state.busy) {
-    process.stdout.write("\r\x1b[K\x1b[2A\r\x1b[K" + footerLine() + "\n" + ruleLine() + "\n");
-    rl.setPrompt(promptText());
-    rl.prompt(true);
-    showPlaceholder();
-  }
+  if (announce && !state.busy) drawBelow();
 }
 
 // rl.question, but the answer doesn't end up in the ↑ history.
@@ -685,8 +734,46 @@ function setupReadline() {
     }, 180);
   });
 
+  // While a /command is being typed, ↑↓ move through the suggestions (not the history), tab completes the chosen
+  // one, enter runs it and esc closes the list.
+  const ttyWrite = rl._ttyWrite.bind(rl);
+  rl._ttyWrite = (s, key = {}) => {
+    const list = !state.busy && !state.selecting && !state.asking ? suggestions() : null;
+    if (list && list.length) {
+      const setLine = (t) => { rl.line = t; rl.cursor = t.length; rl._refreshLine(); };
+      if (key.name === "up" || key.name === "down") {
+        sugg.sel = (sugg.sel + (key.name === "up" ? -1 : 1) + list.length) % list.length;
+        return drawBelow();
+      }
+      if (key.name === "tab" && !key.shift) return setLine(list[sugg.sel][0] + " "), drawBelow();
+      if (key.name === "escape") return (sugg.closed = rl.line), drawBelow();
+      if ((key.name === "return" || key.name === "enter") && rl.line !== list[sugg.sel][0]) setLine(list[sugg.sel][0]);
+    }
+    return ttyWrite(s, key);
+  };
+
   process.stdin.on("keypress", (s, key) => {
     if (state.selecting) return;
+    // (not after enter: the input has just been sent, and the bar under it goes away with it)
+    if (!state.busy && !state.asking && !(key && (key.name === "return" || key.name === "enter"))) setImmediate(() => {
+      if (!/^\/\S*$/.test(rl.line)) sugg.sel = 0;
+      drawBelow();
+    });
+    // A single key offered on screen (1–4 on the start screen, r / c / u after a task, f / s / n after a failure):
+    // pressed alone, with a short pause after it, it acts; typing on makes it the start of a message.
+    if (!state.busy && !state.asking && rl.line.length === 1 && (state.quick[rl.line.toLowerCase()] || rl.line === "?")) {
+      const k = rl.line;
+      clearTimeout(state.quickTimer);
+      state.quickTimer = setTimeout(() => {
+        if (rl.line !== k || state.busy) return;
+        const act = k === "?" ? () => command("/help").then(showPrompt) : state.quick[k.toLowerCase()];
+        rl.line = "";
+        rl.cursor = 0;
+        process.stdout.write("\r\x1b[J");
+        print("");
+        act();
+      }, 450);
+    }
     // The first key clears the faint hint (readline has already drawn the key; this wipes the rest).
     if (state.placeholder && !state.asking) {
       state.placeholder = false;
@@ -921,9 +1008,27 @@ async function callModel() {
   }
 
   const write = ui.markdownWriter();
-  let text = "", lineBuf = "", inTool = false, heldFence = null;
+  let text = "", lineBuf = "", inTool = false, heldFence = null, inPlan = false;
   const emit = (line) => {
     if (inTool) return;
+    // The plan the model keeps (see LOOK.PLAN_RULES): shown in the card at the bottom, not in the words.
+    if (state.task) {
+      const d = /<done>\s*(\d+)\s*<\/done>/.exec(line);
+      if (d && state.plan) state.plan.done = Number(d[1]);
+      if (/<offer-fix\s*\/?>/.test(line)) state.task.offerFix = true;
+      line = line.replace(/<done>\s*\d+\s*<\/done>|<offer-fix\s*\/?>/g, "");
+      if (inPlan || /<plan>/.test(line)) {
+        const body = line.replace(/<\/?plan>/g, "");
+        if (/<plan>/.test(line)) { inPlan = true; state.plan = { steps: [], done: state.plan && state.plan.done > 0 ? state.plan.done : 0 }; }
+        const m = /^\s*\d+[.)]\s+(.+)/.exec(body);
+        if (m) state.plan.steps.push(m[1].trim());
+        if (/<\/plan>/.test(line)) inPlan = false;
+        if (state.plan.steps[state.plan.done]) spinner.text(state.plan.steps[state.plan.done]);
+        return;
+      }
+      if (d && state.plan && state.plan.steps[state.plan.done]) spinner.text(state.plan.steps[state.plan.done]);
+      if (!line.trim() && (d || /offer-fix/.test(text.slice(-40)))) return;
+    }
     // Kimi K3's own tool-call markers can start mid-line: show the words before them, hide the rest.
     const kimi = line.indexOf("<|open|>tools");
     if (kimi >= 0) {
@@ -1085,12 +1190,20 @@ function fromKimi(text) {
 }
 
 // "Run this command?" in a box: › 1 Yes · 2 Yes, and don't ask again … · 3 No, tell yAI what to do instead.
-async function askPermission(title, alwaysLabel, detail) {
+async function askPermission(title, alwaysLabel, detail, look) {
   spinner.stop();
   const options = ["Yes", alwaysLabel, "No, tell yAI what to do instead"];
   const editPlan = state.pendingEdit;
   state.pendingEdit = null;
-  const i = state.askHook ? await state.askHook({ title, detail, options, edit: editPlan }) : await select({ title, detail, options });
+  let i;
+  if (state.askHook) i = await state.askHook({ title, detail, options, edit: editPlan });
+  else if (look && process.stdout.isTTY) {
+    // the v2 card: its keys map back to yes / always / no
+    const keys = look.keys;
+    const j = await select({ ...look, detail, options: keys.map((k) => k[1]), keys: keys.map((k) => k[0]), render: (o) => LOOK.approveLines({ ...look, detail, options: keys, selected: o.selected }) });
+    const k = j >= 0 ? keys[j][0] : "n";
+    i = k === "y" ? 0 : k === "a" ? 1 : j < 0 ? -1 : 2;
+  } else i = await select({ title, detail, options });
   if (i === 0) return "yes";
   if (i === 1) return "always";
   if (i < 0 || state.askHook) return { no: true, feedback: "" };
@@ -1132,7 +1245,10 @@ async function execTool(call) {
         const allowedMcp = project().mcpAllowed || [];
         if (!state.printMode && !allowedMcp.includes(call.name)) {
           ui.cancelRow();
-          const ans = await askPermission("Use this MCP tool?", "Yes, and don't ask again for this tool", `${tool.server} · ${tool.tool}`);
+          const ans = await askPermission("Use this MCP tool?", "Yes, and don't ask again for this tool", `${tool.server} · ${tool.tool}`, {
+            title: "Can I use this tool?", explain: `It comes from the ${tool.server} MCP server, and it may change things outside this folder.`, tag: "MCP", tagFill: "soft",
+            keys: [["y", "Yes, use it"], ["a", "Always allow it"], ["n", "No"]],
+          });
           if (ans.no) return rejected(ans);
           if (ans === "always") {
             project().mcpAllowed = [...allowedMcp, call.name];
@@ -1172,15 +1288,23 @@ async function execTool(call) {
       const plan = tool.prepare(ctx, call.args);
       if (plan.before === plan.after) return { output: "No change: the new content is the same as the old." };
       const name = path.basename(plan.abs);
-      T.showEdit(ctx, plan);
+      const counts = T.showEdit(ctx, plan) || { added: 0, removed: 0 };
       if (state.mode !== "acceptEdits") {
         state.pendingEdit = plan; // the phone and VS Code show the change itself
-        const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply this edit to ${name}?`, "Yes, and apply edits without asking");
+        const ans = await askPermission(plan.created ? `Create ${name}?` : `Apply this edit to ${name}?`, "Yes, and apply edits without asking", "", {
+          title: plan.created ? `Can I create ${name}?` : `Can I change ${name}?`,
+          explain: plan.created ? `A new file, ${counts.added} line${counts.added === 1 ? "" : "s"}. It's shown above.` : `${counts.added} line${counts.added === 1 ? "" : "s"} added and ${counts.removed} removed, shown above. /undo puts it back.`,
+          keys: [["y", plan.created ? "Yes, create it" : "Yes, apply it"], ["a", "Always, this session"], ["n", "No"]],
+        });
         if (ans.no) return rejected(ans);
         if (ans === "always") state.mode = "acceptEdits";
       }
       state.undo.push({ abs: plan.abs, before: plan.before, created: plan.created });
       T.applyEdit(ctx, plan);
+      if (state.task) {
+        const f = relPath(plan.abs), was = state.task.files.get(f) || { a: 0, d: 0 };
+        state.task.files.set(f, { a: was.a + counts.added, d: was.d + counts.removed });
+      }
       ui.note(`${c.green("✓")} ${c.dim(plan.created ? "created · 1 new file" : "applied · 1 file changed")}`);
       return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` };
     }
@@ -1201,7 +1325,11 @@ async function execTool(call) {
       // The question shows the command, so the waiting step row is dropped and redrawn after.
       ui.cancelRow();
       const prefix = commandPrefix(command);
-      const ans = await askPermission("Run this command?", chained ? "Yes, this once" : `Yes, and don't ask again for ${prefix}`, shownCommand);
+      const risk = LOOK.riskOf(command);
+      const ans = await askPermission("Run this command?", chained ? "Yes, this once" : `Yes, and don't ask again for ${prefix}`, shownCommand, {
+        title: LOOK.approveTitle(command), explain: risk.explain, tag: risk.tag, tagFill: risk.fill,
+        keys: chained ? [["y", "Yes, run it"], ["n", "No, skip"]] : [["y", "Yes, run it"], ["a", `Always allow ${prefix}`], ["n", "No, skip"]],
+      });
       if (ans.no) return rejected(ans);
       if (ans === "always" && !chained) {
         project().allowedCommands.push(prefix);
@@ -1252,6 +1380,10 @@ async function runAgent(content) {
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
   const undoStart = state.undo.length;
+  const costStart = state.cost.session;
+  state.task = { files: new Map(), tests: null, failure: null, offerFix: false };
+  state.plan = null;
+  if (process.stdout.isTTY && !state.stdio) ui.setLive(() => LOOK.planLines(state.plan, { files: state.task.files }));
   let reviewed = false;
   let nudges = 0; // replies that announced a step but stopped before it
   let planReady = false; // plan mode finished with a plan: ask to go ahead
@@ -1333,6 +1465,10 @@ async function runAgent(content) {
       // and stop after five.
       if (call.name === "run" && !call.cutOff) {
         const failed = /\n\[(exit code [1-9]\d*|command [^\]]+)\]$/.test(String(result.output));
+        // for the summary and the failure card
+        const tc = LOOK.testCounts(result.output);
+        if (tc) state.task.tests = tc;
+        state.task.failure = failed ? { command: String((call.args || {}).command || ""), output: String(result.output), tests: tc } : null;
         const cmd = String((call.args || {}).command || "").trim().toLowerCase();
         if (!failed) failedRuns = 0;
         else {
@@ -1362,6 +1498,7 @@ async function runAgent(content) {
     const out = state.usage.out - startOut;
     const took = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
     state.lastStats = out ? `↓ ${kTokens(out)} tok · ${Math.round(out / Math.max(1, secs))} tok/s · ${took}` : `done in ${took}`;
+    if (!state.interrupted) finishTask({ took, secs: took.replace("s", " s"), out, cost: state.cost.session - costStart, undoStart });
     if (state.mode === "plan" && !state.printMode && !state.interrupted) planReady = true;
     if (JSON.stringify(state.messages).length > COMPACT_HINT_AT) print(c.yellow(" context is getting long · /compact summarizes it so you can keep going"));
   } catch (err) {
@@ -1370,12 +1507,69 @@ async function runAgent(content) {
     if (err.auth) state.user = null;
   } finally {
     spinner.stop();
+    ui.setLive(null);
     state.busy = false;
     state.abort = null;
     syncMute();
     saveSession();
   }
   if (planReady) await approvePlan();
+}
+
+// After a request (v2): a failure gets a card that says what failed, with keys to fix it, see the fix first or leave it;
+// a task that changed files gets a summary (tests, files, time) and keys for what to do next. A plain answer gets neither.
+function finishTask({ took, out, cost, undoStart }) {
+  const t = state.task;
+  if (!t || state.printMode || state.stdio || !process.stdout.isTTY) return;
+  const f = t.failure;
+  if (f && (t.offerFix || !t.files.size)) {
+    state.phase = "attention";
+    const lines = f.output.replace(/\n\[[^\]]*\]$/, "").split("\n").map((l) => l.trimEnd()).filter((l) => l.trim());
+    const header = f.tests && f.tests.failed ? `${f.tests.failed} test${f.tests.failed === 1 ? "" : "s"} failed` : "The command failed";
+    print("");
+    // the lines that say what failed (the test's name, the error, expected and actual), not the end of a stack dump
+    const telling = [...new Set(lines.filter((l) => /✖|not ok|FAILED|Error\b|error:|expected|actual|assert/i.test(l) && !/^\s*at /.test(l) && !/failing tests:?\s*$/i.test(l)).map((l) => l.trim()))];
+    for (const l of LOOK.failureLines({ header, lines: [`$ ${f.command}`, ...(telling.length ? telling.slice(0, 4) : lines.slice(-3))] })) print(l);
+    print("");
+    print(LOOK.buttons([["f", "Fix it"], ["s", "Show me the fix first"], ["n", "Leave it, I'll look"]]));
+    state.quick = {
+      f: () => handleInput("Yes, fix it."),
+      s: () => handleInput("Show me the fix first, as a diff in your reply. Don't change any files yet."),
+      n: () => { state.phase = "ready"; state.quick = {}; print(c.dim("   OK, leaving it as it is.")); showPrompt(); },
+      e: () => { print(""); for (const l of lines.slice(-60)) print("   " + c.dim(l)); showPrompt(); },
+    };
+    return;
+  }
+  if (!t.files.size) return void (state.phase = "ready");
+  state.phase = "finished";
+  state.phaseLabel = `Finished in ${took.replace(/(\d)s$/, "$1 s")}`;
+  let a = 0, d = 0;
+  for (const n of t.files.values()) (a += n.a), (d += n.d);
+  const tests = t.tests;
+  const cards = [
+    tests ? { label: "Tests", value: tests.failed ? `${tests.failed} failed` : `${tests.passed} passed`, sub: tests.failed ? `${tests.passed} passed` : "all green", dot: !tests.failed } : { label: "Tests", value: "Not run", sub: "ask yAI to run them" },
+    { label: "Files changed", value: `${t.files.size} file${t.files.size === 1 ? "" : "s"}`, sub: `+${a} −${d} lines · ${ui.clip([...t.files.keys()].join(", "), 40)}` },
+    { label: "Time and tokens", value: took.replace(/(\d)s$/, "$1 s"), sub: `${kTokens(out)} tokens · ${cost > 0 ? "$" + cost.toFixed(3) : "free (local)"}` },
+  ];
+  print("");
+  for (const l of LOOK.cards(cards)) print(l);
+  print("");
+  print(`  ${c.faint("What next?")}`);
+  print(LOOK.buttons([["r", "Review changes"], ["c", "Commit with a message"], ["u", "Undo everything"]]));
+  state.quick = {
+    r: () => handleInput("/review"),
+    c: () => handleInput("/commit"),
+    u: () => { undoAll(undoStart); state.phase = "ready"; state.quick = {}; showPrompt(); },
+  };
+}
+// Takes back every edit since the request started (newest first).
+function undoAll(from) {
+  let n = 0;
+  while (state.undo.length > from) {
+    undoLast();
+    n++;
+  }
+  if (n) ui.note(c.dim(`all ${n} change${n === 1 ? "" : "s"} from that task are undone`));
 }
 
 // Plan mode ends with a plan to approve (2026-10-20): go ahead with edits approved automatically, go ahead asking
@@ -1569,7 +1763,7 @@ const HELP = [
   ["/duo", "Two models: yAI Q3.8 Max (or another hosted model) plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
-  ["/bench [model]", "Run the 6-task coding benchmark (44 tests) on a model; scores go to the leaderboard"],
+  ["/bench [model]", "Run the 6-task coding benchmark (44 tests) on a model; scores are kept in ~/.yai/bench.json"],
   ["/mcp [add|remove|restart]", "MCP servers and their tools (also read from .mcp.json)"],
   ["/tasks [stop n]", "Commands yAI left running in the background (dev servers, watchers)"],
   ["/web <question>", "Search the web and answer from the results, with sources"],
@@ -1579,6 +1773,47 @@ const HELP = [
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
 const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+// The suggestions while a /command is typed (v2): a plain title, and a line saying what it does or what's on now.
+function COMMAND_INFO() {
+  const pct = contextPercent();
+  const info = {
+    "/help": ["Show every command", "with what each one does"],
+    "/model": ["Switch model", `Now: ${modelLabel()}. Try yAI Ultra for harder tasks.`],
+    "/mode": ["Change how much I ask", `Now: ${MODE_WORDS[state.mode]}`],
+    "/plan": ["Plan first, change nothing", "read-only: I look around and propose a plan"],
+    "/undo": ["Undo my last change", state.undo.length ? `${state.undo.length} change${state.undo.length === 1 ? "" : "s"} this session` : "nothing to undo yet"],
+    "/resume": ["Pick up an earlier conversation", "in this folder"],
+    "/clear": ["Start a new conversation", "this one stays in /resume"],
+    "/compact": ["Free up memory", `${pct}% of memory used in this session`],
+    "/status": ["See where things stand", "account, model, folder, memory and spend"],
+    "/usage": ["See today's usage", "against your daily limits"],
+    "/review": ["Review my changes", "a second model looks them over and runs the tests"],
+    "/commit": ["Commit with a message", "I write the message from the changes"],
+    "/fix": ["Make the tests pass", "run them and fix what fails"],
+    "/team": ["Split the work between agents", "2 to 4 work at the same time"],
+    "/duo": ["Plan and review with a second model", state.duo ? "on" : "off"],
+    "/tutor": ["Learning mode", "hints instead of finished answers"],
+    "/web": ["Search the web", "and answer with sources"],
+    "/init": ["Write notes about this project", "YAI.md, read at the start of every conversation"],
+    "/look": ["Review how a page looks", "screenshots on desktop and phone"],
+    "/clone": ["Rebuild a page", "from a screenshot or a live site"],
+    "/showcase": ["Record a demo video", "of your page"],
+    "/image": ["Make an image", "or edit a photo"],
+    "/video": ["Make a short video", "5 seconds, with sound"],
+    "/paste": ["Paste a screenshot", "from the clipboard"],
+    "/theme": ["Change the colours", ui.THEMES[ui.themeKey]?.name || ""],
+    "/remote": ["Take tasks from your phone", "the site's Run on your PC page"],
+    "/share": ["Share this conversation", "at an unlisted link"],
+    "/bench": ["Benchmark a model", "6 coding tasks, 44 tests"],
+    "/mcp": ["Manage MCP servers", "and their tools"],
+    "/tasks": ["Background commands", "dev servers and watchers I left running"],
+    "/login": ["Sign in", "to your yAI account"],
+    "/logout": ["Sign out", ""],
+    "/config": ["Use a different yAI site", ""],
+    "/exit": ["Quit", "or Ctrl+C twice"],
+  };
+  return COMMAND_NAMES.map((n) => [n, ...(info[n] || [n.slice(1), ""])]);
+}
 
 // ---------- /theme ----------
 const THEME_KEYS = Object.keys(ui.THEMES);
@@ -2022,15 +2257,27 @@ async function command(line) {
 function restyleInput(text) {
   if (!process.stdout.isTTY || text.includes("\n")) return;
   const rows = Math.max(1, Math.ceil((3 + text.length) / ui.columns()));
-  process.stdout.write("\x1b[1A\r\x1b[K".repeat(rows));
+  // the key bar under the input, the input itself and the status row over it make way for the message
+  process.stdout.write("\r\x1b[J" + "\x1b[1A".repeat(rows + 1) + "\r\x1b[J");
   ui.userLine(text);
 }
 
 async function handleInput(input) {
   state.placeholder = false;
-  const text = input.trim();
-  if (!text) return showPrompt();
+  clearTimeout(state.quickTimer);
+  let text = input.trim();
+  if (!text) {
+    // an empty enter: the prompt is drawn again in the same place, not under the old one
+    if (process.stdout.isTTY && !state.stdio) process.stdout.write("\r\x1b[J" + "\x1b[1A".repeat(3) + "\r\x1b[J");
+    return showPrompt();
+  }
   restyleInput(input);
+  // A new message starts afresh: the keys offered after the last task go away.
+  state.quick = {};
+  state.phase = "ready";
+  state.hint = "";
+  if (state.prefix && !text.startsWith("/")) text = state.prefix + text;
+  state.prefix = "";
   try {
     if (text.startsWith("/") && !text.includes("\n") && /^\/[a-z?]+(\s|$)/i.test(text)) await command(text);
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());
@@ -2361,10 +2608,18 @@ async function main() {
     else print(c.yellow(`No model matches "${modelArg}".`));
   }
 
-  // The welcome box (the design's start screen): model, project, instructions, account.
-  const rows = welcomeRows();
-  if (prewarm()) rows.push(["gpu", "waking up", c.faint("· in the background while you type")]);
-  ui.welcome({ version: VERSION, rows });
+  // The start screen (v2): a greeting, what yAI saw in the project, four numbered starters, and the last conversation.
+  const here = recentSessions(6).find((r) => r.here);
+  for (const l of LOOK.welcome({ user: state.user, projectName: path.basename(root), root, version: VERSION, recent: here })) print(l);
+  if (prewarm()) print(`  ${c.faint(`${modelLabel()} is waking up in the background while you type`)}`);
+  state.phase = "welcome";
+  state.quick = {
+    1: () => { state.prefix = "Fix this: "; state.hint = "Paste the error, or describe what's broken"; showPrompt(); },
+    2: () => { state.prefix = "Add this feature. Plan it first, then ask before changing files: "; state.hint = "Describe the feature"; showPrompt(); },
+    3: () => handleInput("Explain this project: give me a short tour of how the code fits together. Read the key files first."),
+    4: () => handleInput("/review"),
+    ...(here && { r: () => { state.quick = {}; state.phase = "ready"; resumeSession("last").then(showPrompt); } }),
+  };
 
   // First time in a folder: ask before working in it.
   if (!project().trusted) {
@@ -2392,18 +2647,6 @@ async function main() {
   }
   if (resume) await resumeSession(resume === "last" ? "last" : "");
   if (remote) await remoteMode();
-  // Tips and recent sessions, as in the design's start screen
-  print("");
-  const k = (key, text) => `${c.accent(key)}  ${c.dim(text)}`;
-  print(` ${c.faint("Tips")}`);
-  print(` ${[k("/model", "switch model"), k("@", "mention a file"), k("/help", "all commands")].join("     ")}`);
-  print(` ${[k("shift+tab", "cycle ask · auto-approve · plan"), k("!", "run a command yourself")].join("     ")}`);
-  const recent = recentSessions(3);
-  if (recent.length) {
-    print("");
-    print(` ${c.faint("Recent sessions")}`);
-    for (const r of recent) print(` ${c.faint(r.when.padEnd(12))}${c.ink(r.title)}${r.here ? c.faint("  · /resume") : c.faint(`  · ${r.folder}`)}`);
-  }
   showPrompt();
 }
 

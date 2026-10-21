@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "1.0.92",
+      "date": "2026-10-21",
+      "title": "yAI Code, reimagined",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Always know what it is doing",
+          "text": "A status pill says Ready, Working, Finished or Needs attention, and while yAI works its plan stays at the bottom with each step ticked off and the files it changed."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Plain-language start",
+          "text": "Instead of a wall of tips: what yAI saw in the project and four starters (fix something, add a feature, explain the project, review changes), each a single key, and R to pick up the last conversation."
+        },
+        {
+          "area": "yAI Code",
+          "title": "One-key answers",
+          "text": "Approvals say what a command does and how risky it is (read-only, changes files, network, risky) and take y, a or n. When a task is done you get a summary and r, c or u to review, commit or undo it all."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Failures in plain words",
+          "text": "When a test fails, yAI explains it simply before the stack trace and offers f to fix it, s to see the fix first, or n to leave it."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Commands with descriptions",
+          "text": "Typing / shows matching commands with what each does and what is on now; arrows move, tab completes, and the bar under the input lists the keys that work right now."
+        },
+        {
+          "area": "Phone",
+          "title": "Hosted models labelled right",
+          "text": "yAI Q3.8 Max now shows as Hosted in the model picker."
+        }
+      ]
+    },
+    {
       "version": "1.0.91",
       "date": "2026-10-21",
       "title": "A proper opening",

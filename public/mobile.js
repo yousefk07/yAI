@@ -72,7 +72,7 @@
   const initials = (u) => String(u || "?").slice(0, 2).toUpperCase();
   const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
   const modelLabel = () => modelSel.selectedOptions[0]?.textContent || "Model";
-  const modelTag = (o) => (/^(kimi|deepseek)/.test(o.value) ? "Hosted" : o.dataset.cloud ? "Cloud GPU" : "Your PC");
+  const modelTag = (o) => (o.dataset.price || /^(kimi|deepseek|qwen3.8)/.test(o.value) ? "Hosted" : o.dataset.cloud ? "Cloud GPU" : "Your PC");
   async function loadUsage(force) {
     if (!force && usage && Date.now() - usageAt < 60000) return usage;
     try {
