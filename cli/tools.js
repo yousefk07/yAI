@@ -272,6 +272,35 @@ const tools = {
       "header is one or two words; 2 to 4 options each, with a short description. The user can also type their own answer. Their answers come back as the result.",
     kind: "ask",
   },
+  // The services connected on the yAI website (2026-10-21, connections): weather, maps, Wolfram Alpha, arXiv, Semantic
+  // Scholar, YouTube, the user's GitHub, Drive, Spotify, LEARN and webhooks. Ones that change something ask first.
+  service: {
+    params: ["name", "args"],
+    describe: 'Use a connected service listed under "# Connected services": <name> is the tool name (e.g. weather.forecast), <args> a JSON object of its arguments.',
+    readOnly: true,
+    async run(ctx, a) {
+      const name = String(a.name || a.tool || "").trim();
+      if (!ctx.service) throw new ToolError("Connected services aren't available here.");
+      const info = ctx.serviceTool(name);
+      if (!info) throw new ToolError(`${name || "That"} isn't a connected service. Connected: ${ctx.serviceNames().join(", ") || "none (the user can connect them on the yAI website)"}.`);
+      let args = a.args || {};
+      if (typeof args === "string") {
+        try { args = args.trim() ? JSON.parse(args) : {}; } catch { throw new ToolError('<args> must be a JSON object, e.g. {"place":"Waterloo, ON"}.'); }
+      }
+      const summary = Object.values(args).map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" · ").slice(0, 80);
+      if (info.write && !(await ctx.approve(name, args))) return "The user said no; it wasn't done.";
+      toolHeader(info.label, `${name.split(".")[1].replace(/_/g, " ")}${summary ? ` · ${summary}` : ""}`);
+      spinner.start(`asking ${info.label}`);
+      let r;
+      try {
+        r = await ctx.service(name, args, !!info.write);
+      } finally {
+        spinner.stop();
+      }
+      toolResult(r.link ? r.text.split("\n")[0] : `Got ${plural(r.text.split("\n").length, "line")}${r.sources?.length ? ` · ${plural(r.sources.length, "source")}` : ""}`);
+      return r.text + (r.sources?.length ? `\n\nSources:\n${r.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}`).join("\n")}` : "");
+    },
+  },
   web_search: {
     params: ["query"],
     describe: "Search the web. Returns titles, links and snippets. Use it for documentation, error messages, library versions and anything recent; then web_fetch the best link.",

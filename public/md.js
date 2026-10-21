@@ -32,6 +32,18 @@ function googleCard(tag, attrs, body, done) {
     `<div class="g-actions">${done ? '<button type="button" class="btn-primary g-save">Add to Google Calendar</button>' : '<span class="muted">Writing…</span>'}</div></div>`;
 }
 
+// Connections (2026-10-21): <yai-action tool="spotify.create_playlist">{json args}</yai-action> becomes a card with a
+// "Do it" button (connections.js runs it). The JSON is shown as plain lines, never as HTML.
+const ACTION_NAMES = { "spotify.create_playlist": "Make a Spotify playlist", "github.create_issue": "Open a GitHub issue", "github.comment": "Comment on GitHub", "github.create_pr": "Open a pull request", "drive.create_doc": "Save as a Google Doc", "webhook.send": "Send to a webhook" };
+function actionCard(attrs, body, done) {
+  const tool = attrsOf(attrs).tool || "";
+  let args = {};
+  try { args = JSON.parse(body.trim() || "{}"); } catch { done = done && false; }
+  const lines = Object.entries(args).map(([k, v]) => `<div><span class="muted">${escapeHtml(k)}</span> ${escapeHtml(Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)).slice(0, 1200)}</div>`).join("");
+  return `<div class="g-card a-card" data-tool="${escapeHtml(tool)}" data-args="${escapeHtml(JSON.stringify(args))}"><div class="g-head"><span class="g-badge">${escapeHtml(tool.split(".")[0] || "action")}</span><b>${escapeHtml(ACTION_NAMES[tool] || tool)}</b></div>` +
+    `<div class="g-body a-args">${lines}</div><div class="g-actions">${done ? '<button type="button" class="btn-primary a-run">Do it</button><span class="muted">yAI only does this when you press the button</span>' : '<span class="muted">Writing…</span>'}</div></div>`;
+}
+
 window.renderMarkdown = function renderMarkdown(src) {
   const blocks = [];
   const hold = (html) => `\u0000${blocks.push(html) - 1}\u0000`;
@@ -50,6 +62,7 @@ window.renderMarkdown = function renderMarkdown(src) {
         (end ? `<button type="button" class="viz-btn" data-act="code" aria-pressed="false">Code</button>${kind === "chart" ? '<button type="button" class="viz-btn" data-act="table" aria-pressed="false">Table</button>' : ""}<button type="button" class="viz-btn" data-act="download">Download</button>` : "") +
         `</div><div class="viz-out"><div class="viz-wait">${end ? "Drawing…" : "Writing…"}</div></div><div class="viz-code" hidden><pre><code>${escapeHtml(body.replace(/\n$/, ""))}</code></pre></div><pre class="viz-src" hidden>${escapeHtml(body)}</pre></div>`)))
     .replace(/<(gmail-draft|calendar-event)\b([^>]*)>([\s\S]*?)(<\/\1>|$)/g, (_, tag, attrs, body, end) => `\n${hold(googleCard(tag, attrs, body, !!end))}\n`)
+    .replace(/<yai-action\b([^>]*)>([\s\S]*?)(<\/yai-action>|$)/g, (_, attrs, body, end) => `\n${hold(actionCard(attrs, body, !!end))}\n`)
     .replace(/```([\w+#.-]*)[^\n]*\n?([\s\S]*?)(```|$)/g, (_, lang, code) =>
       hold(
         `<div class="code"><div class="code-head"><span>${escapeHtml(lang || "code")}</span>` +

@@ -110,6 +110,25 @@ const X = require("./extras")({
 });
 
 // /team: background agents that split the work (cli/team.js).
+// Connections (cli/connect.js): the website's connected services, and /connections, /pr, /issues, /deploy.
+const CONN = require("./connect")({
+  state, root, api, ui, X,
+  select: (o) => select(o),
+  question: (q) => question(q),
+  runAgent: (text) => runAgent(text),
+});
+const serviceOk = new Set(); // write services the user said "always" to, this session
+ctx.service = (tool, args, confirm) => CONN.call(tool, args, confirm);
+ctx.serviceTool = (name) => CONN.tools().find((t) => t.name === name);
+ctx.serviceNames = () => CONN.tools().map((t) => t.name);
+ctx.approve = async (name, args) => {
+  if (serviceOk.has(name)) return true;
+  const detail = Object.entries(args).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("\n").slice(0, 1500);
+  const r = await askPermission(`Let yAI use ${name}?`, `Yes, and don't ask again for ${name} this session`, detail);
+  if (r === "always") serviceOk.add(name);
+  return r === "yes" || r === "always";
+};
+
 const TEAM = require("./team")({
   state, root, api, ui, X,
   syncMute: () => syncMute(),
@@ -681,7 +700,7 @@ All paths are relative to the project folder. You cannot access anything outside
 ${toolFormat()}
 
 Available tools:
-${toolDocs}
+${toolDocs}${CONN.promptBlock()}
 
 # How to work
 - Look before you change anything: use list_files, find_files, search and read_file. Never guess what a file contains.
@@ -2119,6 +2138,10 @@ const HELP = [
   ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
   ["/team <task>", "A lead splits the task; 2 to 4 agents do the parts at the same time, each on its own files"],
+  ["/connections", "Services connected on the website (GitHub, Drive, Spotify, LEARN, weather, maps, papers…)"],
+  ["/pr [note]", "Push this branch and open a GitHub pull request written from the diff"],
+  ["/issues", "Pick an open GitHub issue of this repo and let yAI work on it"],
+  ["/deploy [prod]", "Deploy this folder with the Vercel CLI (a preview, or production) and print the link"],
   ["/duo", "Two models: yAI Q3.8 Max (or another hosted model) plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
@@ -2131,7 +2154,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/connections", "/pr", "/issues", "/deploy", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 // The suggestions while a /command is typed (v2): a plain title, and a line saying what it does or what's on now.
 function COMMAND_INFO() {
   const pct = contextPercent();
@@ -2150,6 +2173,10 @@ function COMMAND_INFO() {
     "/commit": ["Commit with a message", "I write the message from the changes"],
     "/fix": ["Make the tests pass", "run them and fix what fails"],
     "/team": ["Split the work between agents", "2 to 4 work at the same time"],
+    "/deploy": ["Deploy this folder", "a Vercel preview link (or /deploy prod)"],
+    "/pr": ["Open a pull request", "push the branch, I write the description"],
+    "/issues": ["Work on a GitHub issue", "pick one of this repo's open issues"],
+    "/connections": ["See your connected services", "GitHub, Drive, LEARN, weather, maps, papers…"],
     "/duo": ["Plan and review with a second model", state.duo ? "on" : "off"],
     "/tutor": ["Learning mode", "hints instead of finished answers"],
     "/web": ["Search the web", "and answer with sources"],
@@ -2216,7 +2243,7 @@ function welcomeRows() {
 
 // Clears the screen (and scrollback) and prints the welcome box and this conversation again: your messages, yAI's
 // words and a row for each step it took (tool output itself isn't kept, so steps show without their results).
-const STEP_NAMES = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Edit", write_file: "Create", run: "Run", web_search: "Web search", web_fetch: "Fetch", task_output: "Task output", task_stop: "Stop task" };
+const STEP_NAMES = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Edit", write_file: "Create", run: "Run", web_search: "Web search", web_fetch: "Fetch", task_output: "Task output", task_stop: "Stop task", service: "Service" };
 function redrawTranscript() {
   if (!process.stdout.isTTY || state.printMode || SCREEN.on) return; // the full-window app redraws itself
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
@@ -2547,6 +2574,14 @@ async function command(line) {
       return X.toggleDuo(arg);
     case "/team":
       return TEAM.team(arg);
+    case "/connections":
+      return CONN.connections();
+    case "/pr":
+      return CONN.pr(arg);
+    case "/issues":
+      return CONN.issues();
+    case "/deploy":
+      return CONN.deploy(arg);
     case "/tutor":
       return X.toggleTutor(arg);
     case "/share":
@@ -2851,6 +2886,7 @@ async function stdioMode() {
     state.user = api.cfg.user;
     await loadModels();
     if (!process.env.YAI_NO_MCP && MCP.configured().length) await MCP.startAll({ approve: async () => true }).catch(() => {});
+    await CONN.load();
   } catch (err) {
     send({ type: "error", message: err.message });
     return process.exit(1);
@@ -3015,6 +3051,7 @@ async function main() {
     }
   }
 
+  CONN.load(); // the connected services, for the service tool (in the background)
   // MCP servers start after the folder is trusted; their tools are ready by the time the first answer needs them.
   if (!process.env.YAI_NO_MCP && MCP.configured().length) {
     const announce = () => {

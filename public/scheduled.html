@@ -125,6 +125,7 @@
             </div>
             <div class="row">
               <label class="check"><input type="checkbox" id="web" /> Search the web first</label>
+              <select id="webhook" aria-label="Also send the result to" hidden><option value="">Just notify me</option></select>
               <span class="grow"></span>
               <button type="button" class="btn-primary" id="save">Schedule it</button>
             </div>
@@ -175,6 +176,13 @@
     // ---------- the list ----------
     async function load() {
       try { tasks = (await hub("schedules")).tasks; } catch (err) { $("tasks").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+      // the saved webhooks (Connections), to send results to as well as the notification
+      hub("connections-settings").then((s) => {
+        const keep = $("webhook").value;
+        $("webhook").innerHTML = `<option value="">Just notify me</option>${(s.webhooks || []).map((h) => `<option value="${esc(h.id)}">Also send to ${esc(h.name)}</option>`).join("")}`;
+        $("webhook").value = keep;
+        $("webhook").hidden = !(s.webhooks || []).length;
+      }).catch(() => {});
       $("tasks").innerHTML = tasks.length ? tasks.map((t) => `<div class="task${t.enabled ? "" : " off"}" data-id="${esc(t.id)}">
           <button type="button" class="switch" role="switch" aria-checked="${t.enabled}" aria-label="On" data-act="toggle"><i></i></button>
           <div class="body"><b>${esc(t.title)}</b>
@@ -222,7 +230,7 @@
       $("prompt").value = t.prompt; $("title").value = t.title; $("kind").value = t.schedule.kind; $("time").value = t.schedule.time;
       if (t.schedule.kind === "weekly") $("day").value = String(t.schedule.day);
       if (t.schedule.kind === "once") $("date").value = t.schedule.date;
-      $("model").value = t.model; $("web").checked = t.web;
+      $("model").value = t.model; $("web").checked = t.web; $("webhook").value = t.webhook || "";
       $("formTitle").textContent = "Edit task"; $("save").textContent = "Save"; $("cancelEdit").hidden = false; $("ideas").hidden = true;
       syncKind();
       $("formPanel").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -230,7 +238,7 @@
     }
     function resetForm() {
       editing = null;
-      $("prompt").value = ""; $("title").value = ""; $("kind").value = "daily"; $("time").value = "08:00"; $("web").checked = false; $("model").value = "deepseek-v4.1-flash";
+      $("prompt").value = ""; $("title").value = ""; $("kind").value = "daily"; $("time").value = "08:00"; $("web").checked = false; $("model").value = "deepseek-v4.1-flash"; $("webhook").value = "";
       $("formTitle").textContent = "New task"; $("save").textContent = "Schedule it"; $("cancelEdit").hidden = true; $("ideas").hidden = false; $("formErr").textContent = "";
       syncKind();
     }
@@ -239,7 +247,7 @@
       const old = tasks.find((t) => t.id === editing);
       const kind = $("kind").value;
       const body = {
-        ...(editing && { id: editing }), title: $("title").value, prompt: $("prompt").value, model: $("model").value, web: $("web").checked,
+        ...(editing && { id: editing }), title: $("title").value, prompt: $("prompt").value, model: $("model").value, web: $("web").checked, webhook: $("webhook").value,
         enabled: old ? old.enabled : true, tz: kind === "once" || !old ? tz : old.tz,
         schedule: { kind, time: $("time").value || "08:00", ...(kind === "weekly" && { day: Number($("day").value) }), ...(kind === "once" && { date: $("date").value }) },
       };

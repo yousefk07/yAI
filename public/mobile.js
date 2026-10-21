@@ -503,6 +503,7 @@
           ${row("Model", val(modelLabel()), 'data-set="model"')}
           ${row("Search on by default", `<span class="m-switch${webSearch ? " on" : ""}"><i></i></span>`, 'data-set="search"')}
           ${row("Memory", chev, 'data-set="memory"')}
+          ${row("Connections", chev, 'data-set="connections"')}
           ${T.googleConfigured || T.googleConnected ? row("Google calendar and email", val(T.googleConnected ? "Connected" : "Connect"), 'data-set="google"') : ""}
         </div></div>
         <div><div class="m-label">Appearance</div><div class="m-group-box">
@@ -539,6 +540,7 @@
     if (k === "model") modelSheet();
     else if (k === "search") { $("webMode").click(); setTimeout(renderSettings); }
     else if (k === "memory") $("memoryBtn").click();
+    else if (k === "connections") window.yaiConnections?.open();
     else if (k === "google") $("googleBtn").click();
     else if (k === "code") $("codeDialog").showModal();
     else if (k === "install") $("installBtn").click();

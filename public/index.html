@@ -194,6 +194,7 @@
               <a href="/usage" role="menuitem" class="menu-item">Your usage</a>
               <button type="button" role="menuitem" class="menu-item" id="memoryBtn">Memory</button>
               <button type="button" role="menuitem" class="menu-item" id="googleBtn">Connect Google</button>
+              <button type="button" role="menuitem" class="menu-item" id="connectionsBtn">Connections</button>
               <a href="/developers" role="menuitem" class="menu-item">API keys</a>
               <a href="/changelog" role="menuitem" class="menu-item">What's new</a>
               <button type="button" role="menuitem" class="menu-item" id="installBtn" hidden>Install the app</button>
@@ -1322,6 +1323,11 @@
               renderSources(el, sources);
               if (!answer) el.querySelector(".content").innerHTML = `<div class="searching">Read ${sources.length} source${sources.length === 1 ? "" : "s"} · writing</div>`;
             }
+            // The connected tools it used (weather, arXiv, GitHub…), above the answer.
+            if (msg.toolsUsed?.length) {
+              el.dataset.tools = msg.toolsUsed.join(" · ");
+              renderSources(el, sources || []);
+            }
             // The search failed or found nothing: say so above the answer instead of failing silently.
             if (msg.searchNote) {
               const note = document.createElement("div");
@@ -1791,14 +1797,16 @@
     function renderSources(el, sources) {
       let box = el.querySelector(".sources");
       const list = (sources || []).filter((s) => /^https?:\/\//.test(s.url));
-      if (!list.length) { box?.remove(); el.querySelector(".searched")?.remove(); return; }
-      // "Searched the web · 6 sources" above the answer, the source cards under it.
+      if (!list.length && !el.dataset.tools) { box?.remove(); el.querySelector(".searched")?.remove(); return; }
+      // "Searched the web · 6 sources" above the answer, the source cards under it; "Used Weather · 1 source" when the
+      // connected tools answered (connections, 2026-10-21).
       if (!el.querySelector(".searched")) {
         const line = document.createElement("div");
         line.className = "searched";
         el.querySelector(".body").prepend(line);
       }
-      el.querySelector(".searched").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>${el.dataset.research ? "Deep research" : "Searched the web"} · ${list.length} source${list.length === 1 ? "" : "s"}`;
+      el.querySelector(".searched").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>${el.dataset.research ? "Deep research" : el.dataset.tools ? `Used ${escapeHtml(el.dataset.tools)}` : "Searched the web"}${list.length ? ` · ${list.length} source${list.length === 1 ? "" : "s"}` : ""}`;
+      if (!list.length) { box?.remove(); return; }
       if (!box) {
         box = document.createElement("div");
         box.className = "sources";
@@ -2130,6 +2138,7 @@
   <script src="/canvas.js"></script>
   <script src="/voice.js"></script>
   <script src="/extras.js"></script>
+  <script src="/connections.js"></script>
   <script src="/mobile.js"></script>
 </body>
 </html>

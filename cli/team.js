@@ -9,6 +9,10 @@
 // security checker, docs writer), each ending with a VERDICT line; if any of them finds a problem, the fixer runs last
 // with their reports. You pick the members on a checklist after the lead's split; the picks are remembered.
 //
+// The layout first (2026-10-21): the lead plans every file the work needs (paths, with a folder for a new project) and
+// who owns each; yAI makes the folders before anyone starts, and every agent's brief carries the whole map, so they
+// all build into the same structure instead of each inventing its own.
+//
 // Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
 // doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
 // After the team, /team log <number or name> prints an agent's whole log.
@@ -27,7 +31,9 @@ const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "�
 const LEAD_SYSTEM =
   "You are the lead of a small coding team. Split the user's task among agents that work AT THE SAME TIME in one folder, " +
   "each with file and shell tools. Reply with only JSON, no prose and no code fence: " +
-  '{"agents":[{"name":"2-3 word name","task":"exactly what this agent does, concrete enough to do alone","files":["paths it may create or change"]}]}. ' +
+  '{"folder":"the folder a new project goes in, e.g. snake-game (empty when changing an existing project)","agents":[{"name":"2-3 word name","task":"exactly what this agent does, concrete enough to do alone","files":["every path it creates or changes, relative to the project folder, including the folder above"]}]}. ' +
+  "Plan the whole file layout up front: list EVERY file the finished work needs, each under exactly one agent, with full paths " +
+  "(a new project's files all go inside its folder, e.g. snake-game/index.html, snake-game/js/game.js). " +
   "Rules: split by independent pieces (for example the API, the page, the tests); every file belongs to at most one agent, " +
   "since two agents editing one file would overwrite each other; each task must make sense without waiting for another " +
   "(agree on names, routes and data shapes inside the task text so the pieces fit). If the task is small or can't be split " +
@@ -90,11 +96,41 @@ module.exports = function create(d) {
       `You are one of ${all.length} agents working at the same time in this project, as a team. The team's overall task: ${task}`,
       "", `Your part: ${me.task}`,
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
+      ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
       "When you're done, end with a short report: what you changed, file by file, and anything the others or the user still need to do.",
     ].join("\n");
+  }
+
+  // The planned files as a tree, each with its owner: "  snake-game/" then "    index.html  (page)".
+  function layoutLines(all) {
+    const owner = new Map();
+    for (const a of all.filter((x) => !x.role)) for (const f of a.files) owner.set(f, a.name);
+    const paths = [...owner.keys()].sort();
+    const out = [], shown = new Set();
+    for (const p of paths) {
+      const parts = p.split("/");
+      for (let i = 0; i < parts.length - 1; i++) {
+        const dir = parts.slice(0, i + 1).join("/");
+        if (!shown.has(dir)) { shown.add(dir); out.push(`${"  ".repeat(i + 1)}${parts[i]}/`); }
+      }
+      out.push(`${"  ".repeat(parts.length)}${parts[parts.length - 1]}  (${owner.get(p)})`);
+    }
+    return out;
+  }
+  // Makes the planned folders (inside the project only) before the builders start.
+  function makeFolders(all) {
+    const fs = require("fs");
+    const made = new Set();
+    for (const a of all.filter((x) => !x.role)) for (const f of a.files) {
+      const dir = path.dirname(path.resolve(root, f));
+      const rel = path.relative(root, dir);
+      if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) continue;
+      if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); made.add(rel.split(path.sep).join("/")); }
+    }
+    return [...made];
   }
 
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
@@ -346,6 +382,8 @@ module.exports = function create(d) {
         messages: [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents.` }],
       }));
       agents = parsePlan(text, max);
+      const folder = (/"folder"\s*:\s*"([^"]*)"/.exec(String(text)) || [])[1]?.replace(/\\/g, "/").replace(/^\.?\/+|\/+$/g, "") || "";
+      if (folder && !folder.includes("..")) for (const a of agents) a.files = a.files.map((f) => (f.startsWith(folder + "/") ? f : `${folder}/${f}`));
     } catch (err) {
       return print(c.red(`   ${state.interrupted ? "Stopped." : err.message}`));
     }
@@ -384,6 +422,16 @@ module.exports = function create(d) {
       return d.runAgent(agents[0].task === task ? task : `${task}\n\n(Your part: ${agents[0].task})`);
     }
     for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly, hasVerdict: r.verdict !== false });
+    // The layout: the folders exist before anyone writes, and everyone gets the same map (in their brief).
+    const layout = layoutLines(agents);
+    if (layout.length) {
+      let made = [];
+      try { made = makeFolders(agents); } catch (err) { print(c.yellow(`   Couldn't make the folders: ${err.message}`)); }
+      print("");
+      print(`   ${c.accent("◆")} ${c.ink("The layout")} ${c.dim(made.length ? `· made ${made.length} folder${made.length === 1 ? "" : "s"}; every agent gets this map before it starts` : "· every agent gets this map before it starts")}`);
+      for (const l of layout.slice(0, 40)) print(`   ${l.endsWith("/") ? c.ink(l) : l.replace(/^(\s*)(\S+)(\s+\(.*\))$/, (m, sp, f, o) => sp + c.ink(f) + c.faint(o))}`);
+      if (layout.length > 40) print(c.dim(`     … ${layout.length - 40} more`));
+    }
 
     // 3. They run; the board redraws while they work. Esc stops them all.
     state.busy = true;

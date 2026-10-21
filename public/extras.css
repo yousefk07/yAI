@@ -224,3 +224,45 @@
 .viz-table th, .viz-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .viz-table th:first-child, .viz-table thead th { text-align: left; color: var(--text-2); font-weight: 500; }
 @media (max-width: 600px) { .viz-canvas { height: 230px; } }
+
+/* ---------- Connections (2026-10-21) ---------- */
+.conn-dialog {
+  width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 60px); padding: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 18px; background: var(--surface); color: var(--text); box-shadow: 0 24px 80px rgba(0,0,0,.28);
+}
+.conn-dialog[open] { display: flex; flex-direction: column; }
+.conn-dialog::backdrop { background: rgba(0,0,0,.35); }
+.conn-head { display: flex; gap: 12px; align-items: flex-start; padding: 18px 20px 12px; border-bottom: 1px solid var(--border); }
+.conn-head h2 { margin: 0 0 4px; font-size: 18px; }
+.conn-head p { margin: 0; font-size: 13px; line-height: 1.5; }
+.conn-head .conn-close { margin-left: auto; flex: none; }
+.conn-body { overflow: auto; padding: 4px 20px 20px; }
+.conn-body h3 { margin: 18px 0 6px; font: 600 12px var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.conn-row { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.conn-main { flex: 1; min-width: 0; }
+.conn-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.conn-title small { font-size: 12.5px; color: var(--muted); }
+.conn-on { color: var(--pos); font-weight: 600; }
+.conn-main > p { margin: 3px 0 6px; font-size: 13px; }
+.conn-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.conn-tool { font: 11px var(--mono); padding: 2px 6px; border-radius: 5px; background: var(--hover); color: var(--muted); }
+.conn-tool.w { background: var(--acc-soft); color: var(--acc-ink); }
+.conn-act { flex: none; align-self: center; }
+.conn-act button { height: 32px; padding: 0 12px; font-size: 13px; }
+.conn-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.conn-form input { flex: 1 1 180px; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); color: var(--text); font: 13px var(--sans); }
+.conn-form button { flex: none; width: auto; height: 34px; padding: 0 14px; font-size: 13px; }
+.conn-help { margin: 6px 0 0; font-size: 12px; }
+.conn-hooks { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.conn-hooks li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.conn-hooks li .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.conn-hooks button { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.a-args { white-space: normal; display: flex; flex-direction: column; gap: 3px; }
+.a-args .muted { font: 11.5px var(--mono); margin-right: 6px; }
+.g-actions .muted { align-self: center; font-size: 12px; }
+.a-done { font-size: 13.5px; color: var(--pos); }
+@media (max-width: 640px) {
+  .conn-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; }
+  .conn-row { flex-direction: column; }
+  .conn-act { align-self: flex-start; }
+}

@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.110",
+      "date": "2026-10-21",
+      "title": "Connections",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Connections",
+          "text": "yAI can now use outside services when a question needs them: live weather, maps and directions, Wolfram Alpha, arXiv and Semantic Scholar papers, YouTube transcripts, and your own GitHub, Google Drive and Docs, Spotify and UWaterloo LEARN due dates. Open Connections in the account menu to connect them. Answers say which ones were used, with sources."
+        },
+        {
+          "area": "Chat",
+          "title": "Actions wait for you",
+          "text": "Anything that changes something (a Spotify playlist, a GitHub issue, a Google Doc, a webhook message) comes as a card with a Do it button, and only happens when you press it."
+        },
+        {
+          "area": "Chat",
+          "title": "Webhooks",
+          "text": "Save webhooks (Discord, Slack, Zapier, n8n, any URL) under Connections. yAI can send to them, and scheduled tasks can send their results there too. Scheduled tasks also use your connected services, so \"every Sunday, tell me what is due on LEARN\" works."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Connections in the terminal",
+          "text": "The same services reach yAI Code through its service tool. New commands: /connections, /pr (push and open a pull request written from the diff), /issues (pick a GitHub issue and let yAI work on it) and /deploy (a Vercel preview or production, with a fix offer if the build fails)."
+        },
+        {
+          "area": "yAI Code",
+          "title": "/team plans the layout first",
+          "text": "The lead now plans every file and its owner up front. yAI makes the folders before anyone starts, and every agent gets the whole map in its brief."
+        }
+      ]
+    },
+    {
       "version": "1.0.109",
       "date": "2026-10-21",
       "title": "Previews that work",
