@@ -770,7 +770,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
 
   // ---------- what the /team screens show (cli/teamview.js draws them; 2026-10-22, the "yAI Code Team" design) ----------
   const V = require("./teamview")({ ui });
-  const screenW = () => (ui.screen ? ui.screen.width() : Math.max(60, (process.stdout.columns || 100) - 2));
+  const screenW = () => (ui.screen ? (ui.screen.fullWidth?.() || ui.screen.width()) : Math.max(60, (process.stdout.columns || 100) - 2));
   const screenH = () => Math.max(16, (process.stdout.rows || 30) - (ui.screen ? 10 : 6));
   const STAGES = [
     { name: "PLAN", has: (p) => p < 1 }, { name: "BUILD", has: (p) => p === 1 }, { name: "JOIN", has: (p) => p > 1 && p < 1.5 },

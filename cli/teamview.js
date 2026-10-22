@@ -112,9 +112,10 @@ module.exports = function create({ ui }) {
     });
     out.push(` ${segs.map((s) => s.bar).join(" ")}`, ` ${segs.map((s) => s.lab).join(" ")}`, "");
     // the agents, under their stages
-    const feedW = W >= 118 ? Math.min(44, Math.floor(W * 0.32)) : 0;
+    // the feed gets a third of a wide window (up to 72 columns), so the space goes to what agents say
+    const feedW = W >= 118 ? Math.min(72, Math.floor(W * 0.34)) : 0;
     const LW = feedW ? W - feedW - 3 : W;
-    const timeW = 7, costW = LW >= 90 ? 7 : 0, barCol = LW >= 96 ? 10 : 0, nameW = LW >= 90 ? 16 : 13;
+    const timeW = 7, costW = LW >= 90 ? 7 : 0, barCol = LW >= 96 ? 10 : 0, nameW = LW >= 120 ? 22 : LW >= 90 ? 16 : 13;
     const actW = Math.max(10, LW - 4 - 2 - nameW - 2 - (barCol ? barCol + 2 : 0) - timeW - (costW ? costW + 1 : 0) - 3);
     const left = [];
     let k = 0;

@@ -273,5 +273,12 @@ module.exports = function create({ ui }) {
       const panel = cols >= 100 && parts.panel();
       return Math.min(140, cols - 4 - (panel ? Math.min(40, Math.max(32, Math.floor(cols * 0.28))) + 3 : 0));
     },
+    // the whole pane, without the 140-column cap that keeps reading text comfortable: for /team's screens, which are
+    // laid out in columns (2026-10-22: on a 210-column window the board stopped at 140 with black space after it)
+    fullWidth() {
+      const cols = (process.stdout.columns || 100) - 1;
+      const panel = cols >= 100 && parts.panel();
+      return cols - 3 - (panel ? Math.min(40, Math.max(32, Math.floor(cols * 0.28))) + 3 : 0);
+    },
   };
 };

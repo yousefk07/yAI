@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.151",
+      "date": "2026-10-22",
+      "title": "/team fills the window",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Wide windows",
+          "text": "The /team screens use the whole window instead of stopping at 140 columns; on a wide window the live feed gets a third of it and agent names more room."
+        }
+      ]
+    },
+    {
       "version": "1.0.150",
       "date": "2026-10-22",
       "title": "A new /team",
