@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.146",
+      "date": "2026-10-22",
+      "title": "Room for the whole project",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Merger and checkers keep more in mind",
+          "text": "The /team roles that must see the whole project at once (merger, integration, reviewer, fixer, spec checker) keep up to 80k tokens of file contents before old ones are trimmed, up from 48k. On big projects they had been losing the first files while reading the last, re-reading them until they were stopped."
+        }
+      ]
+    },
+    {
       "version": "1.0.145",
       "date": "2026-10-22",
       "title": "The /team board in running order",

@@ -519,13 +519,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   }
 
   // ---------- running the agents ----------
+  // The roles that must hold the whole project at once get a bigger budget before old file contents are trimmed
+  // (2026-10-22: a merger on a Minecraft clone, ~2,400 lines over 5 files, kept losing the first files while reading
+  // the last, re-read them until the repeat guard stopped it, and never edited). 80k leaves room in a 128k window for
+  // the system prompt and the reply; builders keep 48k, which is cheaper and enough for their own files.
+  const WIDE_ROLES = new Set(["merger", "integration", "reviewer", "fixer", "spec"]);
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: "48000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
