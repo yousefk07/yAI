@@ -12,7 +12,7 @@ cloud GPUs that only exist while someone is using them; and two small models run
 | **yAI Ultra** (Kimi K3, reads images) | Modal shared endpoint, $3 / $15 per million tokens | no waiting |
 | **yAI Q3.8 Max** (Qwen3.8 Max, 2.4T parameters, 95B active) | Modal shared endpoint, $2 / $6 per million tokens | no waiting |
 | **yAI 3 Coder** (Qwen3 Coder 30B; yAI Code only, 64k context) | Modal serverless vLLM, 48 GB L40S (the only chat model on a cloud GPU) | wakes in a minute or two after a quiet spell |
-| yAI Q3.5 (Qwen 3.5 4B Uncensored) and yAI P4 (Phi 4 Mini) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
+| yAI Q3.5 (Qwen 3.5 4B Uncensored) | LM Studio on a 6 GB laptop GPU | up to ~200 tokens/s |
 | **Qwen-Image 2.1** (create and edit images) | RunPod serverless ComfyUI, 48 GB GPU | seconds per image |
 | **MiniMax H3** (videos with sound, from text or a photo) | RunPod serverless ComfyUI, 48 GB GPU | about 3 minutes per 5-second clip |
 
@@ -92,7 +92,7 @@ Browser ─▶ Vercel ───────┼─▶ RunPod serverless: Qwen-Ima
 
 ### yAI Code (terminal agent)
 
-A Claude Code–style agent for the terminal that uses the same models as the site, plus **yAI 3 Coder** (Qwen3 Coder 30B), which only yAI Code can use. yAI Code offers yAI Ultra Flash (its default), yAI Ultra, yAI Q3.8 Max, yAI 3 Coder, yAI Q3.5 and yAI P4. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
+A Claude Code–style agent for the terminal that uses the same models as the site, plus **yAI 3 Coder** (Qwen3 Coder 30B), which only yAI Code can use. yAI Code offers yAI Lite (its default), yAI Ultra Flash, yAI Ultra, yAI Q3.8 Max, yAI 3 Coder and yAI Q3.5. It signs in with your yAI account, works on the files in the folder you start it from, and asks before it edits a file or runs a command.
 
 ```powershell
 cd path\to\yAI

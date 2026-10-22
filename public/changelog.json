@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.141",
+      "date": "2026-10-22",
+      "title": "yAI Lite is the default",
+      "items": [
+        {
+          "area": "Models",
+          "title": "yAI Lite by default",
+          "text": "yAI Lite (GLM-4.7 Flash, free) is the default model on the website, in yAI Code and for API calls that name no model. When it is busy the reply comes from DeepSeek Flash instead."
+        },
+        {
+          "area": "Models",
+          "title": "yAI P4 removed",
+          "text": "yAI P4 (Phi 4 Mini) is no longer offered. yAI Q3.5 stays as the model on the host PC."
+        }
+      ]
+    },
+    {
       "version": "1.0.140",
       "date": "2026-10-22",
       "title": "yAI Lite, a free model",
