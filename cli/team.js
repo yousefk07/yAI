@@ -164,7 +164,7 @@ module.exports = function create(d) {
       "", `Your part: ${me.task}`,
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
-      ...contractLines(),
+      ...contractLines(), ...notesLines(),
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
@@ -358,7 +358,7 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...notesLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -372,7 +372,7 @@ module.exports = function create(d) {
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
       ...workersLines(all), "",
-      ...contractLines(), ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
+      ...contractLines(), ...notesLines(), ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
       ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
@@ -516,6 +516,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     a.state = state.interrupted ? "stopped" : r.verdict ? "done" : "skipped";
     if (!r.verdict) a.step = r.lines[0];
     a.ended = Date.now();
+    finished(a, all);
     d.wake();
   }
 
@@ -535,6 +536,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     a.state = state.interrupted ? "stopped" : r.verdict ? "done" : "skipped";
     if (!r.verdict) a.step = r.lines[0];
     a.ended = Date.now();
+    finished(a, all);
     d.wake();
   }
 
@@ -558,15 +560,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     child.stderr.on("data", (b) => (err += b).length > 4000 && (err = err.slice(-4000)));
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       let e;
+      if (a.child !== child) return; // restarted or skipped from the board: this was the old process
       try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") {
         a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         const want = a.model || state.model; // the model picked for this agent
         if (e.model !== want) a.send({ type: "model", id: want });
         a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
-      } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
+      } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
       else if (e.type === "status" && e.text) a.step = String(e.text);
-      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); log({ k: "step", verb: e.verb, arg: e.arg }); }
+      // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
+      else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost || a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
+      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
       else if (e.type === "diff" && e.path) { a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
       else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
@@ -586,14 +591,30 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
         child.stdin.end();
+        finished(a, all);
       }
       d.wake();
     });
     child.on("exit", (code) => {
-      if (a.state === "starting" || a.state === "working") { a.state = state.interrupted ? "stopped" : "failed"; a.error ||= clip(err.trim().split("\n").pop() || `stopped (exit ${code})`, 200); }
+      if (a.child !== child) return; // restarted or skipped from the board: this was the old process
+      if (a.state === "starting" || a.state === "working") { a.state = state.interrupted ? "stopped" : "failed"; a.error ||= clip(err.trim().split("\n").pop() || `stopped (exit ${code})`, 200); if (a.state === "failed") say(a.name, "failed", "bad", a.error); }
       a.ended ||= Date.now();
       d.wake();
     });
+  }
+
+  // A finished agent, in the live feed: what it found (handed to the fixer), what it did, and a builder's hand-off
+  function finished(a, all) {
+    if (a.state !== "done") return;
+    a.summary = summaryOf(a);
+    if (a.role && a.role !== "fixer" && BAD.test(a.verdict || "")) {
+      const p = a.internal ? (a.text || []).filter((l) => l.trim() && !/^\W*VERDICT/i.test(l)).map(tidy) : problemsOf(a);
+      const fixer = all.some((x) => x.role === "fixer");
+      say(a.name, `${fixer ? "→ fixer: " : "found "}${p.length || "some"} problem${p.length === 1 ? "" : "s"}`, "bad", p[0] || "");
+    } else if (a.role === "fixer") say(a.name, a.summary, a.verdict === "FIXED" ? "ok" : "warn");
+    else if (a.verdict) say(a.name, `passed${a.internal && a.summary ? ` · ${a.summary.replace(/^Pass · /, "")}` : ""}`, "ok");
+    else say(a.name, `finished · ${a.summary}`);
+    if (!a.role) { const h = handoffs([a])[0]; if (h) say(a.name, "→ the others", "acc", h.text.split("\n").find((l) => l.trim()) || ""); }
   }
 
   // the last "VERDICT: X" an agent wrote
@@ -605,22 +626,6 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
 
   const ICON = { done: () => c.green("✓"), failed: () => c.red("✗"), stopped: () => c.yellow("■"), waiting: () => c.faint("○"), skipped: () => c.faint("–") };
   const ENDED = ["done", "failed", "stopped", "skipped"];
-  function boardLines(agents, tick) {
-    const w = ui.width();
-    const nameW = Math.max(...agents.map((a) => a.name.length));
-    return agents.map((a, i) => {
-      const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
-      // an agent still waiting has no time of its own yet (it showed the team's time, 2026-10-22)
-      const time = a.state === "waiting" ? "" : secs((a.ended || Date.now()) - a.started);
-      // with how many of its replies came from the fallback model (yAI Lite busy → DeepSeek Flash)
-      const model = a.model && !a.internal ? (state.models.find((m) => m.id === a.model)?.label || a.model).replace(/^yAI\s+/, "") + (a.fallbacks ? ` (${a.fallbacks} via fallback)` : "") + " · " : "";
-      const right = `${model}${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
-      const what = a.state === "done" ? ["finished", a.verdict, a.flag].filter(Boolean).join(" · ") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
-      const room = Math.max(8, w - nameW - right.length - 12);
-      // the number opens the agent (press it, or click the row)
-      return ` ${c.faint(String(i + 1).padStart(2))} ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length || a.flag ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
-    });
-  }
 
   // One agent's log as lines: what it said, its steps and their results, and its edits as diffs.
   // One row of the view: a multi-line command (node -e "…" over several lines) or note must not break the row, or the
@@ -763,6 +768,137 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     return cmds.reduce((p, cmd) => p.then(async (rs) => (signal?.aborted ? rs : [...rs, await one(cmd)])), Promise.resolve([]));
   }
 
+  // ---------- what the /team screens show (cli/teamview.js draws them; 2026-10-22, the "yAI Code Team" design) ----------
+  const V = require("./teamview")({ ui });
+  const screenW = () => (ui.screen ? ui.screen.width() : Math.max(60, (process.stdout.columns || 100) - 2));
+  const screenH = () => Math.max(16, (process.stdout.rows || 30) - (ui.screen ? 10 : 6));
+  const STAGES = [
+    { name: "PLAN", has: (p) => p < 1 }, { name: "BUILD", has: (p) => p === 1 }, { name: "JOIN", has: (p) => p > 1 && p < 1.5 },
+    { name: "CHECK", has: (p) => p >= 1.5 && p < 3 }, { name: "FIX", has: (p) => p >= 3 },
+  ];
+  const stageOf = (a) => STAGES.find((s) => s.has(a.phase || 1))?.name || "BUILD";
+  // the live feed (newest first): hand-offs, problems found, agents finishing or stuck, your notes
+  let feed = [], teamStarted = 0, teamNotes = [];
+  const say = (who, what, tone = "", quote = "") => { feed.unshift({ at: Date.now(), who, what, tone, quote: tidy(quote) }); if (feed.length > 80) feed.pop(); };
+  const clock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  const STUCK_MS = 120000; // no step for two minutes
+  const stuck = (a) => a.state === "working" && !a.paused && Date.now() - (a.lastMove || a.started) > STUCK_MS;
+  const money = (x) => (!x ? "" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
+  const tokensOf = (n) => (!n ? "0" : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const modelShort = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
+  // "Read js/x.js" → "Reading js/x.js"
+  const ING = { Read: "Reading", Edit: "Editing", Create: "Writing", Run: "Running", Search: "Searching for", List: "Looking in", Find: "Finding", Image: "Looking at", thinking: "Thinking", writing: "Writing", starting: "Starting" };
+  const plainStep = (s) => {
+    const t = row1(s), m = /^(\w+)\s*(.*)$/.exec(t);
+    if (!m) return t;
+    return ING[m[1]] ? `${ING[m[1]]}${m[2] ? " " + m[2] : "…"}` : t.charAt(0).toUpperCase() + t.slice(1);
+  };
+  const tidy = (s) => row1(String(s).replace(/\*\*|`/g, "").replace(/^[-*•]\s+/, ""));
+  // the problems in a checker's report: the bullets under **Problems** (or every bullet if it has no such label)
+  function problemsOf(a) {
+    const lines = (a.text || []).filter((l) => !/^\W*VERDICT/i.test(l));
+    const at = lines.findIndex((l) => /^\s*(\*\*|#+\s*)?(problems|issues|bugs|holes|failures)\b/i.test(l));
+    const from = at >= 0 ? lines.slice(at + 1) : lines;
+    const out = [];
+    for (const l of from) {
+      if (at >= 0 && /^\s*(\*\*[^*]+\*\*|#+\s)/.test(l)) break;
+      if (/^\s*([-*•]|\d+[.)])\s+/.test(l)) out.push(tidy(l.replace(/^\s*\d+[.)]\s+/, "")));
+    }
+    return out;
+  }
+  const linesIn = (files) => files.reduce((s, f) => { try { return s + require("fs").readFileSync(path.join(root, f), "utf8").split("\n").length; } catch { return s; } }, 0);
+  const shortFiles = (files) => { const n = files.map((f) => path.basename(f)); return `${n.slice(0, 3).join(", ")}${n.length > 3 ? ` +${n.length - 3}` : ""}`; };
+  // what a finished agent did, in one line
+  function summaryOf(a) {
+    const said = (a.text || []).filter((l) => l.trim() && !/^\W*VERDICT/i.test(l)).map(tidy);
+    if (a.internal) return `${a.verdict ? (BAD.test(a.verdict) ? "Fail" : "Pass") + " · " : ""}${said[0] || a.step || ""}`;
+    if (a.role === "fixer") return `${a.verdict === "FIXED" ? "Fixed" : a.verdict === "PARTLY" ? "Partly fixed" : "Finished"}${a.changed.size ? ` · ${shortFiles([...a.changed])}` : ""}`;
+    if (a.hasVerdict && a.role && a.verdict) {
+      if (!BAD.test(a.verdict)) return "No problems found";
+      const p = problemsOf(a);
+      return p.length ? `${p.length} problem${p.length === 1 ? "" : "s"} · ${p[0]}` : "Found problems";
+    }
+    if (a.changed.size) { const f = [...a.changed]; return `${shortFiles(f)} · ${linesIn(f)} lines`; }
+    return a.hasVerdict && a.role ? "Finished without a verdict" : "Finished · no files changed";
+  }
+  const cap = (s) => String(s || "").charAt(0).toUpperCase() + String(s || "").slice(1);
+  // what an agent is doing, in plain words
+  function actOf(a, all) {
+    if (a.state === "waiting") {
+      if (a.role === "fixer") { const n = all.filter((x) => x.role && x.role !== "fixer" && ENDED.includes(x.state) && BAD.test(x.verdict || "")).length; return `Starts when the checks finish${n ? ` · ${n} found problems so far` : ""}`; }
+      return `Starts ${a.step}`;
+    }
+    if (a.state === "skipped") return a.merged ? "Done by the reviewer" : cap(a.step || "not needed");
+    if (a.state === "failed") return cap(a.error || "failed");
+    if (a.state === "stopped") return "Stopped";
+    if (a.state === "done") return (a.summary ||= summaryOf(a)) + (a.flag ? ` · ${a.flag}` : "");
+    if (a.paused) return "Paused · p to resume";
+    if (stuck(a)) return `No progress for ${Math.floor((Date.now() - (a.lastMove || a.started)) / 60000)}m · r retry · s skip · enter to look`;
+    const now = a.plan?.steps?.[a.plan.done];
+    return now ? cap(now) : plainStep(a.step);
+  }
+  const stOf = (a) => a.state === "waiting" ? "wait" : a.state === "skipped" ? "skip" : a.state === "stopped" ? "stopped" : a.state === "failed" ? "fail"
+    : a.state === "done" ? (a.verdict ? (BAD.test(a.verdict) && a.role !== "fixer" ? "fail" : a.internal || a.role === "fixer" || a.hasVerdict ? "pass" : "done") : "done") : stuck(a) ? "stuck" : "work";
+  const pctOf = (a) => {
+    if (ENDED.includes(a.state)) return 100;
+    if (a.state === "waiting") return 0;
+    if (a.plan?.steps?.length) return Math.min(95, Math.round(((a.plan.done + 0.4) / a.plan.steps.length) * 100));
+    return Math.min(90, 5 + 5 * (a.log || []).filter((e) => e.k === "step").length);
+  };
+  // did it actually run? (one stopped or skipped before it started shows no time or cost)
+  const ran = (a) => !(["stopped", "skipped"].includes(a.state) && (a.ended || 0) - (a.started || 0) < 1000);
+  // the board (run screen)
+  function runView(agents, task, tick, sel, estimate) {
+    const doneN = agents.filter((a) => ENDED.includes(a.state)).length, working = agents.filter((a) => a.state === "working" || a.state === "starting").length;
+    const cost = agents.reduce((s, a) => s + (a.cost || 0), 0);
+    const stages = [];
+    for (const S of STAGES) {
+      const rows = agents.filter((a) => S.has(a.phase || 1));
+      if (!rows.length) continue;
+      const w = rows.filter((a) => a.state === "working" || a.state === "starting").length;
+      const bad = rows.filter((a) => a.state === "done" && BAD.test(a.verdict || "") && a.role !== "fixer").length;
+      const all = rows.every((a) => ENDED.includes(a.state));
+      const span = all ? Math.max(...rows.map((a) => a.ended || 0)) - Math.min(...rows.map((a) => a.started || Date.now())) : 0;
+      const note = all ? (rows.every((a) => a.state === "skipped") ? "not needed" : rows.every((a) => a.state === "stopped" || a.state === "skipped") ? "stopped" : `done in ${secs(span)}${S.name === "BUILD" && rows.length > 1 ? ` · ${rows.length} at the same time` : ""}`)
+        : [w && `${w} working`, bad && `${bad} found problems`, !w && rows.every((a) => a.state === "waiting") && (S.name === "FIX" ? "only if needed" : "waiting")].filter(Boolean).join(" · ");
+      stages.push({ name: S.name, note, current: w > 0, all, total: rows.length, done: rows.filter((a) => ENDED.includes(a.state)).length, working: w,
+        rows: rows.map((a) => ({ n: agents.indexOf(a) + 1, st: stOf(a), name: a.name, act: actOf(a, agents), pct: pctOf(a),
+          time: a.state === "waiting" || !ran(a) ? "" : secs((a.ended || Date.now()) - a.started),
+          cost: !ran(a) ? "" : a.internal ? "free" : a.cost ? money(a.cost) : ENDED.includes(a.state) && a.state !== "skipped" ? "free" : "" })) });
+    }
+    const strip = [...stages.map((g) => ({ label: `${cap(g.name.toLowerCase())}${g.current ? ` · ${g.working} working` : ""}`, total: g.total, done: g.done, working: g.working, current: g.current, past: g.all })),
+      { label: "Done", total: 0, done: 0, past: doneN === agents.length }];
+    return {
+      title: `${c.bold(c.ink(clip(task, 60)))}${c.faint(` · ${agents.length} agents`)}`,
+      stats: [`${c.bold(c.ink(`${doneN} / ${agents.length}`))} ${c.faint("done")}`, working ? `${c.bold(c.ink(String(working)))} ${c.faint("working")}` : "",
+        c.bold(c.ink(secs(Date.now() - teamStarted))), `${c.bold(c.ink(money(cost) || "$0.000"))}${estimate ? c.faint(` of ~${money(estimate)}`) : ""}`],
+      strip, stages, sel, tick, width: screenW(), height: screenH(),
+      feed: feed.map((f) => ({ t: clock(f.at - teamStarted), who: f.who, whoTone: f.tone, what: f.what, quote: f.quote })),
+    };
+  }
+  // one agent's screen
+  function agentView(a, agents, tick) {
+    const later = agents.filter((x) => (x.phase || 1) > (a.phase || 1) && x.state === "waiting").map((x) => x.name);
+    const touch = a.internal ? [["the page", "opens it"]]
+      : !a.role ? [...a.files.slice(0, 4).map((f) => [path.basename(f), "write"]), ...(a.files.length > 4 ? [[`+${a.files.length - 4} more`, "write"]] : []), ["commands", "ask first"]]
+      : a.readOnly ? [["every file", "read only"], ["commands", "read-only checks"]]
+      : a.role === "tester" ? [["tests", "write"], ["the app", "read only"], ["commands", "safe checks"]]
+      : a.role === "designer" ? [["CSS, HTML", "write"], ["commands", "safe checks"]]
+      : [["any file", "write"], ["commands", "safe checks"]];
+    return {
+      tabs: agents.filter((x) => x.state !== "waiting" || x === a).map((x) => ({ name: x.name, st: stOf(x), on: x === a })),
+      side: {
+        n: agents.indexOf(a) + 1, name: a.name, where: `${cap(stageOf(a).toLowerCase())} stage · ${a.internal ? "built-in" : modelShort(a.model) || "—"}`, desc: a.task,
+        stats: [[a.state === "waiting" ? "—" : secs((a.ended || Date.now()) - a.started), a.paused ? "paused" : a.state === "working" ? "running" : a.state], [tokensOf(a.tokens), "tokens"], [a.internal ? "free" : money(a.cost) || "$0.000", ENDED.includes(a.state) ? "in all" : "so far"]],
+        steps: (a.plan?.steps || []).map((l, i) => ({ l, st: i < a.plan.done || ENDED.includes(a.state) ? "done" : i === a.plan.done && a.state === "working" ? "work" : "next" })),
+        touch, waiting: later,
+      },
+      body: logLines(a, agents, tick).slice(3), width: screenW(), height: screenH(), tick,
+    };
+  }
+  // what the user said while the team worked, for the agents that start later
+  const notesLines = () => (teamNotes.length ? ["", "Notes from the user while the team worked (follow them):", ...teamNotes.map((n) => `- ${n}`)] : []);
+
   let lastTeam = null; // the last team's agents, for /team log
   function showLog(arg) {
     if (!lastTeam) return print(c.yellow("   No team has run yet in this session."));
@@ -832,15 +968,61 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...group("If anything is found", (p) => p === 3),
       ...group("At the end", (p) => p > 3),
     ];
+    // The pick screen (teamview.pickLines, 2026-10-22): the rows as stages, each with its model and an estimate, presets
+    // on q / r / e, and c to talk the plan over instead. The rows are built stage by stage, so the screen's order is
+    // the checklist's.
+    const items = rows.filter((r) => r.kind !== "head");
+    // a role's typical run: [requests, prompt in thousands of tokens, output in thousands, minutes], from real runs
+    // (2026-10-22: the desktop OS team made ~15 requests an agent, 93% of each prompt cached, ~4k tokens out)
+    const PROFILE = { architect: [6, 12, 5, 1.5], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
+    const estOf = (r) => {
+      if (r.role?.internal) return { usd: 0, min: 0.5 };
+      const [req, ctx, out, min] = PROFILE[r.role?.key || "builder"] || PROFILE.builder;
+      const p = state.models.find((m) => m.id === r.model)?.price || { in: 0, cached: 0, out: 0 };
+      return { usd: (req * ctx * 1000 * (0.07 * (p.in || 0) + 0.93 * (p.cached ?? p.in ?? 0)) + out * 1000 * (p.out || 0)) / 1e6, min };
+    };
+    const estText = (r) => { if (r.role?.internal) return "free"; const e = estOf(r); return `${e.min < 1 ? "<1" : Math.round(e.min)}m · ${e.usd ? money(e.usd) : "free"}`; };
+    const totals = () => {
+      const on = items.filter((r) => r.on);
+      return { usd: on.reduce((s, r) => s + estOf(r).usd, 0), min: STAGES.reduce((s, S) => s + Math.max(0, ...on.filter((r) => S.has(r.role ? r.role.phase : 1)).map((r) => estOf(r).min)), 0) };
+    };
+    // presets: Quick (builders, tester, fixer, merger when there are 3+ builders, yAI's own checks), Recommended (each
+    // role's default), Everything
+    const defOn = (r) => { const R = ROLES.find((x) => x.key === r.role.key); return !!(typeof R.on === "function" ? R.on(task, agents.length) : R.on); };
+    const PRESETS = [
+      { key: "q", label: "Quick", on: (r) => ["tester", "fixer"].includes(r.role.key) || (r.role.key === "merger" && agents.length >= 3) || (!!r.role.internal && defOn(r)) },
+      { key: "r", label: "Recommended", on: defOn },
+      { key: "e", label: "Everything", on: () => true },
+    ];
+    const count = (p) => items.filter((r) => (r.role ? p.on(r) : r.on)).length;
+    const NOTES = { PLAN: "first", BUILD: `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
     const picked = await d.checklist({
-      title: "Who's on the team?", note: "edits are made without asking; other commands still ask", rows, models,
-      start: (items) => {
-        const b = items.filter((x) => !x.role && x.on).length, n = items.filter((x) => x.on).length;
-        return b ? `Start ${n} agent${n === 1 ? "" : "s"}` : "Pick at least one builder";
+      rows, models, start: () => "",
+      render: (sel) => {
+        const t = totals(), n = items.filter((r) => r.on).length, b = items.filter((r) => !r.role && r.on).length;
+        const groups = STAGES.map((S) => ({ name: S.name, note: NOTES[S.name], rows: items.filter((r) => S.has(r.role ? r.role.phase : 1)) })).filter((g) => g.rows.length);
+        return V.pickLines({
+          title: "Pick your team", width: screenW(), sel,
+          sub: `The lead split "${clip(task, 60)}" into ${agents.length} builder job${agents.length === 1 ? "" : "s"}. Choose who else joins and which model each one uses.`,
+          presets: PRESETS.map((p) => ({ label: p.label, count: count(p), on: items.every((r) => !r.role || !!r.on === p.on(r)) })),
+          start: { n: b ? n : 0, time: `~${Math.max(1, Math.round(t.min))} min`, cost: t.usd ? `~${money(t.usd)}` : "free", parallel: b },
+          groups: groups.map((g) => ({ ...g, rows: g.rows.map((r) => ({ n: items.indexOf(r) + 1, label: r.label, on: r.on, model: modelShort(r.model), desc: r.desc, est: estText(r), builtIn: !!r.role?.internal })) })),
+        });
       },
+      onKey: (s, key, { draw, finish }) => {
+        const p = !key.ctrl && PRESETS.find((x) => x.key === s);
+        if (p) { for (const r of items) if (r.role) r.on = p.on(r); draw(); return true; }
+        if (s === "c" && !key.ctrl) { finish({ chat: true }); return true; }
+        return false;
+      },
+      keys: [["↑↓", "move"], ["space", "toggle"], ["← →", "model"], ["q r e", "presets"], ["enter", "start"], ["c", "chat"], ["esc", "cancel"]],
     });
     if (!picked) return print(c.dim("   Cancelled."));
-    const items = rows.filter((r) => r.kind !== "head");
+    if (picked.chat) {
+      state.pendingContext.push(`I ran /team for: "${task}". The lead split it into: ${agents.map((a) => `${a.name} (${a.task}${a.files.length ? `; files: ${a.files.join(", ")}` : ""})`).join("; ")}. I want to talk the plan over before starting; when it's right I'll run /team again.`);
+      return print(c.dim("   Not started. Say what you'd change about the plan, then run /team again."));
+    }
+    const estimate = totals().usd;
     items.forEach((r, i) => (r.on = picked[i]));
     const builderRows = items.filter((r) => !r.role);
     agents.forEach((a, i) => (a.model = builderRows[i].model));
@@ -910,15 +1092,19 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     let drawn = 0, tick = 0, wake = () => {}, over = false, asking = false;
     let viewing = null; // the agent you're watching, or null for the board
     d.wake = () => wake();
+    let sel = 0; // the agent picked on the board with ↑↓
+    feed = []; teamNotes = []; teamStarted = Date.now();
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
       // mustn't draw it again under the reports
       // while an agent's question is open it owns the bottom of the screen; redrawing the board would wipe it
       if (!tty || over || asking) return;
-      let lines = viewing ? logLines(viewing, agents, tick++) : [...boardLines(agents, tick++), "", `   ${c.faint(`press 1–${agents.length}${ui.screen ? " or click an agent" : ""} to watch it`)}`];
+      const t = tick++;
+      // the screens (cli/teamview.js): the team at work, or the agent you opened
+      let lines = viewing ? V.agentLines(agentView(viewing, agents, t)) : V.runLines(runView(agents, task, t, sel, estimate));
       if (ui.screen) return ui.screen.setExtra(["", ...lines]); // the full-window app keeps the board at the end
-      // the scrolling terminal redraws in place, so an agent's view shows its latest lines
-      if (viewing) lines = [...lines.slice(0, 3), ...lines.slice(3).slice(-Math.max(5, (process.stdout.rows || 30) - 8))];
+      // the scrolling terminal redraws in place, so it never draws more lines than the window has
+      lines = lines.slice(0, Math.max(10, (process.stdout.rows || 30) - 3));
       if (drawn) process.stdout.write(`\x1b[${drawn}A`);
       for (const l of lines) process.stdout.write("\r\x1b[K" + l + "\n");
       if (drawn > lines.length) process.stdout.write("\x1b[J");
@@ -944,18 +1130,76 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       draw();
       ui.screen?.render();
     };
+    // An agent that is stuck (or failed, or stopped) can be restarted from scratch, and a stuck or waiting one skipped.
+    // The old process is let go first, so nothing it still sends reaches the board.
+    const letGo = (a) => { const old = a.child; a.child = null; if (old) { try { old.stdin.end(); } catch {} old.kill(); } };
+    const retry = (a) => {
+      if (!a || a.state === "waiting" || a.state === "skipped") return;
+      letGo(a);
+      Object.assign(a, { ended: 0, error: "", verdict: "", summary: "", plan: null, paused: false, flag: "" });
+      say(a.name, "restarted by you", "you");
+      if (a.role === "browser") startBrowser(a, task, agents);
+      else if (a.internal) startInternal(a, task, agents);
+      else startAgent(a, task, agents);
+      draw();
+    };
+    const skip = (a) => {
+      if (!a || !(a.state === "waiting" || stuck(a) || a.paused)) return;
+      letGo(a);
+      Object.assign(a, { state: "skipped", step: "skipped by you", ended: Date.now() });
+      say(a.name, "skipped by you", "you");
+      wake();
+    };
+    const togglePause = (a) => {
+      if (!a?.send || a.state !== "working") return;
+      a.paused = !a.paused;
+      a.send({ type: a.paused ? "pause" : "resume" });
+      say(a.name, a.paused ? "paused by you (it stops after this step)" : "resumed", "you");
+      draw();
+    };
+    // keys: ↑↓ and enter on the board; tab, p and r in an agent's view; r and s act on a stuck agent, so they don't take
+    // the first letter of a note you're typing
     state.keyHook = (s, key) => {
       if (over) return false;
-      if (viewing && (key.name === "escape" || key.name === "left")) { open(null); return true; }
-      if (/^[1-9]$/.test(s || "") && !d.inputLine() && Number(s) <= agents.length) { open(agents[Number(s) - 1]); return true; }
+      const typing = !!d.inputLine();
+      if (viewing) {
+        if (key.name === "escape") { open(null); return true; }
+        if (key.name === "tab") { const list = agents.filter((x) => x.state !== "waiting"); open(list[(list.indexOf(viewing) + 1) % list.length] || viewing); return true; }
+        if (!typing && s === "p" && viewing.state === "working") { togglePause(viewing); return true; }
+        if (!typing && s === "r" && ["failed", "stopped"].concat(stuck(viewing) ? ["working"] : []).includes(viewing.state)) { retry(viewing); return true; }
+        return false;
+      }
+      if (typing) return false;
+      if (key.name === "up") { sel = (sel + agents.length - 1) % agents.length; draw(); return true; }
+      if (key.name === "down") { sel = (sel + 1) % agents.length; draw(); return true; }
+      if (key.name === "return" || key.name === "enter") { open(agents[sel]); return true; }
+      const a = agents[sel];
+      if (s === "r" && a && (stuck(a) || a.state === "failed" || a.state === "stopped")) { retry(a); return true; }
+      if (s === "s" && a && (stuck(a) || a.paused)) { skip(a); return true; }
+      if (/^[1-9]$/.test(s || "") && Number(s) <= agents.length) { open(agents[Number(s) - 1]); return true; }
       return false;
     };
     state.teamKeys = () => viewing
-      ? [["esc", "back to the team"], [`1–${agents.length}`, "another agent"], ["PgUp", "scroll back"]]
-      : [[`1–${agents.length}`, "watch an agent"], ...(ui.screen ? [["click", "an agent"]] : []), ["esc", "stop them all"]];
+      ? [["esc", "back to team"], ["tab", "next agent"], ...(viewing.state === "working" ? [["p", viewing.paused ? "resume it" : "pause it"]] : []), ...(["failed", "stopped"].includes(viewing.state) || stuck(viewing) ? [["r", "restart it"]] : [])]
+      : [["↑↓", "pick agent"], ["enter", "watch it"], ...(agents[sel] && (stuck(agents[sel]) || ["failed", "stopped"].includes(agents[sel].state)) ? [["r", "retry"]] : []), ...(agents[sel] && (stuck(agents[sel]) || agents[sel].paused) ? [["s", "skip"]] : []), ["esc", "stop all"]];
+    // what you type goes to the whole team (now, and in the briefs of agents that start later), or to the agent you're watching
+    state.teamInput = (text) => {
+      if (over) return;
+      if (viewing) {
+        if (viewing.send && viewing.state === "working") { viewing.send({ type: "note", text }); say("you", `→ ${viewing.name}: ${text}`, "you"); }
+        else say("you", `(${viewing.name} isn't working, so it didn't get: ${text})`, "you");
+      } else {
+        teamNotes.push(text);
+        for (const a of agents) if (a.send && a.state === "working") a.send({ type: "note", text });
+        say("you", `note: ${text}`, "you");
+      }
+      draw();
+    };
+    state.teamInput.placeholder = () => (viewing ? `Message ${viewing.name} directly…` : "Add a note for the whole team…");
+    state.teamInput.hint = () => (viewing ? `only ${viewing.name} sees this` : "read after each step");
     ui.screen?.onClick((row) => {
       if (over) return;
-      if (viewing) { if (/back to the team/.test(row)) open(null); return; }
+      if (viewing) { if (/esc ← team/.test(row)) open(null); return; }
       const a = agents.find((x) => new RegExp(`^\\s*\\d+\\s\\S\\s${x.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s`).test(row));
       if (a) open(a);
     });
@@ -1010,13 +1254,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           else if (a.role === "browser") startBrowser(a, task, agents);
           else if (a.internal) startInternal(a, task, agents);
-          else startAgent(a, task, agents);
+          else {
+            if (a.role === "fixer") { const n = agents.filter(concern).length; say("fixer", `started · ${n} report${n === 1 ? "" : "s"} to fix`, "acc"); }
+            startAgent(a, task, agents);
+          }
         }
       }
     };
     try {
       await new Promise((resolve) => {
-        const timer = setInterval(() => { draw(); report(); }, 120);
+        const timer = setInterval(() => {
+          // an agent with no step for two minutes is stuck: once in the feed (the board offers r retry · s skip)
+          for (const a of agents) if (stuck(a) && !a.stuckSaid) { a.stuckSaid = true; say(a.name, "has not done anything for 2m", "warn"); }
+          draw(); report();
+        }, 120);
         wake = async () => {
           if (over) return;
           next();
@@ -1042,11 +1293,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       // the full-window app: the board's last state goes into the conversation, where it stays
       state.keyHook = null;
       state.teamKeys = null;
+      state.teamInput = null;
       state.teamView = false;
       ui.screen?.onClick(null);
       viewing = null;
       lastTeam = agents;
-      if (ui.screen) { ui.screen.setExtra([]); ui.screen.toBottom(); for (const l of boardLines(agents, 0)) print(l); }
+      if (ui.screen) { ui.screen.setExtra([]); ui.screen.toBottom(); for (const l of V.runLines(runView(agents, task, 0, -1, estimate))) print(l); }
       state.busy = false;
       state.abort = null;
       d.syncMute();
@@ -1135,5 +1387,5 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     );
   }
 
-  return { team, browserCheck }; // browserCheck: for trying the check on its own
+  return { team, browserCheck, _views: { runView, agentView, V } }; // browserCheck: for trying the check on its own; _views: for testing the screens
 };

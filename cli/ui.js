@@ -229,6 +229,8 @@ let output = false; // the last line was a step's output (the │ gutter), not a
 // as events instead of being drawn as terminal text. Anything else printed still arrives, as plain "out" text.
 let sink = null;
 const setSink = (fn) => (sink = fn);
+// An event for whatever is listening on --stdio (a /team agent's progress, for the board); nothing in a terminal.
+const event = (ev) => { if (sink) sink(ev); };
 // Remote Control (2026-10-21): while a phone task runs, the same events also go to the phone (the terminal still draws
 // everything), so the phone can show a chat instead of a terminal dump.
 let tap = null;
@@ -667,7 +669,7 @@ function resetSections() {
 }
 
 module.exports = {
-  c, print, spinner, setSink, markdownWriter, inline, renderTable, withTables, isTableRow, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
+  c, print, spinner, setSink, event, markdownWriter, inline, renderTable, withTables, isTableRow, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
   welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, setTap, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };

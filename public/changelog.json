@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.150",
+      "date": "2026-10-22",
+      "title": "A new /team",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Pick your team",
+          "text": "The agents are laid out as stages (Plan, Build, Join, Check, Fix), each with its model (← → to change it) and an estimate of its time and cost. Presets on q, r and e (Quick, Recommended, Everything); the Start box shows the whole run's estimated time and cost; c talks the plan over instead of starting."
+        },
+        {
+          "area": "yAI Code",
+          "title": "The team at work",
+          "text": "A bar of the stages on top, then every agent under its stage with what it is doing in plain words, a progress bar from its own plan, its time and cost. A live feed down the right shows hand-offs, problems found, agents finishing or stuck, and your notes. A stuck agent can be retried (r) or skipped (s); ↑↓ and enter open any agent."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Watching one agent",
+          "text": "Tabs for every agent, and a side panel with its stage and model, time, tokens and cost, its steps, what it may change and who waits on it, next to its transcript. Tab moves to the next agent, p pauses it after its current step, r restarts a stuck one."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Talk to the team",
+          "text": "What you type while a team runs goes to every working agent (and to the ones that start later); while you watch one agent, it goes to that agent only."
+        }
+      ]
+    },
+    {
       "version": "1.0.148",
       "date": "2026-10-22",
       "title": "/team on big projects",

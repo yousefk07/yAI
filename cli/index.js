@@ -372,13 +372,16 @@ function select(opts) {
 // A checklist (2026-10-21, the /team picker): rows to tick, grouped under headings, and a Start row. Resolves to the
 // rows' on/off values (heading rows left out), or null when cancelled. Rows with a `model` show it, and ← → changes it
 // to the next or previous of `models` ({ id, short }); the new id is left on the row (2026-10-22: a model per agent).
-async function checklist({ title, note = "", rows, start, models = [] }) {
+// The /team picker draws itself (`render(sel)` → lines), adds its own keys (`onKey(s, key, { sel, draw, finish })`,
+// true when it handled one) and its own key hints (`keys`).
+async function checklist({ title, note = "", rows, start, models = [], render, onKey: extraKey, keys }) {
   spinner.stop();
   const items = rows.filter((r) => r.kind !== "head");
   if (!process.stdout.isTTY || state.askHook) return items.map((r) => !!r.on);
   let sel = 0, drawn = [];
+  state.checklistKeys = keys || null;
   const draw = () => {
-    const lines = LOOK.checklistLines({ title, note, rows, sel, start: start(items), models });
+    const lines = render ? render(sel) : LOOK.checklistLines({ title, note, rows, sel, start: start(items), models });
     if (SCREEN.on) SCREEN.setExtra(["", ...lines]);
     else {
       if (drawn.length) process.stdout.write(`\x1b[${drawn.length}A`);
@@ -397,6 +400,7 @@ async function checklist({ title, note = "", rows, start, models = [] }) {
       process.stdin.removeListener("keypress", onKey);
       state.selecting = false;
       state.checklistOpen = false;
+      state.checklistKeys = null;
       state.cancelSelect = null;
       if (SCREEN.on) SCREEN.setExtra([]);
       else process.stdout.write(`\x1b[${drawn.length}A\r\x1b[J`);
@@ -408,6 +412,7 @@ async function checklist({ title, note = "", rows, start, models = [] }) {
       if (state.inMouse) return;
       const n = items.length + 1; // the items and the Start row
       if (key.name === "escape" || (key.ctrl && key.name === "c")) return finish(null);
+      if (extraKey && extraKey(s, key, { sel, draw, finish })) return;
       if (key.name === "up") { sel = (sel + n - 1) % n; return draw(); }
       if (key.name === "down" || key.name === "tab") { sel = (sel + 1) % n; return draw(); }
       if (key.name === "space" && sel < items.length) { items[sel].on = !items[sel].on; return draw(); }
@@ -698,6 +703,12 @@ function add(a, b) {
 // carries the task-specific rules.
 const TEAM_AGENT = !!process.env.YAI_TEAM_AGENT;
 const TEAM_SKIP = new Set(["service", "ask_user"]);
+// A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
+// cost, the tokens it has processed, and how many replies came from the fallback model.
+function teamProgress() {
+  if (!TEAM_AGENT) return;
+  ui.event({ type: "progress", plan: state.plan ? { steps: state.plan.steps, done: state.plan.done } : null, cost: state.cost.session, tokens: state.teamTokens || 0, fallbacks: state.fallbacks || 0 });
+}
 function teamPrompt(shell, toolDocs) {
   return `You are one agent in a yAI Code team, working in a project folder on your own part of a bigger task.
 
@@ -721,7 +732,8 @@ ${toolDocs}${FOCUS.block()}
 - Write long files in parts of at most 60 lines (write_file, then write_file with <append>true</append>).
 - Check your work when you can (a syntax check such as node --check file.js, or the tests). Delete scratch files.
 - If a tool returns an error, fix the cause instead of repeating the call.
-- Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.${projectNotes()}`;
+- Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.
+- Start your first reply with a short plan of 3 to 5 steps in plain words, between <plan> and </plan>, one numbered step per line. When a whole step is finished, start your next reply with <done>N</done> (N = steps finished so far). yAI shows these as your progress.${projectNotes()}`;
 }
 
 // The tools as an OpenAI-style list, for hosts that call tools natively (DeepSeek's API, 2026-10-22). Every argument is
@@ -898,13 +910,15 @@ SCREEN.parts.input = () => {
     return { label: "›", text: state.askHidden ? "•".repeat(text.length) : text, cursor: rl.cursor, placeholder: state.askLabel || "", active: true };
   }
   // a question form or an approval card has the keys; the input stays out of it
-  if (state.formOpen || state.checklistOpen) return { text: "", cursor: 0, placeholder: "Answer above, or choose Chat about this to talk it over", active: false, caret: false };
+  if (state.formOpen || state.checklistOpen) return { text: "", cursor: 0, placeholder: state.checklistKeys ? "Press c to chat about the plan instead" : "Answer above, or choose Chat about this to talk it over", active: false, caret: false };
+  // a /team run says who a note goes to (the whole team, or the agent you're watching)
+  if (state.busy && state.teamInput) return { text, cursor: rl ? rl.cursor : 0, placeholder: state.teamInput.placeholder?.() || "Add a note for the whole team…", hint: state.teamInput.hint?.() || "read after each step", active: false };
   if (state.busy) return { text, cursor: rl ? rl.cursor : 0, placeholder: state.selecting ? "Or tell me what to do instead" : "Add a note while I work…", hint: "I'll read it after this step", active: false };
   return { text, cursor: rl ? rl.cursor : 0, placeholder: placeholder(), hint: text ? "" : state.phase === "welcome" ? "enter to send" : "", active: true };
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? state.checklistKeys || [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
@@ -1183,6 +1197,8 @@ function setupReadline() {
       const text = lines.join("\n");
       lines = [];
       if (state.busy) {
+        // while a /team runs, what you type is a note for the team (or the agent you're watching)
+        if (state.teamInput && text.trim()) return state.teamInput(text.trim());
         if (text.trim()) {
           queue.push(text);
           print(c.dim(`   Queued: ${text.split("\n")[0].slice(0, 60)}`));
@@ -1505,6 +1521,7 @@ async function callModel() {
       state.cost.session += ((promptTokens - cached) * price.in + cached * (price.cached ?? price.in) + (usage?.out ?? seen) * price.out) / 1e6;
     }
     state.lastPromptTokens = promptTokens;
+    state.teamTokens = (state.teamTokens || 0) + Math.round(promptTokens) + (usage?.out ?? seen); // for the /team board
     seen = 0;
   } catch (err) {
     if (!state.interrupted) {
@@ -1872,7 +1889,10 @@ async function runAgent(content) {
       if (plan) pushUser(plan);
     }
     for (let step = 0; step < MAX_STEPS; step++) {
+      // paused from the /team board: wait here, between steps, until it's resumed or stopped
+      while (state.paused && !state.interrupted) await new Promise((r) => setTimeout(r, 250));
       const text = await callModel();
+      teamProgress();
       spinner.stop();
       if (state.interrupted) {
         if (text.trim()) state.messages.push({ role: "assistant", content: text });
@@ -2002,6 +2022,8 @@ async function runAgent(content) {
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
+      // notes the user sent from the /team board while this agent worked, read with this step's result
+      if (state.notes?.length) pushUser(state.notes.splice(0).map((n) => `A note from the user, sent while you work: ${n}`).join("\n"));
       if (idle >= 25) {
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept checking without changing anything, so it was stopped.")} ${c.dim("Its changes are kept.")}`);
         break;
@@ -3137,6 +3159,10 @@ async function stdioMode() {
     } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; send({ type: "done", stats: state.lastStats || "", ...info() }); }
     else if (msg.type === "model" && state.models.some((m) => m.id === msg.id)) { state.model = msg.id; prewarm(); send({ type: "done", stats: state.lastStats || "", ...info() }); }
     else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
+    // from the /team board: a note read with the agent's next step result, and pause / resume between steps
+    else if (msg.type === "note" && String(msg.text || "").trim()) (state.notes ||= []).push(String(msg.text).slice(0, 2000));
+    else if (msg.type === "pause") state.paused = true;
+    else if (msg.type === "resume") state.paused = false;
   });
   lines.on("close", () => process.exit(0));
 }
