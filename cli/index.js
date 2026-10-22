@@ -538,7 +538,7 @@ function showHelp() {
 const padVis = (s, n) => s + " ".repeat(Math.max(0, n - ui.stripAnsi(s).length));
 
 // ---------- /model: a table to pick from ----------
-const SPEED = { "deepseek-v4-pro": "fast", "deepseek-v4.1-flash": "fast", "qwen3-coder-30b-cloud": "~60 tok/s" };
+const SPEED = { "deepseek-v4-pro": "fast", "deepseek-v4.1-flash": "fast", "glm-4.7-flash": "free", "qwen3-coder-30b-cloud": "~60 tok/s" };
 async function modelPicker() {
   let ultraLeft = "";
   try {

@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.140",
+      "date": "2026-10-22",
+      "title": "yAI Lite, a free model",
+      "items": [
+        {
+          "area": "Models",
+          "title": "yAI Lite (GLM-4.7 Flash)",
+          "text": "A free model on Z.ai's own API, for quick questions and light coding. When the free model is busy it moves to GLM-4.7 FlashX (a few cents per million tokens), then DeepSeek Flash. Past your daily allowance it keeps working on the free model alone. Text only."
+        }
+      ]
+    },
+    {
       "version": "1.0.139",
       "date": "2026-10-22",
       "title": "Tables drawn as tables",
