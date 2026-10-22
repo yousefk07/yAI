@@ -584,7 +584,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const nameW = Math.max(...agents.map((a) => a.name.length));
     return agents.map((a, i) => {
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
-      const time = secs((a.ended || Date.now()) - a.started);
+      // an agent still waiting has no time of its own yet (it showed the team's time, 2026-10-22)
+      const time = a.state === "waiting" ? "" : secs((a.ended || Date.now()) - a.started);
       const model = a.model && !a.internal ? (state.models.find((m) => m.id === a.model)?.label || a.model).replace(/^yAI\s+/, "") + " · " : "";
       const right = `${model}${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
       const what = a.state === "done" ? ["finished", a.verdict, a.flag].filter(Boolean).join(" · ") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
@@ -846,6 +847,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
     // web work: yAI opens the page in a browser between the builders and the checkers
     if (entryPage(agents)) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
+    // the board lists them in the order they run (2026-10-22: the architect, which runs first, was listed 9th)
+    agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
     const layout = layoutLines(agents);
     if (layout.length) {
       let made = [];

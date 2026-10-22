@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.145",
+      "date": "2026-10-22",
+      "title": "The /team board in running order",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Agents listed in the order they run",
+          "text": "The architect is listed first, then the builders, the merger and designer, yAI's own checks, the checkers, the fixer and the spec checker. An agent that hasn't started shows no time instead of the whole team's."
+        }
+      ]
+    },
+    {
       "version": "1.0.144",
       "date": "2026-10-22",
       "title": "Neater agent reports",
