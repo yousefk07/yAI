@@ -59,6 +59,7 @@ module.exports = function create(d) {
   const printMarkdown = (text) => {
     const w = ui.markdownWriter();
     for (const line of String(text).split("\n")) w(line);
+    w.end();
   };
   const relPath = (abs) => T.rel(ctx, abs);
   // Models that can see images, best first: yAI Ultra (always running, so no GPU to wake; each look costs a few cents

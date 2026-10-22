@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.139",
+      "date": "2026-10-22",
+      "title": "Tables drawn as tables",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Markdown tables line up",
+          "text": "A table in a reply, an agent view or a /team report is drawn with aligned columns and a header rule instead of raw | pipes. Cells too wide for the terminal wrap inside their column."
+        }
+      ]
+    },
+    {
       "version": "1.0.138",
       "date": "2026-10-22",
       "title": "Widgets removed",

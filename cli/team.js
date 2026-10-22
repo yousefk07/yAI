@@ -601,9 +601,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     if (!a.log) return [...out, `   ${c.dim(a.state === "skipped" ? `It didn't run: ${a.step}.` : `It hasn't started yet: it starts ${a.step}.`)}`];
     const TONE = { error: c.red, warn: c.yellow };
     // what the agent says is set off by one blank line; steps in a row stay together, and empty lines are dropped
-    let gap = false, fence = false;
+    let gap = false, fence = false, table = [];
     const blank = () => { if (out[out.length - 1] !== "") out.push(""); };
+    // a table's rows are collected, then drawn as one aligned table (or as text, if they weren't a table after all)
+    const flushTable = () => {
+      if (!table.length) return;
+      if (gap) { blank(); gap = false; }
+      for (const l of ui.withTables(table, w - 4, (x) => wrapText(x, w - 4).map((y) => c.ink(md(y))))) out.push(`   ${l}`);
+      table = [];
+    };
     for (const e of a.log) {
+      if (e.k === "text" && !fence && ui.isTableRow(e.line)) { table.push(e.line); continue; }
+      if (!(e.k === "text" && !e.line.trim())) flushTable();
       if (e.k === "brief") out.push(`   ${c.faint("Its part:")} ${c.dim(clip(row1(e.text), w - 14))}`, "");
       else if (e.k === "gap") gap = true;
       else if (e.k === "text") {
@@ -632,6 +641,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.k === "ask") out.push(` ${c.yellow("?")} ${c.ink(row1(e.text))} ${c.dim(clip(row1(e.detail), w - row1(e.text).length - 6))}`);
       else if (e.k === "error") out.push(` ${c.red("✗")} ${c.red(clip(row1(e.text), w - 4))}`);
     }
+    flushTable();
     if (a.state === "working" || a.state === "starting") out.push("", ` ${c.accent(SPIN[tick % SPIN.length])} ${c.dim(a.asks.length ? "waiting for you" : clip(row1(a.step), w - 6))}`);
     return out;
   }
@@ -1008,7 +1018,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const said = a.text.join("\n").trim() || a.error || "";
       // a builder's report shows its last lines; the others' reports are shown whole (up to 40 lines), wrapped, without the VERDICT line
       const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));
-      if (a.role) for (const l of lines.slice(0, 40).filter((x) => !/^\s*```/.test(x))) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(md(w))}`);
+      if (a.role) {
+        const shown = lines.slice(0, 40).filter((x) => !/^\s*```/.test(x));
+        for (const l of ui.withTables(shown, ui.width() - 6, (x) => wrapText(x, ui.width() - 6).map((w) => c.ink(md(w))))) print(`     ${l}`);
+      }
       else for (const l of lines.slice(-8).filter((x) => !/^\s*```/.test(x))) print(`     ${c.dim(md(clip(l, ui.width() - 6)))}`);
       if (a.recheck) {
         print("");

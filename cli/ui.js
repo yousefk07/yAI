@@ -268,24 +268,112 @@ function inline(s) {
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?:;]|$)/g, (_, p, x) => p + c.italic(x));
 }
 
+// ---------- Markdown tables ----------
+// A table the model writes (| a | b |, then |---|---|) is drawn with aligned columns instead of raw pipes
+// (2026-10-22). Cells too wide for the terminal wrap inside their column.
+const isTableRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const cellsOf = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((x) => x.trim().replace(/\\\|/g, "|"));
+const plainLen = (s) => s.replace(/\*\*|`/g, "").length;
+function wrapCell(s, w) {
+  const out = [];
+  let cur = "";
+  for (const word of s.split(/\s+/).filter(Boolean)) {
+    for (let piece = word; piece; ) {
+      const room = cur ? w - plainLen(cur) - 1 : w;
+      if (plainLen(piece) <= room) { cur = cur ? cur + " " + piece : piece; piece = ""; }
+      else if (cur) { out.push(cur); cur = ""; }
+      else { out.push(piece.slice(0, w)); piece = piece.slice(w); }
+    }
+  }
+  if (cur || !out.length) out.push(cur);
+  // a ** or ` left unpaired by the wrap is dropped rather than shown
+  return out.map((l) => ((l.match(/\*\*/g) || []).length % 2 ? l.replace(/\*\*/g, "") : l)).map((l) => ((l.match(/`/g) || []).length % 2 ? l.replace(/`/g, "") : l));
+}
+// The table's lines, ready to print; null when `lines` isn't a table (no |---| line under the header).
+function renderTable(lines, maxWidth) {
+  if (lines.length < 2 || !TABLE_SEP.test(lines[1])) return null;
+  const head = cellsOf(lines[0]);
+  const align = cellsOf(lines[1]).map((x) => (/^:-+:$/.test(x) ? "center" : /-:$/.test(x) ? "right" : "left"));
+  const rows = lines.slice(2).filter((l) => !TABLE_SEP.test(l)).map(cellsOf);
+  const n = Math.max(head.length, ...rows.map((r) => r.length));
+  const all = [head, ...rows].map((r) => Array.from({ length: n }, (_, i) => r[i] || ""));
+  const widths = Array.from({ length: n }, (_, i) => Math.max(1, ...all.map((r) => plainLen(r[i]))));
+  const room = Math.max(n * 4, maxWidth - 3 * (n - 1));
+  while (widths.reduce((a, b) => a + b, 0) > room) {
+    const i = widths.indexOf(Math.max(...widths));
+    if (widths[i] <= 4) break;
+    widths[i]--;
+  }
+  const sepBar = c.line(" │ ");
+  const fit = (s, w, a) => {
+    const gap = w - plainLen(s);
+    return a === "right" ? " ".repeat(gap) + s : a === "center" ? " ".repeat(gap >> 1) + s + " ".repeat(gap - (gap >> 1)) : s + " ".repeat(gap);
+  };
+  const out = [];
+  all.forEach((r, ri) => {
+    const cells = r.map((x, i) => wrapCell(x, widths[i]));
+    const height = Math.max(...cells.map((x) => x.length));
+    for (let k = 0; k < height; k++) {
+      const parts = cells.map((x, i) => {
+        const text = fit(x[k] || "", widths[i], align[i]);
+        return ri === 0 ? c.bold(c.ink(text.replace(/\*\*|`/g, ""))) : c.ink(inline(text));
+      });
+      out.push(parts.join(sepBar).replace(/\s+$/, ""));
+    }
+    if (ri === 0) out.push(c.line(widths.map((w) => "─".repeat(w)).join("─┼─")));
+  });
+  return out;
+}
+// `lines` with every table in them drawn; other lines go through `fmt`, which returns a line or a list of lines.
+function withTables(lines, maxWidth, fmt) {
+  const out = [];
+  let buf = [];
+  const put = (l) => out.push(...[].concat(fmt(l)));
+  const flush = () => {
+    if (!buf.length) return;
+    const t = renderTable(buf, maxWidth);
+    if (t) out.push(...t);
+    else buf.forEach(put);
+    buf = [];
+  };
+  for (const l of lines) {
+    if (isTableRow(l)) buf.push(l);
+    else { flush(); put(l); }
+  }
+  flush();
+  return out;
+}
+
 // A streamed reply: "◆ " on its first line, the rest indented under it. Runs of blank lines collapse
-// to one and trailing blank lines are dropped.
+// to one and trailing blank lines are dropped. A table is held until its last row arrives, then drawn
+// whole; call .end() when the reply is over so a table at the very end is drawn too.
 function markdownWriter() {
-  let inCode = false, first = true, blank = false;
   if (tap && !sink) {
     tapped({ type: "text-start" });
     const draw = markdownWriterDraw();
-    return (line) => { tapped({ type: "text", line: String(line) }); draw(line); };
+    const fn = (line) => { tapped({ type: "text", line: String(line) }); draw(line); };
+    fn.end = draw.end;
+    return fn;
   }
   return markdownWriterDraw();
 }
 function markdownWriterDraw() {
-  let inCode = false, first = true, blank = false;
+  let inCode = false, first = true, blank = false, table = [];
   if (sink) {
     sink({ type: "text-start" });
-    return (line) => sink({ type: "text", line: String(line) });
+    const fn = (line) => sink({ type: "text", line: String(line) });
+    fn.end = () => {};
+    return fn;
   }
-  return (line) => {
+  const put = (out) => {
+    if (first) {
+      section("text");
+      print(` ${c.accent("●")} ${out}`);
+      first = false;
+    } else print(`   ${out}`);
+  };
+  const draw = (line) => {
     if (!inCode && !line.trim()) return void (blank = !first);
     if (blank) rawPrint("");
     blank = false;
@@ -300,12 +388,25 @@ function markdownWriterDraw() {
     else if ((m = line.match(/^(\s*)[-*+]\s+(.*)/))) out = `${m[1]}${c.faint("–")} ${inline(m[2])}`;
     else if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) out = c.line(theme.box.h.repeat(Math.min(48, columns() - 6)));
     else out = c.ink(inline(line));
-    if (first) {
-      section("text");
-      print(` ${c.accent("●")} ${out}`);
-      first = false;
-    } else print(`   ${out}`);
+    put(out);
   };
+  const flush = () => {
+    if (!table.length) return;
+    const rows = table;
+    table = [];
+    const drawn = renderTable(rows, textWidth());
+    if (!drawn) return rows.forEach(draw);
+    if (blank) rawPrint("");
+    blank = false;
+    drawn.forEach(put);
+  };
+  const fn = (line) => {
+    if (!inCode && isTableRow(line)) return void table.push(line);
+    flush();
+    draw(line);
+  };
+  fn.end = flush;
+  return fn;
 }
 // The width replies are wrapped at, so the indent under ● still fits.
 const textWidth = () => Math.max(36, width() - 4);
@@ -566,7 +667,7 @@ function resetSections() {
 }
 
 module.exports = {
-  c, print, spinner, setSink, markdownWriter, inline, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
+  c, print, spinner, setSink, markdownWriter, inline, renderTable, withTables, isTableRow, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
   welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, setTap, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };

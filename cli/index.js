@@ -1467,7 +1467,8 @@ async function callModel() {
         }
         // Show long paragraphs as they arrive, wrapped at the terminal width.
         const width = ui.textWidth();
-        while (!inTool && lineBuf.length > width && !/^\s*(<|```)/.test(lineBuf) && !lineBuf.includes("<|")) {
+        // (a table row is never cut: it's drawn whole once the table ends)
+        while (!inTool && lineBuf.length > width && !/^\s*(<|```|\|)/.test(lineBuf) && !lineBuf.includes("<|")) {
           const cut = lineBuf.lastIndexOf(" ", width);
           if (cut < width / 2) break;
           emit(lineBuf.slice(0, cut));
@@ -1501,6 +1502,7 @@ async function callModel() {
     if (!state.interrupted) {
       spinner.stop();
       if (lineBuf) emit(lineBuf);
+      write.end();
       throw err;
     }
   } finally {
@@ -1510,6 +1512,7 @@ async function callModel() {
   }
   if (lineBuf && !state.interrupted) emit(lineBuf.replace(/\r$/, ""));
   if (heldFence !== null && !inTool) write(heldFence);
+  write.end();
   if (process.env.YAI_DEBUG_DIR) {
     try { fs.writeFileSync(path.join(process.env.YAI_DEBUG_DIR, `reply-${Date.now()}.txt`), text); } catch {}
   }
@@ -2402,6 +2405,7 @@ function redrawTranscript() {
     if (prose.trim()) {
       const write = ui.markdownWriter();
       for (const line of prose.trim().split("\n")) write(line);
+      write.end();
     }
     if (call && call.name && !call.cutOff) {
       const a = call.args || {};
