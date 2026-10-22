@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.163",
+      "date": "2026-10-22",
+      "title": "A faster, truer team",
+      "items": [
+        {
+          "area": "Team",
+          "title": "The merger only runs when needed",
+          "text": "When yAI's own map of the code finds nothing that fails to line up, the merger is skipped. When it runs, it works from the list of mismatches instead of reading the whole project."
+        },
+        {
+          "area": "Team",
+          "title": "No more re-reading",
+          "text": "A read of lines an agent already has (inside a range it read, still in the conversation, file unchanged) is not run again. An agent that reads 20 times without a change is told to act, and stopped at 32."
+        },
+        {
+          "area": "Team",
+          "title": "Progress that moves",
+          "text": "After 6 steps on one plan step, the agent is asked whether that step is finished, so the board stops sitting on step 1."
+        },
+        {
+          "area": "Team",
+          "title": "Estimates from your own runs",
+          "text": "Each role's real cost and time per model is remembered after a run, and the picker uses that average next time instead of a fixed guess."
+        }
+      ]
+    },
+    {
       "version": "1.0.162",
       "date": "2026-10-22",
       "title": "A sharper eye",

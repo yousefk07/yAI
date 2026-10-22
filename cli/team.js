@@ -338,9 +338,11 @@ module.exports = function create(d) {
         "When you're done, end with a short report: the main decisions and anything the builders must be careful about.",
       ],
       merger: [
-        "Your job: the builders worked separately; join their work so it runs as one thing. Read every file they made, the CONTRACT, and the notes they left for each other (below).",
-        "Fix the mismatches between files: a name spelled differently, a function one file calls that another never defines, the wrong load or init order, a script or stylesheet not included, two files defining the same thing, a data shape that doesn't match.",
-        "Make the smallest edits that join the pieces. Don't restyle, refactor or add features. Then run the syntax checks (node --check) and any tests.",
+        "Your job: the builders worked separately; join their work so it runs as one thing.",
+        // 2026-10-22: "read every file" sent mergers through the whole project for minutes, re-reading what was trimmed
+        "Work from yAI's map and its list of possible mismatches (below): for each one, read only the lines around it (a line range, or a search for the name), decide which side is right (the CONTRACT wins), and fix it with edit_file. Don't read files whole, and don't read the whole project to look for other problems: the checkers after you do that.",
+        "Also check the HTML's load order against the contract (which script must load first), and the notes the builders left for each other (below).",
+        "Make the smallest edits that join the pieces. Don't restyle, refactor or add features. Then run node --check on the files you changed.",
         // 2026-10-22: a merger wrote a node -e script loading the whole browser game into Node's vm; it never finished
         "Don't write node -e scripts or harnesses that load the project in Node: browser code never finishes there. node --check on each file, and reading the code, are the checks.",
         CHECKS, "", RULES,
@@ -1293,6 +1295,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const PROFILE = { researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
     const estOf = (r) => {
       if (r.role?.internal) return { usd: 0, min: 0.5 };
+      // what this role really took on this model in earlier runs, when there are any (learned at the end of a run)
+      const seen = api.cfg.team?.learned?.[`${r.role?.key || "builder"}|${r.model}`];
+      if (seen) return { usd: seen.usd, min: seen.min, seen: seen.n };
       const [req, ctx, out, min] = PROFILE[r.role?.key || "builder"] || PROFILE.builder;
       const p = state.models.find((m) => m.id === r.model)?.price || { in: 0, cached: 0, out: 0 };
       return { usd: (req * ctx * 1000 * (0.07 * (p.in || 0) + 0.93 * (p.cached ?? p.in ?? 0)) + out * 1000 * (p.out || 0)) / 1e6, min };
@@ -1710,6 +1715,19 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       if (page.some((x) => x.role === "browser") && page.every((x) => x.state === "done" && x.verdict && !BAD.test(x.verdict))) return (a.step = "the page checks all passed");
       return false;
     };
+    // The merger only joins pieces that don't fit (2026-10-22: it read the whole project for minutes even when they
+    // did). When yAI's own map of the code finds no name, id or script that fails to line up, and every builder of its
+    // round finished, there's nothing to join: the page check and the fixer after it catch the rest.
+    const mergerNotNeeded = (a) => {
+      const builders = agents.filter((x) => !x.role && rnd(x) === rnd(a));
+      if (!builders.length || builders.some((x) => x.state !== "done")) return false;
+      try {
+        const files = [...new Set(builders.flatMap((x) => [...(x.files || []), ...(x.changed || [])]))].filter((f) => !/TEAM_CONTRACT/i.test(f));
+        const m = PM.projectMap(root, files);
+        if (!m.text || m.mismatches.length) return false;
+      } catch { return false; }
+      return (a.step = "the pieces already fit");
+    };
     const next = () => {
       for (const n of PHASES()) {
         // the builders start from the architect's contract
@@ -1728,6 +1746,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
           else if (a.role === "integration" && integrationNotNeeded(a)) Object.assign(a, { state: "skipped", ended: Date.now() });
+          else if (a.role === "merger" && mergerNotNeeded(a)) { Object.assign(a, { state: "skipped", ended: Date.now() }); say("merger", "not needed · yAI's map found nothing to join", "dim"); }
           else if (lp(n) === 3 && a.role === "fixer" && !a.fixRound && !agents.filter((x) => x.role && rnd(x) === rnd(a) && (x.phase || 1) < n).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           // the re-check only runs after a fixer that ran
@@ -1878,6 +1897,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...(fixerA?.recheck || []).filter((r) => r.code !== 0).map((r) => `${clip(r.cmd, 40)} still fails: ${row1(r.tail.slice(-1)[0] || "")}`),
     ];
     for (const t of attention) print(`   ${c.yellow("!")} ${c.ink(clip(t, ui.width() - 6))}`);
+    // What each role really cost and took, per model, so the next estimate is this user's own average instead of a
+    // guess (2026-10-22: the picker's numbers were always off). Only agents that finished count; the newest run weighs
+    // a third.
+    try {
+      const learned = { ...(api.cfg.team?.learned || {}) };
+      for (const a of agents) {
+        if (a.internal || a.state !== "done" || !a.model || !a.started || !a.ended) continue;
+        const k = `${a.role || "builder"}|${a.model}`, min = (a.ended - a.started) / 60000, usd = a.cost || 0;
+        const o = learned[k];
+        learned[k] = o ? { usd: o.usd + (usd - o.usd) / 3, min: o.min + (min - o.min) / 3, n: (o.n || 1) + 1 } : { usd, min, n: 1 };
+      }
+      api.cfg.team = { ...(api.cfg.team || {}), learned };
+      api.save();
+    } catch {}
     let reportAt = "";
     if (files.size) { try { reportAt = writeReport(agents, task, estimate); } catch (err) { print(c.yellow(`   Couldn't write the team report: ${err.message}`)); } }
     if (reportAt) print(`   ${c.accent("◆")} ${c.ink("The run as a page")} ${c.dim(`· ${reportAt}: open it in a browser (a replay of the board, the score, every agent, screenshots)`)}`);

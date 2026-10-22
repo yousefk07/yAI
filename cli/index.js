@@ -1879,6 +1879,42 @@ async function runAgent(content) {
   };
   const noteWhole = (call) => { for (const f of wholeOf(call)) readWhole.set(f.abs, f.mtime); };
   const wholeAgain = (call) => { const hit = wholeOf(call).filter((f) => readWhole.get(f.abs) === f.mtime).map((f) => f.p); return hit.length ? hit : null; };
+  // The lines of each file read so far, while their text is still in the conversation: abs -> { mtime, have: [[from,
+  // to, step entry]] }. A read inside lines already there isn't run again (2026-10-22: mergers re-read overlapping
+  // ranges, 120-180 then 100-200 then 150-170, that the exact-repeat check let through).
+  const readRanges = new Map();
+  const rangesOf = (call) => {
+    if (call.name !== "read_file" || call.args?.offset || call.args?.limit) return [];
+    const paths = T.splitPaths(call.args?.path, root);
+    return paths.map((p) => {
+      const m = /^(.*?)(?::(\d+)(?:-(\d+))?)?$/.exec(p.trim());
+      try {
+        const abs = path.resolve(root, m[1]);
+        // read_file's own limits: a whole read shows 600 lines, or 400 each when several files are read at once
+        return { p: p.trim(), abs, mtime: fs.statSync(abs).mtimeMs, from: m[2] ? +m[2] : 1, to: m[2] ? (m[3] ? +m[3] : +m[2] + 199) : paths.length > 1 ? 400 : 600 };
+      } catch { return null; }
+    }).filter(Boolean);
+  };
+  const stillThere = (ref) => ref?.msg && state.messages.includes(ref.msg) && !/old tool output removed/.test(String(ref.msg.content || ""));
+  const haveLines = (call) => {
+    const rs = rangesOf(call);
+    if (!rs.length) return null;
+    const hits = rs.map((r) => {
+      const f = readRanges.get(r.abs);
+      const h = f && f.mtime === r.mtime && f.have.find(([a, b, ref]) => a <= r.from && b >= r.to && stillThere(ref));
+      return h && { p: r.p, step: h[2].step };
+    });
+    return hits.every(Boolean) ? hits : null;
+  };
+  const noteRanges = (call, ref) => {
+    for (const r of rangesOf(call)) {
+      let f = readRanges.get(r.abs);
+      if (!f || f.mtime !== r.mtime) readRanges.set(r.abs, (f = { mtime: r.mtime, have: [] }));
+      f.have.push([r.from, r.to, ref]);
+    }
+  };
+  let reads = 0; // /team agents: reads and searches before their first change
+  let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
   let lastUndo = state.undo.length, idle = 0; // /team agents: steps since their last change
@@ -1984,21 +2020,24 @@ async function runAgent(content) {
         const lost = before && /old tool output removed/.test(String(before.msg?.content || ""));
         const again = !before || lost ? wholeAgain(call) : null;
         const everything = call.name === "search" && /^\s*(\^?\.[*+]?\$?|\^|\$|\\[sSwW][*+]?|\[\\s\\S\][*+]?)?\s*$/.test(String(call.args?.pattern ?? ""));
-        if ((before && !lost) || again || everything) {
+        const inside = !(before && !lost) && !again && !everything ? haveLines(call) : null;
+        if ((before && !lost) || again || everything || inside) {
           repeats++;
           result = {
             output: (everything
               ? `A search for everything just reads the whole file again. Search for one name (a function, a variable, an id), or read a line range (path:120-180).`
+              : inside
+                ? `You already have ${inside.map((x) => `${x.p} (read in step ${x.step + 1})`).join(", ")}: those lines are further up and the file hasn't changed since, so ${inside.length === 1 ? "it wasn't" : "they weren't"} read again. Use what you have.`
               : again
                 ? `${again.join(", ")} ${again.length === 1 ? "is a long file you already read whole" : "are long files you already read whole"}, and ${again.length === 1 ? "it hasn't" : "they haven't"} changed since: the text is further up, or was removed to save space. Don't read it whole again: read only the lines you need (path:120-180, several ranges in one read_file), or search for one name.`
                 : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
               (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
           };
-          ui.note(c.dim(everything ? "· a search for everything · not run" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
+          ui.note(c.dim(everything ? "· a search for everything · not run" : inside ? "· lines it already has · not read again" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
         } else {
           result = await execTool(call);
           if (sig) doneSteps.set(sig, (resultOf = { step, msg: null }));
-          if (call.name === "read_file") noteWhole(call);
+          if (call.name === "read_file") { noteWhole(call); if (resultOf && !String(result.output).startsWith("Error")) noteRanges(call, resultOf); }
         }
       }
       if (state.interrupted) {
@@ -2030,6 +2069,19 @@ async function runAgent(content) {
         if (state.undo.length !== lastUndo) { lastUndo = state.undo.length; idle = 0; }
         else if (state.undo.length > undoStart) idle++;
         if (idle === 15) result.output += "\nYou have taken 15 steps since your last change. Your files are written: finish now with your report, unless something is clearly broken (then fix it in one edit).";
+        // An agent that may write but only reads (2026-10-22: mergers read for many minutes before a first edit, or
+        // never made one when the pieces already fit) is told to act, then stopped. Read-only checkers are exempt.
+        if (!process.env.YAI_REPORT_ONLY && state.undo.length === undoStart && LOOK_STEPS.has(call.name)) {
+          reads++;
+          if (reads === 20) result.output += "\nYou have looked at the project 20 times without changing anything. Stop reading: make the fixes you've found now, or, if the pieces already fit, finish with your report saying so.";
+          if (reads >= 32) { ui.note(`${c.yellow("!")} ${c.ink("yAI kept reading without changing anything, so it was stopped.")}`); pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`); break; }
+        }
+      }
+      // The plan's progress depends on the model saying <done>N</done>, which it often forgets (2026-10-22: boards sat on
+      // step 1 for a whole run). After 6 steps on one plan step, it's asked whether that step is finished.
+      if (state.plan?.steps.length && state.plan.done < state.plan.steps.length) {
+        if (planAt !== state.plan.done) { planAt = state.plan.done; planSteps = 0; }
+        if (++planSteps % 6 === 0) result.output += `\n(Your plan's step ${state.plan.done + 1} is "${state.plan.steps[state.plan.done]}". If it's finished, start your next reply with <done>${state.plan.done + 1}</done>, or a higher number if later steps are finished too.)`;
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
