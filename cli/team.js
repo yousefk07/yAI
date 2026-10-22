@@ -219,7 +219,12 @@ module.exports = function create(d) {
   };
   const browserLines = (all) => {
     const b = all.find((a) => a.role === "browser" && a.text?.length);
-    return b ? ["", `yAI opened the page in a headless browser after the builders (VERDICT: ${b.verdict || "?"}):`, ...b.text] : [];
+    const again = all.find((a) => a.role === "fixer" && a.pageAgain)?.pageAgain;
+    if (!b) return [];
+    // after the fixer, the newer look replaces the old one (2026-10-22: the spec checker judged a fixed game by the
+    // errors from before the fix)
+    if (again) return ["", `yAI opened the page again AFTER the fixer (VERDICT: ${again.verdict || "?"}). This is the current state; the check before the fixer (${b.verdict || "?"}) is out of date:`, ...again.lines];
+    return ["", `yAI opened the page in a headless browser after the builders (VERDICT: ${b.verdict || "?"}):`, ...b.text];
   };
 
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
@@ -870,6 +875,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
+        // after a fixer, yAI opens the page again before the spec checker starts, so it judges the fixed version
+        const fx = agents.find((a) => a.role === "fixer" && a.state === "done");
+        if (n > 3 && fx && agents.some((a) => a.role === "browser") && !state.interrupted && !fx.pageAgain) {
+          if (!fx.pageAgainStarted) {
+            fx.pageAgainStarted = true;
+            for (const a of waiting) a.step = "after yAI opens the page again";
+            browserCheck(fx, task, agents, { signal: state.abort?.signal })
+              .then((r) => (fx.pageAgain = r), () => (fx.pageAgain = { verdict: "", lines: ["Couldn't open it again."] }))
+              .finally(() => wake());
+          }
+          continue;
+        }
         for (const a of waiting) {
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
@@ -929,7 +946,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       }
       if (agents.some((a) => a.role === "browser")) {
         try {
-          const r = await X.busy("opening the page again", (signal) => browserCheck(fixer, task, agents, { signal }));
+          const r = fixer.pageAgain?.verdict ? fixer.pageAgain : await X.busy("opening the page again", (signal) => browserCheck(fixer, task, agents, { signal }));
           if (r.verdict) (fixer.recheck ||= []).push({ cmd: "the page in a browser", code: r.verdict === "PASS" ? 0 : 1, counts: null, tail: r.lines });
         } catch {}
       }

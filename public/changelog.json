@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.130",
+      "date": "2026-10-22",
+      "title": "The spec checker sees the fixed version",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Page re-opened before the spec check",
+          "text": "After the fixer, yAI opens the page again before the spec checker starts, and the spec checker is told the earlier browser check is out of date. Before, it judged a fixed game by the errors from before the fix."
+        }
+      ]
+    },
+    {
       "version": "1.0.129",
       "date": "2026-10-22",
       "title": "Trimming without the loop",
