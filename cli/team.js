@@ -167,6 +167,11 @@ module.exports = function create(d) {
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
+      // 2026-10-22 (a chess run): builders wrote their files in a few steps, then spent 40-100 more printing pieces of
+      // them with node -e and writing _test.js harnesses until they were stopped. Building is their job; testing isn't.
+      "Write your files, check each once with a syntax check (node --check <file>), fix what that finds, and finish. Don't write test harnesses, scratch tests or fake DOMs: " +
+        (roles.includes("tester") ? "the tester does that after you. " : "the checkers do that after you. ") +
+        "To look at a file use read_file, never node -e, Get-Content or cat. If you can't make something work after two tries, say so in your report instead of trying more.",
       "When you're done, end with a short report: what you changed, file by file, and anything the others or the user still need to do.",
     ].join("\n");
   }
@@ -531,7 +536,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "text") { a.text.push(e.line); log({ k: "text", line: e.line }); }
       else if (e.type === "note" && e.text) {
         log({ k: "note", text: e.text });
-        if (/kept repeating steps/.test(e.text)) a.flag = "stuck · stopped";
+        if (/kept repeating steps|kept checking without changing/.test(e.text)) a.flag = "stuck · stopped";
         else if (/^paused after \d+ steps/.test(e.text)) a.flag = "hit the step limit";
       }
       else if (e.type === "out" && String(e.text).trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n")) log({ k: "out", line: l });
@@ -577,23 +582,37 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   }
 
   // One agent's log as lines: what it said, its steps and their results, and its edits as diffs.
+  // One row of the view: a multi-line command (node -e "…" over several lines) or note must not break the row, or the
+  // rows below are drawn over each other (2026-10-22).
+  const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
   function logLines(a, all, tick = 0) {
     const w = ui.width();
     const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
     const n = all.indexOf(a) + 1;
     const time = a.started ? secs((a.ended || Date.now()) - a.started) : "";
     const out = [
-      ` ${icon} ${c.bold(c.ink(a.name))} ${c.faint(`#${n}`)}  ${c.dim([a.state === "working" ? a.step : a.state, a.verdict, a.changed?.size ? `${a.changed.size} file${a.changed.size === 1 ? "" : "s"}` : "", time, a.cost ? `$${a.cost.toFixed(3)}` : ""].filter(Boolean).join(" · "))}`,
+      ` ${icon} ${c.bold(c.ink(a.name))} ${c.faint(`#${n}`)}  ${c.dim([a.state === "working" ? row1(a.step) : a.state, a.verdict, a.changed?.size ? `${a.changed.size} file${a.changed.size === 1 ? "" : "s"}` : "", time, a.cost ? `$${a.cost.toFixed(3)}` : ""].filter(Boolean).join(" · "))}`,
       ` ${c.accent("‹")} ${c.faint("back to the team (esc)")}`,
       c.line(" " + "─".repeat(Math.max(10, w - 2))),
     ];
     if (!a.log) return [...out, `   ${c.dim(a.state === "skipped" ? `It didn't run: ${a.step}.` : `It hasn't started yet: it starts ${a.step}.`)}`];
     const TONE = { error: c.red, warn: c.yellow };
+    // what the agent says is set off by one blank line; steps in a row stay together, and empty lines are dropped
+    let gap = false;
+    const blank = () => { if (out[out.length - 1] !== "") out.push(""); };
     for (const e of a.log) {
-      if (e.k === "brief") out.push(`   ${c.faint("Its part:")} ${c.dim(clip(e.text, w - 14))}`, "");
-      else if (e.k === "gap") { if (out[out.length - 1] !== "") out.push(""); }
-      else if (e.k === "text") for (const l of e.line.trim() ? wrapText(e.line, w - 4) : [""]) out.push(`   ${c.ink(l)}`);
-      else if (e.k === "step") out.push(` ${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(clip(String(e.arg || ""), w - e.verb.length - 6))}`);
+      if (e.k === "brief") out.push(`   ${c.faint("Its part:")} ${c.dim(clip(row1(e.text), w - 14))}`, "");
+      else if (e.k === "gap") gap = true;
+      else if (e.k === "text") {
+        if (!e.line.trim()) continue;
+        if (gap) { blank(); gap = false; }
+        for (const l of wrapText(e.line, w - 4)) out.push(`   ${c.ink(l)}`);
+      }
+      else if (e.k === "step") {
+        if (gap && out[out.length - 1]?.startsWith("   ") && !/└/.test(out[out.length - 1])) blank();
+        gap = false;
+        out.push(` ${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(clip(row1(e.arg), w - e.verb.length - 6))}`);
+      }
       else if (e.k === "result") { const t = String(e.text).split("\n").find((x) => x.trim()) || ""; if (t) out.push(`   ${c.faint("└")} ${(TONE[e.tone] || c.dim)(clip(t, w - 6))}`); }
       else if (e.k === "diff") {
         out.push(` ${c.accent("•")} ${c.bold(c.ink(e.created ? "Create" : "Edit"))} ${c.ink(e.path)} ${c.green(`+${e.added}`)} ${c.red(`−${e.removed}`)}`);
@@ -604,12 +623,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
         if (lines.length > 40) out.push(`     ${c.faint(`… ${lines.length - 40} more lines`)}`);
       }
-      else if (e.k === "note") out.push(`   ${c.dim(clip(e.text, w - 4))}`);
-      else if (e.k === "out") out.push(`   ${clip(e.line, w + 40)}`);
-      else if (e.k === "ask") out.push(` ${c.yellow("?")} ${c.ink(e.text)} ${c.dim(clip(String(e.detail || "").replace(/\s+/g, " "), w - e.text.length - 6))}`);
-      else if (e.k === "error") out.push(` ${c.red("✗")} ${c.red(clip(e.text, w - 4))}`);
+      else if (e.k === "note") out.push(`   ${c.dim(clip(row1(e.text), w - 4))}`);
+      else if (e.k === "out") out.push(`   ${clip(String(e.line).replace(/[\r\t]/g, " "), w + 40)}`);
+      else if (e.k === "ask") out.push(` ${c.yellow("?")} ${c.ink(row1(e.text))} ${c.dim(clip(row1(e.detail), w - row1(e.text).length - 6))}`);
+      else if (e.k === "error") out.push(` ${c.red("✗")} ${c.red(clip(row1(e.text), w - 4))}`);
     }
-    if (a.state === "working" || a.state === "starting") out.push("", ` ${c.accent(SPIN[tick % SPIN.length])} ${c.dim(a.asks.length ? "waiting for you" : a.step)}`);
+    if (a.state === "working" || a.state === "starting") out.push("", ` ${c.accent(SPIN[tick % SPIN.length])} ${c.dim(a.asks.length ? "waiting for you" : clip(row1(a.step), w - 6))}`);
     return out;
   }
 

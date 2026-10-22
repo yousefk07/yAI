@@ -1,6 +1,6 @@
 {
   "name": "local-llm-chat",
-  "version": "1.0.131",
+  "version": "1.0.132",
   "private": true,
   "description": "Web chat interface for a local LLM served by LM Studio",
   "scripts": {

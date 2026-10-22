@@ -350,7 +350,8 @@ function toolHeader(name, arg) {
   if (last === "step" && output) rawPrint(""); // a step that showed output gets room after it
   section("step");
   const verb = VERB[name] || String(name).charAt(0).toUpperCase() + String(name).slice(1);
-  pending = { verb, arg: String(arg || ""), t: Date.now() };
+  // one row: a command written over several lines (node -e "…") would break the step row
+  pending = { verb, arg: String(arg || "").replace(/\s+/g, " ").trim(), t: Date.now() };
 }
 // Drops the waiting row (used before asking to run a command, which shows the command instead).
 function cancelRow() {
@@ -533,7 +534,12 @@ function selectLines({ title, note: titleNote = "", detail, header, options, sel
   const lines = [`     ${edge(b.tl + b.h.repeat(inner) + b.tr)}`];
   const head = ` ${c.bold(c.ink(title))}`;
   lines.push(row(titleNote ? pad(head, inner - vis(titleNote) - 1) + c.faint(titleNote) : head));
-  if (detail) lines.push(row(` ${c.chip(` ${c.ink(clip(detail, inner - 4))} `)}`));
+  // a command over several lines (node -e "…") gets a row per line, at most 8, so it can't break the box
+  if (detail) {
+    const all = String(detail).replace(/\t/g, "  ").split(/\r?\n/).filter((l, i, a) => l.trim() || (i > 0 && i < a.length - 1));
+    for (const l of all.slice(0, 8)) lines.push(row(` ${c.chip(` ${c.ink(clip(l, inner - 4))} `)}`));
+    if (all.length > 8) lines.push(row(`   ${c.faint(`… ${all.length - 8} more lines`)}`));
+  }
   lines.push(row(""));
   if (header) lines.push(row(`   ${c.faint(header)}`));
   options.forEach((o, i) => {

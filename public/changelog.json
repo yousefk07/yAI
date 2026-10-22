@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.132",
+      "date": "2026-10-22",
+      "title": "Builders that finish",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Builders build, checkers test",
+          "text": "In a chess run, builders wrote their files in a few steps, then spent 40 to 100 more printing pieces of them with node -e and writing _test.js harnesses. Builders are now told to write, run one syntax check, and finish, and to leave testing to the tester. A team agent that has made its changes and then takes 15 steps without changing anything is told to finish; at 25 it is stopped, keeping its work."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Tidier agent view and command boxes",
+          "text": "Watching an agent no longer shows big gaps between steps, and a command written over several lines (node -e “…”) stays on one row instead of breaking the view. The “Run this command?” boxes show such a command line by line inside the box."
+        }
+      ]
+    },
+    {
       "version": "1.0.131",
       "date": "2026-10-22",
       "title": "Paste a long /team prompt",

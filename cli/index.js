@@ -1813,6 +1813,7 @@ async function runAgent(content) {
   const doneSteps = new Map(); // look-only step + what had changed when it ran -> its step number
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
+  let lastUndo = state.undo.length, idle = 0; // /team agents: steps since their last change
   const undoStart = state.undo.length;
   const costStart = state.cost.session;
   state.task = { files: new Map(), tests: null, failure: null, offerFix: false, reads: 0, searches: 0 };
@@ -1946,8 +1947,19 @@ async function runAgent(content) {
           if (failedRuns === 3) result.output += "\nThree commands in a row have failed. Stop trying variations: read the error, check your assumptions (does the path exist? is it a file or a folder?), and if you still can't see why, tell the user what's going wrong.";
         }
       }
+      // A /team agent that has written its files and then keeps checking without changing anything (2026-10-22: chess
+      // builders printed bits of their own files with node -e for 40-100 steps) is told to finish, then stopped.
+      if (TEAM_AGENT) {
+        if (state.undo.length !== lastUndo) { lastUndo = state.undo.length; idle = 0; }
+        else if (state.undo.length > undoStart) idle++;
+        if (idle === 15) result.output += "\nYou have taken 15 steps since your last change. Your files are written: finish now with your report, unless something is clearly broken (then fix it in one edit).";
+      }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
+      if (idle >= 25) {
+        ui.note(`${c.yellow("!")} ${c.ink("yAI kept checking without changing anything, so it was stopped.")} ${c.dim("Its changes are kept.")}`);
+        break;
+      }
       if (failedRuns >= 5) {
         ui.note(`${c.yellow("!")} ${c.ink("Five commands in a row failed, so yAI stopped.")} ${c.dim("Tell it what to do differently, or try a bigger model (/model).")}`);
         break;

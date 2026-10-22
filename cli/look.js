@@ -261,8 +261,14 @@ module.exports = function create({ ui }) {
     if (explain) for (const l of wrap(explain, inner - 2)) lines.push(row(` ${c.dim(l)}`));
     if (detail) {
       const t = tag ? (tagFill === "del" ? c.delbg(c.delfg(` ${tag} `)) : c.panel(c.dim(` ${tag} `))) : "";
-      const shown = ui.clip(detail, inner - 6 - (tag ? tag.length + 3 : 0));
-      lines.push(row(""), row(` ${c.chip(` ${c.faint("$")} ${c.ink(shown)} `)}${t ? "  " + t : ""}`));
+      // a command over several lines gets a row per line (at most 8), so it can't break the card
+      const all = String(detail).replace(/\t/g, "  ").split(/\r?\n/).filter((l, i, a) => l.trim() || (i > 0 && i < a.length - 1));
+      lines.push(row(""));
+      all.slice(0, 8).forEach((l, i) => {
+        const shown = ui.clip(l, inner - 6 - (tag && !i ? tag.length + 3 : 0));
+        lines.push(row(` ${c.chip(` ${c.faint(i ? " " : "$")} ${c.ink(shown)} `)}${t && !i ? "  " + t : ""}`));
+      });
+      if (all.length > 8) lines.push(row(`   ${c.faint(`… ${all.length - 8} more lines`)}`));
     }
     lines.push(row(""));
     const btns = options.map(([k, l], i) => (i === selected ? c.soft(` ${c.bold(c.accent(`[${k}]`))} ${c.bold(c.accent(l))} `) : ` ${c.dim(`[${k}]`)} ${c.ink(l)} `));
