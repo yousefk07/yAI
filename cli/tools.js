@@ -173,7 +173,7 @@ const tools = {
 
   read_file: {
     params: ["path", "offset", "limit"],
-    describe: "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 200).",
+    describe: "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 600).",
     readOnly: true,
     run(ctx, a) {
       const abs = resolve(ctx, a.path);
@@ -186,7 +186,7 @@ const tools = {
       if (isBinary(buf)) throw new ToolError(`${a.path} is a binary file.`);
       const lines = buf.toString("utf8").split(/\r?\n/);
       const offset = Math.max(parseInt(a.offset, 10) || 1, 1);
-      const limit = Math.min(Math.max(parseInt(a.limit, 10) || 200, 1), 2000);
+      const limit = Math.min(Math.max(parseInt(a.limit, 10) || 600, 1), 2000);
       const slice = lines.slice(offset - 1, offset - 1 + limit);
       ctx.readFiles.add(abs);
       toolHeader("Read", rel(ctx, abs) + (offset > 1 || slice.length < lines.length ? `:${offset}-${offset + slice.length - 1}` : ""));

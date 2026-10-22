@@ -725,5 +725,5 @@ module.exports = function create(d) {
       : c.dim("tutor mode off"));
   }
 
-  return { partnerModel, oneShot, busy, clone, look, showcase, isImage, describeImages, toggleDuo, duoPlan, duoReview, fix, commit, review, share, toggleTutor, TUTOR_PROMPT };
+  return { partnerModel, oneShot, busy, withVision, imagePart, clone, look, showcase, isImage, describeImages, toggleDuo, duoPlan, duoReview, fix, commit, review, share, toggleTutor, TUTOR_PROMPT };
 };

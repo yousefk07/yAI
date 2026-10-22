@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.116",
+      "date": "2026-10-21",
+      "title": "A team that fits together",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "A contract for every /team",
+          "text": "The lead now writes down every name the files share (functions, element ids, events) in TEAM_CONTRACT.md, and every agent gets it word for word, so one file can no longer call render while another defines renderWorld."
+        },
+        {
+          "area": "yAI Code",
+          "title": "yAI opens web work in a browser",
+          "text": "For pages and games, yAI loads the page in a headless browser after the builders, presses Start, and reports console errors, failed loads, a blank canvas and what the screenshot looks like. The fixer gets that, and the page is checked again after it."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Tidier teams",
+          "text": "Notes the builders leave for each other go to the integration agent and the fixer. Old files in the folder can be moved aside first, a stopped team offers to remove what it made, files made outside the plan are listed, and testers check whether a failing test is itself wrong."
+        },
+        {
+          "area": "yAI Code",
+          "title": "More agents when you want them",
+          "text": "/team 6 … or asking for as many agents as possible now allows up to 8 builders. Files are also read in bigger pieces (600 lines), so follow-up fixes take fewer steps."
+        }
+      ]
+    },
+    {
       "version": "1.0.113",
       "date": "2026-10-21",
       "title": "See what yAI is checking",

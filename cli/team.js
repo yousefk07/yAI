@@ -13,6 +13,18 @@
 // who owns each; yAI makes the folders before anyone starts, and every agent's brief carries the whole map, so they
 // all build into the same structure instead of each inventing its own.
 //
+// Holding the pieces together (2026-10-21, after a Fortnite replica came out as a black screen: the engine called
+// FN.render, the renderer defined FN.renderWorld, the page and the HUD used different element ids, and the agents'
+// "for the others" notes went nowhere):
+//   - the lead writes a contract, every name shared between files (globals, functions, element ids, events), saved
+//     as TEAM_CONTRACT.md and given word for word to every agent;
+//   - for web work yAI opens the page in a headless browser after the builders (console errors, failed loads, a blank
+//     canvas, and a model that can see describes the screenshot), and again after the fixer;
+//   - the builders' notes for each other go to the integration agent and the fixer;
+//   - files already in the folder that aren't in the plan can be moved aside first, a stopped team can remove what it
+//     created, and files made outside the plan are listed at the end;
+//   - up to 8 builders when you ask for more ("/team 6 …" or "as many agents as possible").
+//
 // Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
 // doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
 // After the team, /team log <number or name> prints an agent's whole log.
@@ -26,14 +38,20 @@ const path = require("path");
 const readline = require("readline");
 const { spawn, spawnSync } = require("child_process");
 
-const MAX_AGENTS = 4;
+const MAX_AGENTS = 4; // the default; "/team 6 …" or "as many agents as possible" allows up to MAX_ASKED
+const MAX_ASKED = 8;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const LEAD_SYSTEM =
   "You are the lead of a small coding team. Split the user's task among agents that work AT THE SAME TIME in one folder, " +
   "each with file and shell tools. Reply with only JSON, no prose and no code fence: " +
-  '{"folder":"the folder a new project goes in, e.g. snake-game (empty when changing an existing project)","agents":[{"name":"2-3 word name","task":"exactly what this agent does, concrete enough to do alone","files":["every path it creates or changes, relative to the project folder, including the folder above"]}]}. ' +
+  '{"folder":"the folder a new project goes in, e.g. snake-game (empty when changing an existing project)",' +
+  '"contract":"EVERY name shared between files, with exact spelling and the file that defines it: global objects and their methods/fields, functions one file calls in another, HTML element ids and classes other files look up, events, routes, data shapes. One line each, e.g. window.FN.render(dt) - defined in world.js, called by engine.js every frame",' +
+  '"agents":[{"name":"2-3 word name","task":"exactly what this agent does, concrete enough to do alone","files":["every path it creates or changes, relative to the project folder, including the folder above"]}]}. ' +
   "Plan the whole file layout up front: list EVERY file the finished work needs, each under exactly one agent, with full paths " +
   "(a new project's files all go inside its folder, e.g. snake-game/index.html, snake-game/js/game.js). " +
+  "Write the contract BEFORE the tasks and use exactly its names in every task text: two agents must never be told different names for " +
+  "the same thing (one calling render while the other defines renderWorld, or one page using health-bar while the script looks up healthBar). " +
+  "If the folder already has files, decide in the tasks whether they are reused or replaced. " +
   "Rules: split by independent pieces (for example the API, the page, the tests); every file belongs to at most one agent, " +
   "since two agents editing one file would overwrite each other; each task must make sense without waiting for another " +
   "(agree on names, routes and data shapes inside the task text so the pieces fit). If the task is small or can't be split " +
@@ -97,6 +115,7 @@ module.exports = function create(d) {
       "", `Your part: ${me.task}`,
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
+      ...contractLines(),
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
@@ -133,9 +152,30 @@ module.exports = function create(d) {
     return [...made];
   }
 
+  // "For the others: …" in a builder's report: what it needs from the other agents.
+  function handoffs(all) {
+    return all.filter((a) => !a.role && a.text?.length).map((a) => {
+      const t = a.text.join("\n");
+      const m = /^[#*\s-]*(?:for the others|notes for the others|for other agents|notes for others|for the rest of the team)\b[^\n]*\n?([\s\S]{0,1800})/im.exec(t);
+      return m ? { from: a.name, text: m[1].trim().split(/\n#{1,3} /)[0].trim() } : null;
+    }).filter((h) => h && h.text && !/^(none|nothing|no changes needed)\.?$/i.test(h.text));
+  }
+  const handoffLines = (all, role) => {
+    const list = handoffs(all);
+    if (!list.length || !["integration", "fixer"].includes(role)) return [];
+    return ["", "What the builders said they need from each other (each must end up resolved in the code):", ...list.map((h) => `## from ${h.from}\n${h.text}`)];
+  };
+  const browserLines = (all) => {
+    const b = all.find((a) => a.role === "browser" && a.text?.length);
+    return b ? ["", `yAI opened the page in a headless browser after the builders (VERDICT: ${b.verdict || "?"}):`, ...b.text] : [];
+  };
+
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
   const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.";
-  const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running.";
+  const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Don't leave scratch or debug files (like _test.js or _smoke.js) behind; delete them before you finish.";
+  // The lead's contract: the names every file shares, given word for word to every agent.
+  let contract = "";
+  const contractLines = () => (contract ? ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\":", contract] : []);
   const verdictRule = (a, b) => `End your report with one last line, exactly "VERDICT: ${a}" or "VERDICT: ${b}".`;
 
   // The briefs of the members who check the builders' work (phase 2).
@@ -147,6 +187,7 @@ module.exports = function create(d) {
         "Your job: test the builders' work. Write or update tests ONLY in test files (tests/, test/, __tests__/, *.test.*, *.spec.*, test_*.py); don't change the app's code.",
         "Use the project's test setup if it has one; if it has none, use the language's built-in runner (node --test, python -m unittest) without installing anything. Run the tests.",
         "If a test fails because of a bug in the app, leave the bug for the fixer: report the file, the line and what's wrong.",
+        "Before you report a failure, check whether the test or the app is wrong (run the code path on its own); fix a wrong test instead of reporting it. Any fake page or DOM in a test must use the CONTRACT's exact ids and names.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: the command you ran, the tests you wrote, what passed, and every failure with its file and line.",
         verdictRule("PASS", "FAIL") + " The VERDICT line is required: without it your check counts as unfinished.",
@@ -172,14 +213,16 @@ module.exports = function create(d) {
         "(1) every file that is imported or required exists, and every imported name is actually exported;",
         "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
         "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
-        "(4) the agents' changes don't contradict each other (two files defining the same thing differently).",
+        "(4) the agents' changes don't contradict each other (two files defining the same thing differently);",
+        "(5) every name in the CONTRACT is defined where it says and used with exactly that spelling everywhere (search for each one);",
+        "(6) every note the builders left for each other (below) is resolved; an unresolved one is a problem.",
         "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...workersLines(all), "", ...body].join("\n");
+    return [head, "", ...workersLines(all), ...contractLines(), ...handoffLines(all, a.role), ...browserLines(all), "", ...body].join("\n");
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -193,6 +236,7 @@ module.exports = function create(d) {
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
       ...workersLines(all), "",
+      ...contractLines(), ...handoffLines(all, "fixer"), ...browserLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
       ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
@@ -203,9 +247,87 @@ module.exports = function create(d) {
     ].join("\n");
   }
 
+  // ---------- the browser check (web work) ----------
+  // yAI opens the page itself: no model writes this, so it can't say it passed when it didn't.
+  const QA_SYSTEM =
+    "You look at a screenshot of a web page or browser game a team of coding agents just built, after its start button was pressed. " +
+    "Say in 2-4 sentences what is on screen. Then list anything that looks broken: a blank or black screen, an upside-down or mirrored view, " +
+    "overlapping or cut-off UI, text that can't be read, or something the task asks for that isn't there. End with one line: LOOKS: OK or LOOKS: BROKEN.";
+  function entryPage(all) {
+    const files = all.filter((a) => !a.role).flatMap((a) => a.files).filter((f) => /\.html?$/i.test(f));
+    return files.find((f) => /(^|\/)index\.html?$/i.test(f)) || files[0] || null;
+  }
+  async function browserCheck(a, task, all, { signal } = {}) {
+    const B = require("./browser");
+    const fs = require("fs");
+    const entry = entryPage(all);
+    const lines = [], errors = [];
+    const abs = entry && path.resolve(root, entry);
+    if (!abs || !fs.existsSync(abs)) return { verdict: "FAIL", lines: [`The page ${entry || "(none planned)"} doesn't exist.`] };
+    const server = await B.serveFolder(path.dirname(abs));
+    let b;
+    try {
+      b = await B.launch({ width: 1280, height: 720 });
+      b.on("Runtime.exceptionThrown", (p) => errors.push(`Uncaught: ${(p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]}${p.exceptionDetails.url ? ` (${path.basename(p.exceptionDetails.url)}:${p.exceptionDetails.lineNumber + 1})` : ""}`));
+      b.on("Runtime.consoleAPICalled", (p) => { if (p.type === "error") errors.push(`console.error: ${p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 300)}`); });
+      b.on("Network.responseReceived", (p) => { if (p.response.status >= 400 && !/favicon.ico/.test(p.response.url)) errors.push(`${p.response.status} loading ${p.response.url.replace(server.url, "")}`); });
+      b.on("Network.loadingFailed", (p) => { if (!p.canceled) errors.push(`Failed to load a file: ${p.errorText}`); });
+      await b.send("Network.enable");
+      await B.open(b, `${server.url}/${encodeURIComponent(path.basename(abs))}`);
+      // press the obvious start button (Play, Start, Drop in…) and let it run for a moment
+      const pressed = await B.evaluate(b, `(() => { const el = [...document.querySelectorAll("button, a, [role=button], .btn")].find((e) => e.offsetParent && /^(\\W*)(play|start|drop in|begin|new game|let'?s go)/i.test(e.textContent.trim())); if (!el) return ""; el.click(); return el.textContent.trim().slice(0, 30); })()`).catch(() => "");
+      await new Promise((r) => setTimeout(r, pressed ? 2500 : 1200));
+      // a 2D canvas that is all one colour is a blank screen
+      const page = await B.evaluate(b, `(() => {
+        const cs = [...document.querySelectorAll("canvas")].filter((c) => c.width > 100 && c.height > 100);
+        let blank = null;
+        for (const c of cs) { const g = c.getContext && c.getContext("2d"); if (!g) continue; try { const d = g.getImageData(0, 0, c.width, c.height).data; const seen = new Set(); for (let i = 0; i < d.length; i += 4 * 997) seen.add(d[i] + "," + d[i+1] + "," + d[i+2]); blank = blank === null ? seen.size <= 2 : blank && seen.size <= 2; } catch (e) {} }
+        return { title: document.title, canvases: cs.length, blank, text: document.body.innerText.trim().slice(0, 200) };
+      })()`).catch(() => ({}));
+      const shot = await B.screenshot(b, { quality: 75 });
+      const dir = path.join(root, "yai-media");
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `team-check-${Date.now()}.jpg`);
+      fs.writeFileSync(file, shot);
+      lines.push(`Opened ${entry}${pressed ? `, pressed "${pressed}"` : ""}; screenshot: ${path.relative(root, file).split(path.sep).join("/")}`);
+      if (page.blank) errors.push("The game canvas is blank (one flat colour): nothing is being drawn.");
+      // a model that can see describes it (an upside-down view, missing HUD… no test catches those)
+      let looks = "";
+      try {
+        const seen = await X.withVision((m) => X.oneShot({ model: m.id, system: QA_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: `The task: ${task}` }, X.imagePart(shot, "image/jpeg")] }] }), signal);
+        looks = String(seen.text || "").trim();
+      } catch {}
+      if (looks) lines.push(`What it looks like: ${looks.replace(/\n+/g, " ")}`);
+      const unique = [...new Set(errors)].slice(0, 12);
+      if (unique.length) lines.push("Errors in the browser:", ...unique.map((e) => `- ${e}`));
+      else lines.push("No errors in the browser console.");
+      const broken = unique.length || /LOOKS:\s*BROKEN/i.test(looks);
+      return { verdict: broken ? "FAIL" : "PASS", lines, file };
+    } catch (err) {
+      return { verdict: "", lines: [`Couldn't open it in a browser: ${err.message}`] };
+    } finally {
+      try { b?.close(); } catch {}
+      server.close();
+    }
+  }
+  // the board's browser row: run by yAI, not a child process
+  async function startBrowser(a, task, all) {
+    Object.assign(a, { state: "working", step: "opening the page in a browser", started: Date.now(), log: [{ k: "brief", text: a.task }] });
+    d.wake();
+    const r = await browserCheck(a, task, all, { signal: state.abort?.signal });
+    a.text = [...r.lines, ...(r.verdict ? [`VERDICT: ${r.verdict}`] : [])];
+    for (const l of r.lines) a.log.push({ k: "text", line: l });
+    a.verdict = r.verdict;
+    // no browser on this PC (or it wouldn't open): skipped, not a failure for the fixer to chase
+    a.state = state.interrupted ? "stopped" : r.verdict ? "done" : "skipped";
+    if (!r.verdict) a.step = r.lines[0];
+    a.ended = Date.now();
+    d.wake();
+  }
+
   // ---------- running the agents ----------
   function startAgent(a, task, all) {
-    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.text = []; a.cost = 0; a.asks = [];
+    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = [];
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
@@ -226,7 +348,7 @@ module.exports = function create(d) {
       else if (e.type === "status" && e.text) a.step = String(e.text);
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
-      else if (e.type === "diff" && e.path) { a.changed.add(e.path); log({ k: "diff", ...e }); }
+      else if (e.type === "diff" && e.path) { a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
       else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
       else if (e.type === "text") { a.text.push(e.line); log({ k: "text", line: e.line }); }
       else if (e.type === "note" && e.text) log({ k: "note", text: e.text });
@@ -351,7 +473,7 @@ module.exports = function create(d) {
   const recheckPill = (rs) => {
     const bad = rs.filter((r) => r.code !== 0).length;
     const counts = rs.find((r) => r.counts)?.counts;
-    return bad ? c.red(`tests fail${counts ? ` ${counts.failed}/${counts.passed + counts.failed}` : ""}`) : c.green(`tests pass${counts ? ` ${counts.passed}` : ""}`);
+    return bad ? c.red(`checks fail${counts ? ` ${counts.failed}/${counts.passed + counts.failed}` : ""}`) : c.green(`checks pass${counts ? ` ${counts.passed}` : ""}`);
   };
 
   let lastTeam = null; // the last team's agents, for /team log
@@ -367,10 +489,11 @@ module.exports = function create(d) {
   async function team(arg) {
     if (/^log\b/i.test(arg.trim())) return showLog(arg.trim().slice(3));
     let max = MAX_AGENTS;
-    const m = /^([2-4])\s+([\s\S]+)$/.exec(arg.trim());
+    const m = /^([2-8])\s+([\s\S]+)$/.exec(arg.trim());
     if (m) { max = Number(m[1]); arg = m[2]; }
+    else if (/\b(as many agents|lots of agents|max(imum)? (number of )?agents|many agents|more agents)\b/i.test(arg)) max = MAX_ASKED;
     const task = arg.trim();
-    if (!task) return print(c.yellow("   Usage: /team <task>   (or /team 3 <task> for at most 3 agents). A lead splits it, the agents work at the same time."));
+    if (!task) return print(c.yellow("   Usage: /team <task>   (or /team 6 <task> for up to 6 builders, at most 8). A lead splits it, the agents work at the same time."));
     if (state.mode === "plan" || state.tutor) return print(c.yellow("   /team changes files; leave plan or tutor mode first (⇧⇥ or /tutor)."));
 
     // 1. The lead splits the work.
@@ -379,9 +502,10 @@ module.exports = function create(d) {
     try {
       const text = await X.busy("splitting the work", (signal) => X.oneShot({
         model: lead, system: LEAD_SYSTEM, signal,
-        messages: [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents.` }],
+        messages: [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents${max > MAX_AGENTS ? " (the user asked for many: use as many as the work splits into cleanly)" : ""}.` }],
       }));
       agents = parsePlan(text, max);
+      try { contract = String(JSON.parse(String(text).match(/\{[\s\S]*\}/)[0]).contract || "").trim().slice(0, 6000); } catch { contract = ""; }
       const folder = (/"folder"\s*:\s*"([^"]*)"/.exec(String(text)) || [])[1]?.replace(/\\/g, "/").replace(/^\.?\/+|\/+$/g, "") || "";
       if (folder && !folder.includes("..")) for (const a of agents) a.files = a.files.map((f) => (f.startsWith(folder + "/") ? f : `${folder}/${f}`));
     } catch (err) {
@@ -423,6 +547,38 @@ module.exports = function create(d) {
     }
     for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly, hasVerdict: r.verdict !== false });
     // The layout: the folders exist before anyone writes, and everyone gets the same map (in their brief).
+    // Files already in the project's folder that the plan doesn't mention (a stopped team's leftovers…): move them aside?
+    const fs = require("fs");
+    const planned = new Set(agents.filter((a) => !a.role).flatMap((a) => a.files));
+    const folders = [...new Set([...planned].map((f) => f.split("/")[0]).filter((f) => [...planned].some((p) => p.startsWith(f + "/"))))];
+    const extra = [];
+    for (const f of folders) {
+      const walk = (dir) => { for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) { const rel = `${dir}/${e.name}`; if (e.isDirectory()) { if (!/^(node_modules|\.git|yai-media)$/.test(e.name)) walk(rel); } else if (!planned.has(rel)) extra.push(rel); } };
+      try { if (fs.existsSync(path.join(root, f))) walk(f); } catch {}
+    }
+    if (extra.length) {
+      print("");
+      print(`   ${c.yellow("!")} ${c.ink(`${folders.join(", ")} already has ${extra.length} file${extra.length === 1 ? "" : "s"} the plan doesn't use`)} ${c.faint(clip(extra.join(", "), ui.width() - 30))}`);
+      const i = await d.select({ title: "What should happen to them?", options: ["Move them aside first (to .yai-old/)", "Keep them (the agents see them)", "Cancel"] });
+      if (i === 2 || i < 0) return print(c.dim("   Cancelled."));
+      if (i === 0) {
+        const away = path.join(root, ".yai-old", new Date().toISOString().replace(/[:.]/g, "-"));
+        for (const f of extra) { const to = path.join(away, f); fs.mkdirSync(path.dirname(to), { recursive: true }); fs.renameSync(path.join(root, f), to); }
+        print(c.dim(`   Moved to ${path.relative(root, away).split(path.sep).join("/")}/`));
+      }
+    }
+    // the contract on disk, so the agents (and you) can read it any time
+    if (contract) {
+      const base = folders.length === 1 ? folders[0] : "";
+      const file = path.join(root, base, "TEAM_CONTRACT.md");
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, `# Team contract\n\nThe names every file shares, planned by the lead before the agents started. Use them exactly.\n\n${contract}\n`);
+        print(`   ${c.accent("◆")} ${c.ink("The contract")} ${c.dim(`· ${contract.split("\n").length} shared names, in ${path.relative(root, file).split(path.sep).join("/")}; every agent gets it`)}`);
+      } catch {}
+    }
+    // web work: yAI opens the page in a browser between the builders and the checkers
+    if (entryPage(agents)) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
     const layout = layoutLines(agents);
     if (layout.length) {
       let made = [];
@@ -496,16 +652,17 @@ module.exports = function create(d) {
     // fixer waits for the checkers and only runs if one of them found something.
     const ended = (a) => ENDED.includes(a.state) && !a.asks.length;
     const phase = (n) => agents.filter((a) => (a.phase || 1) === n);
-    agents.forEach((a) => (a.role ? Object.assign(a, { state: "waiting", step: a.phase === 3 ? "if anything is found" : "after the builders", started: Date.now(), changed: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
+    agents.forEach((a) => (a.role ? Object.assign(a, { state: "waiting", step: a.phase === 3 ? "if anything is found" : "after the builders", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
     const next = () => {
-      for (const n of [2, 3]) {
+      for (const n of [1.5, 2, 3]) {
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
         for (const a of waiting) {
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
-          else if (n === 3 && !phase(2).some(concern))
-            Object.assign(a, { state: "skipped", step: phase(2).length ? "nothing to fix" : "no checkers ran", ended: Date.now() });
+          else if (n === 3 && !agents.filter((x) => x.role && (x.phase || 1) < 3).some(concern))
+            Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
+          else if (a.internal) startBrowser(a, task, agents);
           else startAgent(a, task, agents);
         }
       }
@@ -554,6 +711,26 @@ module.exports = function create(d) {
       if (cmds.length) {
         try { fixer.recheck = await X.busy("re-running the tests", (signal) => runChecks(cmds, signal)); } catch {}
       }
+      if (agents.some((a) => a.role === "browser")) {
+        try {
+          const r = await X.busy("opening the page again", (signal) => browserCheck(fixer, task, agents, { signal }));
+          if (r.verdict) (fixer.recheck ||= []).push({ cmd: "the page in a browser", code: r.verdict === "PASS" ? 0 : 1, counts: null, tail: r.lines });
+        } catch {}
+      }
+    }
+
+    // 3c. A stopped team: remove the files it created? And files made outside the plan (scratch files) at the end.
+    const created = [...new Set(agents.flatMap((a) => [...(a.created || [])]))].filter((f) => require("fs").existsSync(path.join(root, f)));
+    if (state.interrupted && created.length && process.stdout.isTTY) {
+      const i = await d.select({ title: `The team was stopped. Remove the ${created.length} file${created.length === 1 ? "" : "s"} it created?`, detail: clip(created.join(", "), 400), options: ["Keep them", "Remove them"] });
+      if (i === 1) { for (const f of created) { try { require("fs").rmSync(path.join(root, f)); } catch {} } print(c.dim(`   Removed ${created.length} file${created.length === 1 ? "" : "s"}.`)); }
+    } else if (!state.interrupted) {
+      const plannedNow = new Set(agents.flatMap((a) => a.files));
+      const stray = created.filter((f) => !plannedNow.has(f) && !/(^|\/)(tests?|__tests__)\/|\.(test|spec)\.|(^|\/)test_|README|CHANGELOG|docs\/|TEAM_CONTRACT/i.test(f));
+      if (stray.length && process.stdout.isTTY) {
+        const i = await d.select({ title: `${stray.length} file${stray.length === 1 ? " was" : "s were"} made outside the plan. Delete ${stray.length === 1 ? "it" : "them"}?`, detail: clip(stray.join(", "), 400), options: ["Keep", "Delete"] });
+        if (i === 1) for (const f of stray) { try { require("fs").rmSync(path.join(root, f)); } catch {} }
+      }
     }
 
     // 4. The reports: the builders' last lines, then each member's report whole, the fixer last.
@@ -579,12 +756,12 @@ module.exports = function create(d) {
       else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
       if (a.recheck) {
         print("");
-        print(`     ${c.bold(c.ink("Re-run by yAI"))} ${c.faint("· the tests after the fixer, to check its verdict")}`);
+        print(`     ${c.bold(c.ink("Re-run by yAI"))} ${c.faint("· the tests and the page after the fixer, to check its verdict")}`);
         for (const r of a.recheck) {
           print(`     ${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.ink(clip(r.cmd, ui.width() - 40))} ${c.dim(`· ${r.timedOut ? "timed out" : `exit ${r.code}`}${r.counts ? ` · ${r.counts.passed} passed, ${r.counts.failed} failed` : ""}`)}`);
           if (r.code !== 0) for (const l of r.tail.slice(-6)) print(`         ${c.dim(clip(l, ui.width() - 10))}`);
         }
-        if (a.verdict === "FIXED" && a.recheck.some((r) => r.code !== 0)) print(`     ${c.red("!")} ${c.ink("The fixer said FIXED, but the tests still fail.")}`);
+        if (a.verdict === "FIXED" && a.recheck.some((r) => r.code !== 0)) print(`     ${c.red("!")} ${c.ink("The fixer said FIXED, but the checks still fail.")}`);
       }
     }
     print("");

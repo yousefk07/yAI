@@ -118,7 +118,7 @@ async function launch({ width = 1280, height = 720 } = {}) {
     const ws = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error("Couldn't connect to the browser.")); });
     let id = 0;
-    const pending = new Map(), waiters = [];
+    const pending = new Map(), waiters = [], listeners = [];
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.id && pending.has(msg.id)) {
@@ -127,6 +127,7 @@ async function launch({ width = 1280, height = 720 } = {}) {
         msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
       } else if (msg.method) {
         for (const w of waiters.filter((x) => x.method === msg.method)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(msg.params); }
+        for (const l of listeners) if (l.method === msg.method) { try { l.fn(msg.params); } catch {} }
       }
     };
     const send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -141,7 +142,9 @@ async function launch({ width = 1280, height = 720 } = {}) {
     });
     await send("Page.enable");
     await send("Runtime.enable");
-    return { send, waitFor, close: () => { try { ws.close(); } catch {} close(); } };
+    // on(): every time an event comes (console errors, failed loads; /team's browser check, 2026-10-21)
+    const on = (method, fn) => listeners.push({ method, fn });
+    return { send, waitFor, on, close: () => { try { ws.close(); } catch {} close(); } };
   } catch (err) {
     close();
     throw err;
