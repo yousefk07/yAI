@@ -31,6 +31,17 @@
 // and check every control, a changed check must be listed and justified, the contract avoids browser built-ins, the
 // re-run only uses test commands that worked for the team, and /team warns when started in the home folder.
 //
+// More members (2026-10-22), in the order they run:
+//   0.5 architect    before the builders: a detailed TEAM_CONTRACT.md (signatures, data shapes, startup order)
+//   1   builders
+//   1.2 merger       joins the pieces and fixes mismatches between them
+//   1.3 designer     visual polish, CSS only
+//   1.5 browser      yAI's own check (always, for web work)
+//   2   checkers     integration, tester, reviewer, security, docs, api, setup, and yAI's browser checks: mobile,
+//                    performance, accessibility, playtester (cli/teamchecks.js)
+//   3   fixer        only if something was found
+//   4   spec         the result against the request, item by item
+//
 // Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
 // doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
 // After the team, /team log <number or name> prints an agent's whole log.
@@ -68,14 +79,27 @@ const LEAD_SYSTEM =
 
 // The members who aren't builders. phase 2 runs when the builders finish; phase 3 (the fixer) only if a check found
 // something. readOnly roles run in plan mode and can't edit; the others edit, and all may run checks that change nothing.
+const WEB = /html|page|site|website|web ?app|game|canvas|\bui\b|frontend|landing|dashboard/i;
+const GAME = /\bgame\b|arcade|platformer|shooter|breakout|snake|tetris|pong|\bplayer\b/i;
 const ROLES = [
+  { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md" },
+  { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
+  { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|look|beautiful|polish|pretty|modern|sleek|styl/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
   { key: "integration", phase: 2, readOnly: true, on: true, desc: "checks the pieces fit together (imports, routes, data shapes)" },
   { key: "tester", phase: 2, on: true, desc: "writes and runs tests for the new work (test files only)" },
   { key: "reviewer", phase: 2, readOnly: true, on: false, desc: "reviews the code for bugs, edge cases and messy code" },
   { key: "security", phase: 2, readOnly: true, on: (task) => /server|api|login|auth|password|token|form|upload|database|sql|payment|cookie|session/i.test(task), desc: "looks for security holes (injection, auth, secrets, unsafe input)" },
   { key: "docs", phase: 2, on: false, verdict: false, desc: "updates the README and docs for what changed" },
+  { key: "api", phase: 2, on: (t) => /\bapi\b|server|backend|endpoint|route|database|express|\brest\b/i.test(t), desc: "calls every route with good and bad input and checks the answers" },
+  { key: "setup", phase: 2, readOnly: true, on: (t) => /npm|package|deploy|vercel|install|setup|readme|dependenc/i.test(t), desc: "checks it runs from a clean checkout: imports, dependencies, paths, README" },
+  { key: "mobile", phase: 2, internal: true, on: (t) => WEB.test(t), desc: "yAI opens it at phone, tablet and laptop sizes" },
+  { key: "performance", phase: 2, internal: true, on: (t) => GAME.test(t), desc: "yAI measures load time, page weight and frame rate" },
+  { key: "accessibility", phase: 2, internal: true, on: (t) => WEB.test(t) && !GAME.test(t), desc: "yAI runs axe-core: contrast, labels, alt text, keyboard use" },
+  { key: "playtester", phase: 2, internal: true, on: (t) => GAME.test(t), desc: "yAI plays the game for 30 s: controls, losing, Play again, saves" },
   { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
+  { key: "spec", phase: 4, readOnly: true, on: true, desc: "checks the result against your request, item by item" },
 ];
+const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 2: "after the builders", 3: "if anything is found", 4: "at the end" };
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
 const TESTISH = /\b(test|tests|pytest|jest|vitest|mocha|unittest|spec)\b|--test\b/i;
 
@@ -174,6 +198,10 @@ module.exports = function create(d) {
     if (!list.length || !["integration", "fixer"].includes(role)) return [];
     return ["", "What the builders said they need from each other (each must end up resolved in the code):", ...list.map((h) => `## from ${h.from}\n${h.text}`)];
   };
+  const internalLines = (all) => {
+    const list = all.filter((a) => a.internal && a.role !== "browser" && a.text?.length);
+    return list.length ? ["", "yAI's own checks of the page:", ...list.map((a) => `## ${a.role} (${a.verdict ? "VERDICT: " + a.verdict : a.state})\n${a.text.filter((l) => !/^VERDICT:/.test(l)).join("\n")}`)] : [];
+  };
   const browserLines = (all) => {
     const b = all.find((a) => a.role === "browser" && a.text?.length);
     return b ? ["", `yAI opened the page in a headless browser after the builders (VERDICT: ${b.verdict || "?"}):`, ...b.text] : [];
@@ -183,15 +211,64 @@ module.exports = function create(d) {
   const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.";
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Don't leave scratch or debug files (like _test.js or _smoke.js) behind; delete them before you finish.";
   // The lead's contract: the names every file shares, given word for word to every agent.
-  let contract = "";
+  let contract = "", contractFile = "";
   const contractLines = () => (contract ? ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\":", contract] : []);
   const verdictRule = (a, b) => `End your report with one last line, exactly "VERDICT: ${a}" or "VERDICT: ${b}".`;
 
   // The briefs of the members who check the builders' work (phase 2).
   function roleBrief(a, task, all) {
     const n = all.filter((x) => !x.role).length;
-    const head = `You are the ${a.role} on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} did the work and ${n === 1 ? "has" : "have"} finished. The team's overall task: ${task}`;
+    const head = a.role === "architect"
+      ? `You are the architect on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} will build it AFTER you, all at the same time, each from the plan below. The team's overall task: ${task}`
+      : a.role === "spec"
+        ? `You are the spec checker on a team of agents working in this project. Everyone has finished: the builders, the checkers and the fixer. The team's overall task: ${task}`
+        : `You are the ${a.role} on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} did the work and ${n === 1 ? "has" : "have"} finished. The team's overall task: ${task}`;
+    const contractAt = contractFile ? path.relative(root, contractFile).split(path.sep).join("/") : "TEAM_CONTRACT.md";
     const body = {
+      architect: [
+        `Your job: before anyone builds, design exactly how the pieces fit and write it to ${contractAt}. Every builder gets that file word for word and must follow it, so be precise:`,
+        "- every name shared between files: globals and modules, functions with their parameters and return values, events, element ids and classes, storage keys, routes;",
+        "- the data shapes passed between files (fields and types), and which file owns (creates and changes) each piece of state;",
+        "- the startup order (what loads first, who calls init on whom) and the main loop or request flow, step by step;",
+        "- for each file in the layout: what it does and what it must not do.",
+        "Keep the lead's names (below) unless one is wrong or clashes with a browser built-in (Audio, Image, Event…); then rename it and say so.",
+        `Write only ${contractAt}; don't write app code or other files. Read the project's existing files first if there are any.`,
+        "", RULES,
+        "When you're done, end with a short report: the main decisions and anything the builders must be careful about.",
+      ],
+      merger: [
+        "Your job: the builders worked separately; join their work so it runs as one thing. Read every file they made, the CONTRACT, and the notes they left for each other (below).",
+        "Fix the mismatches between files: a name spelled differently, a function one file calls that another never defines, the wrong load or init order, a script or stylesheet not included, two files defining the same thing, a data shape that doesn't match.",
+        "Make the smallest edits that join the pieces. Don't restyle, refactor or add features. Then run the syntax checks (node --check) and any tests.",
+        CHECKS, "", RULES,
+        "When you're done, end with a short report: each mismatch you fixed, file by file, and anything you couldn't resolve.",
+      ],
+      designer: [
+        "Your job: make it look finished and professional, by changing its styles. Work in the CSS (and add a class or a wrapper in the HTML only where styling needs it).",
+        "Spacing and alignment, a clear type scale, a consistent colour palette with good contrast, hover, focus and pressed states for every control, smooth short transitions, and a layout that fits a phone, a tablet and a laptop without cutting anything off.",
+        "Don't change any JavaScript, any id, or anything named in the CONTRACT, and don't move or rename files. No new libraries; Google Fonts is fine.",
+        "", RULES,
+        "When you're done, end with a short report: what you changed and why, file by file.",
+      ],
+      api: [
+        "Your job: check every route or endpoint the builders made, the way a client would call it.",
+        "If there is a server, start it in the background (run with <background>true</background>), call each route with good input AND bad input (missing fields, wrong types, unknown ids) using curl or a small script you put under tests/api/, and stop the server (task_stop) before you finish.",
+        "Check status codes, that response shapes match the CONTRACT, that errors are handled with clear messages, and that nothing crashes the server. Don't change the app's code.",
+        "", "Don't commit, push or change git history, and don't install packages.",
+        "When you're done, end with a short report: each route, what you sent, what came back, and every problem with its file and line.", verdictRule("OK", "PROBLEMS"),
+      ],
+      setup: [
+        "Your job: make sure this runs from a clean checkout on another computer. This is a READ-ONLY check: don't edit files.",
+        "Check that every require/import points at a real file or at a dependency listed in package.json (and the reverse: listed but unused), that file paths match the real file names exactly including upper/lower case (Windows hides case bugs that break on Linux and Vercel), that package.json scripts point at real files, that nothing points at an absolute path on this PC, that .gitignore covers node_modules and secrets, that no keys or passwords are in the code, and that the README's run steps are complete and correct.",
+        CHECKS, "", RULES,
+        "When you're done, end with a short report: each problem with its file and line, and how to fix it.", verdictRule("OK", "PROBLEMS"),
+      ],
+      spec: [
+        "Your job: check the finished work against the user's request, item by item. This is a READ-ONLY check: don't edit files.",
+        "First list every requirement in the request: each feature, file, behaviour, control and constraint (read it closely; 'and a high score saved' is its own item). Then for each one say DONE, PARTLY or MISSING, with the file and line you checked or what yAI's checks below showed.",
+        CHECKS, "", RULES,
+        "When you're done, end with the list, then a one-line summary.", verdictRule("OK", "PROBLEMS") + " Answer OK only if every item is DONE.",
+      ],
       tester: [
         "Your job: test the builders' work. Write or update tests ONLY in test files (tests/, test/, __tests__/, *.test.*, *.spec.*, test_*.py); don't change the app's code.",
         "Use the project's test setup if it has one; if it has none, use the language's built-in runner (node --test, python -m unittest) without installing anything. Run the tests.",
@@ -234,7 +311,7 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...workersLines(all), ...contractLines(), ...handoffLines(all, a.role), ...browserLines(all), "", ...body].join("\n");
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" ? internalLines(all) : []), "", ...body].join("\n");
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -385,6 +462,25 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     for (const l of r.lines) a.log.push({ k: "text", line: l });
     a.verdict = r.verdict;
     // no browser on this PC (or it wouldn't open): skipped, not a failure for the fixer to chase
+    a.state = state.interrupted ? "stopped" : r.verdict ? "done" : "skipped";
+    if (!r.verdict) a.step = r.lines[0];
+    a.ended = Date.now();
+    d.wake();
+  }
+
+  // yAI's own checks (cli/teamchecks.js) on the board, like the browser row
+  async function startInternal(a, task, all) {
+    const TC = require("./teamchecks");
+    const fn = TC[a.role === "playtester" ? "playtest" : a.role];
+    const entry = entryPage(all);
+    Object.assign(a, { state: "working", step: { mobile: "opening it at phone, tablet and laptop sizes", performance: "measuring speed and frame rate", accessibility: "running the accessibility rules", playtester: "playing it" }[a.role] || "checking", started: Date.now(), log: [{ k: "brief", text: a.task }] });
+    d.wake();
+    let r;
+    if (!fn || !entry || !require("fs").existsSync(path.resolve(root, entry))) r = { verdict: "", lines: ["There's no page to open."] };
+    else { try { r = await fn({ root, entry: path.resolve(root, entry), task, X, signal: state.abort?.signal }); } catch (err) { r = { verdict: "", lines: [`Couldn't run it: ${err.message}`] }; } }
+    a.text = [...r.lines, ...(r.verdict ? [`VERDICT: ${r.verdict}`] : [])];
+    for (const l of r.lines) a.log.push({ k: "text", line: l });
+    a.verdict = r.verdict;
     a.state = state.interrupted ? "stopped" : r.verdict ? "done" : "skipped";
     if (!r.verdict) a.step = r.lines[0];
     a.ended = Date.now();
@@ -591,18 +687,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
     // 2. You pick the team: the lead's builders, the checkers after them, and the fixer. The picks are remembered.
     const saved = api.cfg.team?.roles || {};
-    const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task) : r.on }));
+    const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task, agents.length) : r.on }));
     print("");
     ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
     for (const a of agents) if (a.files.length) print(`     ${c.accent("•")} ${c.ink(a.name)} ${c.faint(clip(a.files.join(", "), Math.max(20, ui.width() - a.name.length - 10)))}`);
     print("");
+    const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r }))] : []; };
     const rows = [
+      ...group("Before the builders", (p) => p < 1),
       { kind: "head", label: "Builders · the lead's split, at the same time" },
       ...agents.map((a) => ({ label: a.name, desc: a.task, on: true })),
-      { kind: "head", label: "After they finish · together" },
-      ...roles.filter((r) => r.phase === 2).map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r })),
-      { kind: "head", label: "If anything is found" },
-      ...roles.filter((r) => r.phase === 3).map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r })),
+      ...group("Right after the builders", (p) => p > 1 && p < 2),
+      ...group("Checks · together", (p) => p === 2),
+      ...group("If anything is found", (p) => p === 3),
+      ...group("At the end", (p) => p > 3),
     ];
     const picked = await d.checklist({
       title: "Who's on the team?", note: "edits are made without asking; other commands still ask", rows,
@@ -623,7 +721,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ui.note(`${c.accent("◆")} ${c.ink("Just one builder, so yAI does it here on its own.")}`);
       return d.runAgent(agents[0].task === task ? task : `${task}\n\n(Your part: ${agents[0].task})`);
     }
-    for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly, hasVerdict: r.verdict !== false });
+    for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly || !!r.internal, internal: !!r.internal, hasVerdict: r.verdict !== false });
     // The layout: the folders exist before anyone writes, and everyone gets the same map (in their brief).
     // Files already in the project's folder that the plan doesn't mention (a stopped team's leftovers…): move them aside?
     const fs = require("fs");
@@ -645,10 +743,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         print(c.dim(`   Moved to ${path.relative(root, away).split(path.sep).join("/")}/`));
       }
     }
-    // the contract on disk, so the agents (and you) can read it any time
+    // the contract on disk, so the agents (and you) can read it any time (the architect, if on, rewrites it in detail)
+    contractFile = path.join(root, folders.length === 1 ? folders[0] : "", "TEAM_CONTRACT.md");
     if (contract) {
-      const base = folders.length === 1 ? folders[0] : "";
-      const file = path.join(root, base, "TEAM_CONTRACT.md");
+      const file = contractFile;
       try {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, `# Team contract\n\nThe names every file shares, planned by the lead before the agents started. Use them exactly.\n\n${contract}\n`);
@@ -730,9 +828,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // fixer waits for the checkers and only runs if one of them found something.
     const ended = (a) => ENDED.includes(a.state) && !a.asks.length;
     const phase = (n) => agents.filter((a) => (a.phase || 1) === n);
-    agents.forEach((a) => (a.role ? Object.assign(a, { state: "waiting", step: a.phase === 3 ? "if anything is found" : "after the builders", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }) : startAgent(a, task, agents)));
+    const hasArchitect = agents.some((a) => a.role === "architect");
+    agents.forEach((a) => Object.assign(a, { state: "waiting", step: WAIT_STEP[a.phase || 1] || "later", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }));
+    if (!hasArchitect) for (const a of agents) if (!a.role) a.step = "starting";
+    const PHASES = [...new Set(agents.map((a) => a.phase || 1))].sort((x, y) => x - y);
     const next = () => {
-      for (const n of [1.5, 2, 3]) {
+      for (const n of PHASES) {
+        // the builders start from the architect's contract
+        if (n === 1 && hasArchitect && contractFile && phase(1).some((a) => a.state === "waiting") && agents.filter((a) => (a.phase || 1) < 1).every(ended)) {
+          try { contract = require("fs").readFileSync(contractFile, "utf8").replace(/^# Team contract[^\n]*\n+/, "").trim().slice(0, 12000) || contract; } catch {}
+        }
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
         for (const a of waiting) {
@@ -740,7 +845,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
           else if (n === 3 && !agents.filter((x) => x.role && (x.phase || 1) < 3).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
-          else if (a.internal) startBrowser(a, task, agents);
+          else if (a.role === "browser") startBrowser(a, task, agents);
+          else if (a.internal) startInternal(a, task, agents);
           else startAgent(a, task, agents);
         }
       }
@@ -767,6 +873,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           wake();
         };
         draw();
+        wake(); // the first stage starts (the architect, or the builders)
       });
     } finally {
       // the full-window app: the board's last state goes into the conversation, where it stays

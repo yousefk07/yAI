@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.126",
+      "date": "2026-10-22",
+      "title": "Ten more team members",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Architect, merger, designer and spec checker",
+          "text": "In /team, an architect can design how the pieces fit before anyone builds (a detailed contract every builder follows), a merger joins the builders' pieces, a designer polishes the look (CSS only), and a spec checker goes through your request item by item at the very end."
+        },
+        {
+          "area": "yAI Code",
+          "title": "API and setup checkers",
+          "text": "An API checker starts the server, calls every route with good and bad input and checks the answers; a setup checker makes sure it runs from a clean checkout (imports, dependencies, file-name case, README steps, no secrets)."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Checks yAI runs in a real browser",
+          "text": "Mobile (phone, tablet and laptop sizes: sideways scrolling, cut-off areas, tiny buttons), performance (load time, page weight, frame rate, freezes), accessibility (axe-core rules and keyboard use) and a playtester that plays a game for 30 seconds, through game over and Play again, and checks saved scores survive a reload. The checklist groups everyone by when they run, with sensible defaults for the task."
+        }
+      ]
+    },
+    {
       "version": "1.0.125",
       "date": "2026-10-22",
       "title": "A team that checks the controls",
