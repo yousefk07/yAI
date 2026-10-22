@@ -406,7 +406,8 @@ module.exports = function create({ ui }) {
       const on = sel === k;
       const box = r.on ? c.accent("[x]") : c.faint("[ ]");
       const name = ui.pad(r.on ? c.ink(r.label) : c.dim(r.label), labelW);
-      const tag = !anyModel ? "" : ui.pad(!r.model ? "" : on && models.length > 1 ? `${c.accent("‹")} ${c.ink(short(r.model))} ${c.accent("›")}` : `  ${(r.on ? c.soft : c.faint)(short(r.model))}`, modelW) + "  ";
+      // a row without a model is one of yAI's own checks (no AI): it says so, so ← → doing nothing there isn't a mystery
+      const tag = !anyModel ? "" : ui.pad(!r.model ? `  ${c.faint("built-in")}` : on && models.length > 1 ? `${c.accent("‹")} ${c.ink(short(r.model))} ${c.accent("›")}` : `  ${(r.on ? c.soft : c.faint)(short(r.model))}`, modelW) + "  ";
       const desc = c.faint(ui.clip(r.desc || "", Math.max(10, w - labelW - modelW - 16)));
       out.push(` ${on ? c.accent("❯") : " "} ${box} ${c.faint(String(k + 1).padStart(2))}  ${on ? c.bold(name) : name}  ${tag}${desc}`);
       k++;

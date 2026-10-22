@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.143",
+      "date": "2026-10-22",
+      "title": "A shorter /team ending",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "One summary instead of every report",
+          "text": "When a /team run ends you get one aligned block: what was built, every check's verdict, what the fixer changed and whether the re-run tests pass, and a list of anything that needs a look. The reports are no longer printed one after another; /team log shows any agent's whole report, and yAI still has them all for follow-up questions."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Built-in checks are labelled",
+          "text": "In the /team picker, yAI's own browser checks (mobile, performance, accessibility, playtester) say built-in in the model column, since they use no AI model."
+        }
+      ]
+    },
+    {
       "version": "1.0.142",
       "date": "2026-10-22",
       "title": "A model for each /team agent",

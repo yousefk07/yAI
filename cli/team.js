@@ -694,11 +694,6 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     });
     return cmds.reduce((p, cmd) => p.then(async (rs) => (signal?.aborted ? rs : [...rs, await one(cmd)])), Promise.resolve([]));
   }
-  const recheckPill = (rs) => {
-    const bad = rs.filter((r) => r.code !== 0).length;
-    const counts = rs.find((r) => r.counts)?.counts;
-    return bad ? c.red(`checks fail${counts ? ` ${counts.failed}/${counts.passed + counts.failed}` : ""}`) : c.green(`checks pass${counts ? ` ${counts.passed}` : ""}`);
-  };
 
   let lastTeam = null; // the last team's agents, for /team log
   function showLog(arg) {
@@ -1010,42 +1005,49 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       }
     }
 
-    // 4. The reports: the builders' last lines, then each member's report whole, the fixer last.
+    // 4. The summary (2026-10-22, Yousef: no more every agent's report dumped at the end): one aligned block with the
+    // checks, the fix and what needs a look. The reports go into the conversation, and /team log shows any one whole.
     const cost = agents.reduce((s, a) => s + a.cost, 0);
     state.cost.session += cost;
     const files = new Set(agents.flatMap((a) => [...a.changed]));
     const builders = agents.filter((a) => !a.role);
     const crew = agents.filter((a) => a.role);
-    print("");
-    ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed${cost ? ` · $${cost.toFixed(3)}` : ""}`)}`);
-    if (crew.length) print(`     ${crew.map((a) => `${c.dim(a.role)} ${a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || (a.hasVerdict ? c.yellow("no verdict") : c.faint("done"))}${a.recheck ? " " + recheckPill(a.recheck) : ""}`).join(c.faint("  ·  "))}`);
     const quiet = crew.filter(silent);
-    if (quiet.length) print(`     ${c.yellow("!")} ${c.dim(`${quiet.map((a) => a.role).join(" and ")} finished without a verdict, so ${quiet.length === 1 ? "its check" : "their checks"} may be incomplete${crew.some((a) => a.role === "fixer" && a.state === "done") ? " (the fixer looked at it)" : ""}.`)}`);
-    for (const a of [...builders, ...crew]) {
-      if (a.state === "skipped") continue;
-      print("");
-      const what = a.readOnly ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed";
-      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.verdict ? " " + verdictPill(a.verdict) : ""}${a.flag ? " " + c.yellow(a.flag) : ""} ${c.faint(clip(what, Math.max(20, ui.width() - a.name.length - 16)))}`);
-      const said = a.text.join("\n").trim() || a.error || "";
-      // a builder's report shows its last lines; the others' reports are shown whole (up to 40 lines), wrapped, without the VERDICT line
-      const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));
-      if (a.role) {
-        const shown = lines.slice(0, 40).filter((x) => !/^\s*```/.test(x));
-        for (const l of ui.withTables(shown, ui.width() - 6, (x) => wrapText(x, ui.width() - 6).map((w) => c.ink(md(w))))) print(`     ${l}`);
+    // a labelled row whose parts wrap under each other, never splitting a part or starting a line with a separator
+    const row = (label, parts) => {
+      if (!parts.length) return;
+      const indent = 14, room = Math.max(30, ui.width() - indent - 2), sep = c.faint("  ·  ");
+      const lines = [[]];
+      for (const p of parts) {
+        const cur = lines[lines.length - 1];
+        if (cur.length && ui.vis(cur.join(sep)) + 5 + ui.vis(p) > room) lines.push([p]);
+        else cur.push(p);
       }
-      else for (const l of lines.slice(-8).filter((x) => !/^\s*```/.test(x))) print(`     ${c.dim(md(clip(l, ui.width() - 6)))}`);
-      if (a.recheck) {
-        print("");
-        print(`     ${c.bold(c.ink("Re-run by yAI"))} ${c.faint("· the tests and the page after the fixer, to check its verdict")}`);
-        for (const r of a.recheck) {
-          print(`     ${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.ink(clip(r.cmd, ui.width() - 40))} ${c.dim(`· ${r.timedOut ? "timed out" : `exit ${r.code}`}${r.counts ? ` · ${r.counts.passed} passed, ${r.counts.failed} failed` : ""}`)}`);
-          if (r.code !== 0) for (const l of r.tail.slice(-6)) print(`         ${c.dim(clip(l, ui.width() - 10))}`);
-        }
-        if (a.verdict === "FIXED" && a.recheck.some((r) => r.code !== 0)) print(`     ${c.red("!")} ${c.ink("The fixer said FIXED, but the checks still fail.")}`);
-      }
-    }
+      lines.forEach((l, i) => print(`   ${i ? " ".repeat(indent - 3) : c.faint(label.padEnd(indent - 3))}${l.join(sep)}`));
+    };
+    const outcome = (a) => a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || (a.hasVerdict ? c.yellow("no verdict") : c.faint("done"));
+    const fixerA = crew.find((a) => a.role === "fixer");
+    const free = agents.filter((a) => !a.internal && a.state !== "skipped" && !a.cost).length;
     print("");
-    print(c.dim(`   Their reports are in this conversation now: ask a follow-up, /review to check the change as a whole, or /team log 1–${agents.length} for an agent's whole log.`));
+    ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed · $${cost.toFixed(3)}${free ? ` · ${free} agent${free === 1 ? "" : "s"} cost nothing` : ""}`)}`);
+    print("");
+    row("Built", builders.map((a) => `${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.flag ? " " + c.yellow(a.flag) : ""}`));
+    row("Checked", crew.filter((a) => a.role !== "fixer").map((a) => `${c.dim(a.role)} ${outcome(a)}`));
+    if (fixerA) row("Fixed", [
+      fixerA.state === "skipped" ? c.faint("nothing to fix") : `${c.dim("fixer")} ${outcome(fixerA)}${fixerA.changed.size ? c.faint(` · ${[...fixerA.changed].join(", ")}`) : ""}`,
+      ...(fixerA.recheck || []).map((r) => `${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.dim(clip(r.cmd, 40))}${r.counts ? c.dim(` ${r.counts.passed} passed, ${r.counts.failed} failed`) : ""}`),
+    ]);
+    // what needs a look, one line each
+    const attention = [
+      ...agents.filter((a) => a.state === "failed").map((a) => `${a.name} failed${a.error ? `: ${row1(a.error)}` : ""}`),
+      ...agents.filter((a) => a.flag).map((a) => `${a.name}: ${a.flag}`),
+      ...quiet.map((a) => `${a.role} gave no verdict, so its check may be incomplete`),
+      ...(fixerA?.verdict === "FIXED" && fixerA.recheck?.some((r) => r.code !== 0) ? ["the fixer said FIXED, but the checks still fail"] : []),
+      ...(fixerA?.recheck || []).filter((r) => r.code !== 0).map((r) => `${clip(r.cmd, 40)} still fails: ${row1(r.tail.slice(-1)[0] || "")}`),
+    ];
+    for (const t of attention) print(`   ${c.yellow("!")} ${c.ink(clip(t, ui.width() - 6))}`);
+    print("");
+    print(c.dim(`   /team log 1–${agents.length} shows an agent's whole report · ask a follow-up and yAI has all of them · /review checks the change`));
     const skipped = crew.filter((a) => a.state === "skipped");
     state.pendingContext.push(
       `I ran /team: ${builders.length} builder agent${builders.length === 1 ? "" : "s"} worked on this at the same time${crew.length ? `, then ${crew.map((a) => a.role).join(", ")}` : ""}: "${task}". Their reports:\n\n` +
