@@ -489,11 +489,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
 
   // ---------- running the agents ----------
   function startAgent(a, task, all) {
-    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = [];
+    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -513,7 +514,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "diff" && e.path) { a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
       else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
       else if (e.type === "text") { a.text.push(e.line); log({ k: "text", line: e.line }); }
-      else if (e.type === "note" && e.text) log({ k: "note", text: e.text });
+      else if (e.type === "note" && e.text) {
+        log({ k: "note", text: e.text });
+        if (/kept repeating steps/.test(e.text)) a.flag = "stuck · stopped";
+        else if (/^paused after \d+ steps/.test(e.text)) a.flag = "hit the step limit";
+      }
       else if (e.type === "out" && String(e.text).trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n")) log({ k: "out", line: l });
       else if (e.type === "ask") { a.asks.push(e); log({ k: "ask", text: e.title, detail: e.detail }); d.wake(); }
       else if (e.type === "error") { a.error = e.message; log({ k: "error", text: e.message }); if (a.state !== "working") a.state = "failed"; }
@@ -549,10 +554,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
       const time = secs((a.ended || Date.now()) - a.started);
       const right = `${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
-      const what = a.state === "done" ? (a.verdict ? `finished · ${a.verdict}` : "finished") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
+      const what = a.state === "done" ? ["finished", a.verdict, a.flag].filter(Boolean).join(" · ") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
       const room = Math.max(8, w - nameW - right.length - 12);
       // the number opens the agent (press it, or click the row)
-      return ` ${c.faint(String(i + 1).padStart(2))} ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
+      return ` ${c.faint(String(i + 1).padStart(2))} ${icon} ${c.ink(a.name.padEnd(nameW))}  ${(a.state === "failed" ? c.red : a.asks.length || a.flag ? c.yellow : c.dim)(clip(String(what).replace(/\s+/g, " "), room).padEnd(room))}  ${c.faint(right)}`;
     });
   }
 
@@ -933,7 +938,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       if (a.state === "skipped") continue;
       print("");
       const what = a.readOnly ? "read-only check" : a.changed.size ? [...a.changed].join(", ") : "no files changed";
-      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.verdict ? " " + verdictPill(a.verdict) : ""} ${c.faint(clip(what, Math.max(20, ui.width() - a.name.length - 16)))}`);
+      print(` ${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.verdict ? " " + verdictPill(a.verdict) : ""}${a.flag ? " " + c.yellow(a.flag) : ""} ${c.faint(clip(what, Math.max(20, ui.width() - a.name.length - 16)))}`);
       const said = a.text.join("\n").trim() || a.error || "";
       // a builder's report shows its last lines; the others' reports are shown whole (up to 40 lines), wrapped, without the VERDICT line
       const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));

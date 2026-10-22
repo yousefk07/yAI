@@ -39,7 +39,10 @@ const VERSION = (() => {
   return require("../package.json").version || "1.0.0";
 })();
 const MODES = ["default", "acceptEdits", "yolo", "plan"];
-const MAX_STEPS = 50; // tool calls per request before yAI stops to check in
+const MAX_STEPS = Number(process.env.YAI_MAX_STEPS) || 50; // tool calls per request before yAI stops to check in (/team raises it for agents that write)
+// Steps that only look at things: the same one again with nothing changed gives the same answer, so it isn't run
+// twice (2026-10-22: a /team builder re-read the same three parts of a file 43 times and wrote nothing, at 20x the cost).
+const LOOK_STEPS = new Set(["read_file", "list_files", "search", "find_files", "run"]);
 // Share of the model's window at which old tool output is dropped, and at which the conversation is
 // summarized automatically so a task never stops at 100%.
 const TRIM_AT = 0.75;
@@ -1751,6 +1754,8 @@ async function runAgent(content) {
   let lastError = "", sameError = 0; // the same tool error repeated back to back
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
+  const doneSteps = new Map(); // look-only step + what had changed when it ran -> its step number
+  let repeats = 0; // look-only steps asked for again with nothing changed
   const undoStart = state.undo.length;
   const costStart = state.cost.session;
   state.task = { files: new Map(), tests: null, failure: null, offerFix: false, reads: 0, searches: 0 };
@@ -1833,7 +1838,25 @@ async function runAgent(content) {
         ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);
       } else {
         cutOffs = 0;
-        result = await execTool(call);
+        // "Nothing changed" = none of yAI's own edits since, and (for a file) the file on disk is untouched, since
+        // another /team agent may have written it.
+        let sig = "";
+        if (LOOK_STEPS.has(call.name)) {
+          let mtime = "";
+          if (call.name === "read_file") try { mtime = fs.statSync(path.resolve(root, String(call.args?.path || ""))).mtimeMs; } catch {}
+          sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
+        }
+        if (sig && doneSteps.has(sig)) {
+          repeats++;
+          result = {
+            output: `You already did this exact step (step ${doneSteps.get(sig) + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.` +
+              (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
+          };
+          ui.note(c.dim(`· same step as before (${call.name}) · not run again`));
+        } else {
+          result = await execTool(call);
+          if (sig) doneSteps.set(sig, step);
+        }
       }
       if (state.interrupted) {
         pushUser(`<tool_result name="${call.name}">\nInterrupted by the user.\n</tool_result>`);
@@ -1872,7 +1895,14 @@ async function runAgent(content) {
       } else sameError = 0;
       lastError = result.output;
       if (result.stop) return;
-      if (step === MAX_STEPS - 1) print(c.yellow(`   ‖ paused after ${MAX_STEPS} steps · say "continue" to keep going`));
+      if (repeats >= 6) {
+        ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim("Try a bigger model (/model) or say what to do next.")}`);
+        break;
+      }
+      if (step === MAX_STEPS - 1) {
+        if (state.stdio) ui.note(`paused after ${MAX_STEPS} steps`);
+        else print(c.yellow(`   ‖ paused after ${MAX_STEPS} steps · say "continue" to keep going`));
+      }
     }
     const secs = Math.round((Date.now() - started) / 1000);
     const out = state.usage.out - startOut;

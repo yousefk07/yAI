@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.127",
+      "date": "2026-10-22",
+      "title": "No more agents going round in circles",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Repeated steps are caught",
+          "text": "If yAI asks to read the same file, list the same folder or run the same command again when nothing has changed, it isn’t done twice: yAI is told it already has the answer. After three repeats it is told to make its change or finish, and after six it is stopped. In a test run, one /team builder had re-read the same file 43 times and written nothing."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Team agents that write get 100 steps",
+          "text": "Builders, the merger, the designer and the fixer can now take up to 100 steps instead of 50, so a fixer no longer stops halfway through a fix. The board shows “stuck · stopped” or “hit the step limit” in yellow when that happens."
+        }
+      ]
+    },
+    {
       "version": "1.0.126",
       "date": "2026-10-22",
       "title": "Ten more team members",
