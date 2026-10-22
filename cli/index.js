@@ -1445,8 +1445,10 @@ async function callModel() {
         if (price) spinner.extra(`~$${((promptTokens * price.in + n * price.out) / 1e6).toFixed(3)}`);
       },
       onText: (piece) => {
-        text += piece;
-        lineBuf += piece;
+        // DeepSeek's own API writes <｜｜DSML｜｜ …> with doubled bars where Modal's endpoint writes <｜DSML｜ …>
+        // (2026-10-22); both become the single form the parser knows. A tag split across pieces is caught once whole.
+        text = (text + piece).replace(DSML_BARS, "｜DSML｜");
+        lineBuf = (lineBuf + piece).replace(DSML_BARS, "｜DSML｜");
         let i;
         while ((i = lineBuf.indexOf("\n")) !== -1) {
           emit(lineBuf.slice(0, i).replace(/\r$/, ""));
@@ -1516,6 +1518,7 @@ async function callModel() {
 // A reply can be DSML only by its closers (it opened with yAI's <tool name="write_file"> and closed with
 // </｜DSML｜ parameter></｜DSML｜ invoke>, 2026-10-21), so closers count as DSML too. A </tool> only ends a call on a
 // line of its own, so file text that mentions </tool> doesn't end it early.
+const DSML_BARS = /｜{2,}DSML｜+|｜+DSML｜{2,}/g;
 const DSML_START = /<｜DSML｜\s*(?:function_|tool_)?calls>|<｜DSML｜\s*invoke\b/;
 const DS_MARK = /<\/?｜DSML｜|<parameter\s+name\s*=/;
 const DSML_END = /<\/｜DSML｜\s*(?:invoke|(?:function_|tool_)?calls)>/;

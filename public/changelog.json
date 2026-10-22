@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.134",
+      "date": "2026-10-22",
+      "title": "DeepSeek’s tool calls understood",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Steps run again on yAI Ultra Flash",
+          "text": "Through DeepSeek’s own API the model writes its tool calls with doubled bars, which yAI Code didn’t recognise, so it showed the markup instead of running the step. Both forms work now."
+        }
+      ]
+    },
+    {
       "version": "1.0.133",
       "date": "2026-10-22",
       "title": "yAI Ultra Flash through DeepSeek",
