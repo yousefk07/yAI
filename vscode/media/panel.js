@@ -172,6 +172,7 @@
       return { usd: (req * ctx * 1000 * (0.07 * (p.in || 0) + 0.93 * (p.cached ?? p.in ?? 0)) + out * 1000 * (p.out || 0)) / 1e6, min };
     };
     const card = add("", "team-card pick");
+    let rounds = ev.rounds || 1; // build → judge → improve, up to this many times (Showcase sets 3)
     const draw = () => {
       const on = rows.filter((r) => r.on), builders = on.filter((r) => r.builder).length;
       const usd = on.reduce((s, r) => s + est(r).usd, 0);
@@ -184,7 +185,8 @@
           (r.builtIn ? `<span class="pr-model muted">built-in</span>` : `<select data-m="${r.i}">${ev.models.map((m) => `<option value="${esc(m.id)}" ${m.id === r.model ? "selected" : ""}>${esc(m.short)}</option>`).join("")}</select>`) +
           `<span class="pr-est">${r.builtIn ? "free" : `${est(r).min < 1 ? "<1" : Math.round(est(r).min)}m · ${money(est(r).usd)}`}</span><span class="pr-desc">${esc(r.desc)}</span></label>`).join("") + `</div>`).join("") +
         `<div class="tc-foot"><button type="button" class="start" ${builders ? "" : "disabled"}>▶ Start ${builders ? on.length : 0} agent${on.length === 1 ? "" : "s"}</button>` +
-        `<span class="muted">~${Math.max(1, Math.round(min))} min · ${usd ? "~" + money(usd) : "free"} · ${builders} at once</span>` +
+        `<span class="muted">~${Math.max(1, Math.round(min * rounds))} min · ${usd ? "~" + money(usd * rounds) : "free"} · ${builders} at once</span>` +
+        `<label class="muted">rounds <select data-rounds>${[1, 2, 3, 4, 5].map((n) => `<option ${n === rounds ? "selected" : ""}>${n}</option>`).join("")}</select></label>` +
         `<span class="tc-links"><button type="button" class="link" data-chat>Chat about the plan</button> <button type="button" class="link" data-cancel>Cancel</button></span></div>`;
     };
     // once answered, the picker folds to one line (the board takes over below it)
@@ -196,6 +198,7 @@
     };
     card.fold = () => fold(`Team picked · ${rows.filter((r) => r.on).length} agents`); // answered another way
     card.addEventListener("change", (e) => {
+      if (e.target.dataset.rounds != null) { rounds = Number(e.target.value) || 1; return draw(); }
       const i = e.target.dataset.i ?? e.target.dataset.m;
       const r = rows.find((x) => String(x.i) === String(i));
       if (!r) return;
@@ -204,8 +207,8 @@
     });
     card.addEventListener("click", (e) => {
       const p = e.target.closest("[data-preset]");
-      if (p) { for (const r of rows) { if (r.presets) r.on = !!r.presets[p.dataset.preset]; if (r.presetModels && r.presetModels[p.dataset.preset]) r.model = r.presetModels[p.dataset.preset]; } return draw(); }
-      if (e.target.closest(".start")) return finish({ rows: rows.map((r) => ({ i: r.i, on: r.on, model: r.model })) });
+      if (p) { for (const r of rows) { if (r.presets) r.on = !!r.presets[p.dataset.preset]; if (r.presetModels && r.presetModels[p.dataset.preset]) r.model = r.presetModels[p.dataset.preset]; } if (p.dataset.preset === "s") rounds = 3; return draw(); }
+      if (e.target.closest(".start")) return finish({ rows: rows.map((r) => ({ i: r.i, on: r.on, model: r.model })), rounds });
       if (e.target.closest("[data-chat]")) return finish({ chat: true });
       if (e.target.closest("[data-cancel]")) return finish(null);
     });
@@ -231,7 +234,9 @@
     const v = team.view, keep = stick();
     const strip = v.strip.map((s) => { const total = Math.max(1, s.total), d = s.total ? (s.done / s.total) * 100 : s.past ? 100 : 0, w = s.total ? (s.working / s.total) * 100 : 0;
       return `<div class="sg ${s.current ? "cur" : s.past ? "past" : ""}" style="flex:${total}"><div class="bar"><i style="width:${d}%"></i><i class="w" style="width:${w}%"></i></div><span>${esc(s.label)}</span></div>`; }).join("");
-    const head = `<div class="tc-head"><b title="${esc(v.task)}">${esc(v.task)}</b></div><div class="tc-stats"><span><b>${v.done} / ${v.total}</b> done</span>${v.working ? `<span><b>${v.working}</b> working</span>` : ""}<span><b>${esc(v.elapsed)}</b></span><span><b>${esc(v.cost)}</b>${v.estimate ? ` of ~${esc(v.estimate)}` : ""}</span>${v.over ? `<span class="muted">finished</span>` : ""}</div><div class="strip">${strip}</div>`;
+    const head = `<div class="tc-head"><b title="${esc(v.task)}">${esc(v.task)}</b></div><div class="tc-stats"><span><b>${v.done} / ${v.total}</b> done</span>${v.working ? `<span><b>${v.working}</b> working</span>` : ""}<span><b>${esc(v.elapsed)}</b></span><span><b>${esc(v.cost)}</b>${v.estimate ? ` of ~${esc(v.estimate)}` : ""}</span>${v.over ? `<span class="muted">finished</span>` : ""}</div><div class="strip">${strip}</div>` +
+      // between rounds: play it, say what to change, or go on
+      (v.waiting ? `<div class="waitbar"><b>Round ${v.waiting.round} is done.</b> <button type="button" class="link" data-act="open">Open it to play</button> · type what to change below · <button type="button" class="link" data-act="go">Go on</button> <span class="muted">${v.waiting.seconds}s</span></div>` : "");
     if (v.agent) { team.card.innerHTML = head + agentHtml(v.agent); }
     else {
       const stages = v.stages.map((g) => `<div class="stage"><div class="stage-name ${g.current ? "cur" : ""}"><b>${esc(g.name)}</b> ${esc(g.note)}</div>` + g.rows.map((r) =>
@@ -256,6 +261,7 @@
       if (e.k === "step") body.push(`<div class="step"><span class="ic">${iconFor(e.verb || "")}</span><b>${esc(e.verb)}</b><span class="arg">${pathLink(e.arg || "")}</span></div>`);
       else if (e.k === "result") { if (e.text) body.push(`<div class="as-res ${esc(e.tone || "")}">└ ${esc(String(e.text).split("\n")[0])}</div>`); }
       else if (e.k === "diff") body.push(`<div class="as-diff"><span class="ic">${I.edit}</span><b>${e.created ? "Create" : "Edit"}</b> ${pathLink(e.path)} <span class="plus">+${e.added}</span> <span class="minus">−${e.removed}</span></div>`);
+      else if (e.k === "chat") body.push(`<div class="as-chat">${e.sent ? `◇ <span class="muted">to ${esc(e.to)}:</span>` : `◆ <b>${esc(e.from)}</b>`} ${esc(e.text)}</div>`);
       else if (e.k === "you") body.push(`<div class="as-you">› <b>you</b> ${esc(e.text)} <span class="${e.read ? "ok" : "muted"}">${e.read ? "✓ read" : "· read after its current step"}</span></div>`);
       else if (e.k === "note" || e.k === "error") body.push(`<div class="note ${e.k === "error" ? "error" : ""}">${esc(e.text)}</div>`);
     }

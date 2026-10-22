@@ -233,3 +233,10 @@ kbd { font: 10.5px var(--mono); opacity: 0.7; min-width: 10px; }
 .as-diff .ic svg { width: 14px; height: 14px; }
 .as-you { padding: 4px 8px; border-radius: 6px; background: var(--acc-soft); }
 .as-you b { color: var(--acc); }
+
+/* between rounds (2026-10-22): the board waits for you to play it */
+.waitbar { padding: 7px 10px; border-radius: 8px; background: var(--acc-soft); border: 1px solid var(--acc); }
+
+/* the team chat in an agent's transcript (2026-10-22) */
+.as-chat { padding: 4px 8px; border-left: 2px solid var(--acc); color: var(--fg); }
+.as-chat b { color: var(--acc); }

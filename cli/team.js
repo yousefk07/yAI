@@ -92,17 +92,21 @@ const LEAD_SYSTEM =
 // The members who aren't builders. phase 2 runs when the builders finish; phase 3 (the fixer) only if a check found
 // something. readOnly roles run in plan mode and can't edit; the others edit, and all may run checks that change nothing.
 const WEB = /html|page|site|website|web ?app|game|canvas|\bui\b|frontend|landing|dashboard/i;
+// the task without the browser's own APIs ("simple sound with the Web Audio API" isn't a web server to test or secure)
+const serverish = (t) => String(t).replace(/\b(web ?audio|canvas|web ?gl|webgpu|fetch|dom|browser|storage|local ?storage|gamepad|speech|web ?speech|pointer ?lock|fullscreen|vibration|clipboard|geolocation|notification|file|web)\s+api\b/gi, "");
 const GAME = /\bgame\b|arcade|platformer|shooter|breakout|snake|tetris|pong|\bplayer\b/i;
 const ROLES = [
+  // 2026-10-22: a single yAI Code session that searched the web for what Minecraft needs beat a team that only had the prompt
+  { key: "researcher", phase: 0.2, verdict: false, on: (t, n) => n >= 4, desc: "searches the web for what a great version needs and writes TEAM_SPEC.md, the checklist everyone works to" },
   { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
   { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|look|beautiful|polish|pretty|modern|sleek|styl/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
   { key: "integration", phase: 2, readOnly: true, on: true, desc: "checks the pieces fit together (imports, routes, data shapes)" },
   { key: "tester", phase: 2, on: true, desc: "writes and runs tests for the new work (test files only)" },
   { key: "reviewer", phase: 2, readOnly: true, on: false, desc: "reviews the code for bugs, edge cases and messy code" },
-  { key: "security", phase: 2, readOnly: true, on: (task) => /server|api|login|auth|password|token|form|upload|database|sql|payment|cookie|session/i.test(task), desc: "looks for security holes (injection, auth, secrets, unsafe input)" },
+  { key: "security", phase: 2, readOnly: true, on: (task) => /server|api|login|auth|password|token|form|upload|database|sql|payment|cookie|session/i.test(serverish(task)), desc: "looks for security holes (injection, auth, secrets, unsafe input)" },
   { key: "docs", phase: 2, on: false, verdict: false, desc: "updates the README and docs for what changed" },
-  { key: "api", phase: 2, on: (t) => /\bapi\b|server|backend|endpoint|route|database|express|\brest\b/i.test(t), desc: "calls every route with good and bad input and checks the answers" },
+  { key: "api", phase: 2, on: (t) => /\bapi\b|server|backend|endpoint|route|database|express|\brest\b/i.test(serverish(t)), desc: "calls every route with good and bad input and checks the answers" },
   { key: "setup", phase: 2, readOnly: true, on: (t) => /npm|package|deploy|vercel|install|setup|readme|dependenc/i.test(t), desc: "checks it runs from a clean checkout: imports, dependencies, paths, README" },
   { key: "mobile", phase: 1.6, internal: true, on: (t) => WEB.test(t), desc: "yAI opens it at phone, tablet and laptop sizes" },
   { key: "performance", phase: 1.6, internal: true, on: (t) => GAME.test(t), desc: "yAI measures load time, page weight and frame rate" },
@@ -111,7 +115,11 @@ const ROLES = [
   { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
   { key: "spec", phase: 4, readOnly: true, on: true, desc: "checks the result against your request, item by item" },
 ];
-const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 3.2: "after the fixer", 3.4: "after the re-check", 3.6: "after fixer 2", 4: "at the end" };
+// Rounds (2026-10-22): round r's phases are 10*(r-1) + the usual phase, so lp() is the phase within a round and rnd() an
+// agent's round (1 when it has none).
+const lp = (p) => (p || 1) % 10;
+const rnd = (a) => a.round || 1;
+const WAIT_STEP = { 0.2: "first", 0.5: "first", 0.8: "after the architect", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 3.2: "after the fixer", 3.4: "after the re-check", 3.6: "after fixer 2", 4: "at the end" };
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
 // what the integration check looks at (the reviewer takes these on when both run)
 const INTEGRATION_ITEMS = [
@@ -177,11 +185,13 @@ module.exports = function create(d) {
     const roles = all.filter((a) => a.role).map((a) => a.role);
     return [
       `You are one of ${all.filter((a) => !a.role).length} builder agents working at the same time in this project, as a team${roles.length ? " (checkers look at the work after you)" : ""}. The team's overall task: ${task}`,
+      ...(rnd(me) > 1 ? ["", `This is round ${rnd(me)}: the app already exists and runs. Your job is to improve it as described below; read the files you need first, keep what works, and check it with check_page when you're done.`] : []),
       "", `Your feature: ${me.task}`,
       // feature ownership (2026-10-22): the files it creates are its own; it hooks into others' files with small exact edits
       "", me.files.length ? `Files you create (they're yours): ${me.files.join(", ")}. Your feature may also need small hooks in files other agents create (a call in the main loop, a tag in the page): make those with edit_file, a few lines each, and leave the rest of their code alone. Never write_file over a file you didn't create.` : "Keep your changes to the files your feature needs; in files other agents create, only small edit_file hooks.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
-      ...contractLines(), ...notesLines(),
+      ...contractLines(), ...notesLines(), ...specLines(), ...chatLines(), "", CHAT,
+      ...(all.some((x) => x.role === "skeleton" && BAD.test(x.verdict || "")) ? ["", "yAI opened the architect's skeleton and it doesn't run yet:", ...all.find((x) => x.role === "skeleton").text, "Whoever owns the file with the problem fixes it first."] : []),
       // the architect's skeletons (2026-10-22): every file starts with the shared names, so the pieces fit from the start
       ...(roles.includes("architect") ? ["", "The architect already started your files as skeletons: the shared names with empty bodies. Read them first, keep every name, signature, id and script tag exactly as they are, and fill them in. Don't rename or remove anything a skeleton has; add your own private helpers freely."] : []),
       ...others.map((o) => `"${o.name}" owns: ${clip(o.task, 300)}${o.files.length ? ` (it creates ${o.files.join(", ")})` : ""}. Don't build its feature; if you need something from it that the contract doesn't give, say so in your report under "For the others".`),
@@ -247,8 +257,8 @@ module.exports = function create(d) {
     return list.length ? ["", "yAI's own checks of the page:", ...list.map((a) => `## ${a.role} (${a.verdict ? "VERDICT: " + a.verdict : a.state})\n${a.text.filter((l) => !/^VERDICT:/.test(l)).join("\n")}`)] : [];
   };
   const browserLines = (all) => {
-    const b = all.find((a) => a.role === "browser" && a.text?.length);
-    const again = all.find((a) => a.role === "fixer" && a.pageAgain)?.pageAgain;
+    const b = all.filter((a) => a.role === "browser" && a.text?.length).pop(); // the latest round's
+    const again = all.filter((a) => a.role === "fixer" && a.pageAgain).pop()?.pageAgain;
     if (!b) return [];
     // after the fixer, the newer look replaces the old one (2026-10-22: the spec checker judged a fixed game by the
     // errors from before the fix)
@@ -278,6 +288,13 @@ module.exports = function create(d) {
   // The lead's contract: the names every file shares, given word for word to every agent.
   let contract = "", contractFile = "";
   const contractLines = () => (contract ? ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\":", contract] : []);
+  // TEAM_SPEC.md: the researcher's checklist, next to the contract; everyone after it is pointed at it
+  const specFile = () => path.join(contractFile ? path.dirname(contractFile) : root, "TEAM_SPEC.md");
+  const specAt = () => path.relative(root, specFile()).split(path.sep).join("/");
+  const specLines = () => (require("fs").existsSync(specFile()) ? ["", `The team's checklist (what a great version of this needs, researched on the web) is in ${specAt()}. Read the items that touch your work: they're how the result is judged.`] : []);
+  const CHAT = "Team chat: team_say tells the other agents something that affects them (a hook you added in a file they own, a shared name you renamed or need, a question about how a piece fits, or the answer to one); give a name in <to> to reach one agent. Their messages reach you after your steps. Use it a few times at most, never for routine progress.";
+  // what was said on the chat before this agent started (the last 12 messages)
+  const chatLines = () => (chatLog.length ? ["", "The team chat so far (newest last):", ...chatLog.slice(-12).map((m) => `- ${m.from}${m.to ? ` to ${m.to}` : ""}: ${m.text}`)] : []);
   const verdictRule = (a, b) => `End your report with one last line, exactly "VERDICT: ${a}" or "VERDICT: ${b}".`;
   // Every report in one shape (2026-10-22, Yousef: the reports looked messy), so the agent view can draw it neatly.
   const REPORT_STYLE = [
@@ -291,15 +308,24 @@ module.exports = function create(d) {
   // The briefs of the members who check the builders' work (phase 2).
   function roleBrief(a, task, all) {
     const n = all.filter((x) => !x.role).length;
-    const head = a.role === "architect"
+    const head = a.role === "researcher"
+      ? `You are the researcher on a team of agents working in this project. Before anyone plans or builds, you find out what a great version of the task needs. The team's overall task: ${task}`
+      : a.role === "architect"
       ? `You are the architect on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} will build it AFTER you, all at the same time, each from the plan below. The team's overall task: ${task}`
       : a.role === "spec"
         ? `You are the spec checker on a team of agents working in this project. Everyone has finished: the builders, the checkers and the fixer. The team's overall task: ${task}`
         : `You are the ${a.role} on a team of agents working in this project. ${n} builder agent${n === 1 ? "" : "s"} did the work and ${n === 1 ? "has" : "have"} finished. The team's overall task: ${task}`;
     const contractAt = contractFile ? path.relative(root, contractFile).split(path.sep).join("/") : "TEAM_CONTRACT.md";
     const body = {
+      researcher: [
+        "Your job: search the web (web_search, then web_fetch 2 to 4 of the best sources) for what a great version of this needs: its core features and rules, what users or players expect, and what makes amateur copies feel wrong or unfinished.",
+        `Then write ${specAt()}: a numbered checklist of 15 to 40 requirements, most important first. Each item is one line: the requirement, then how to check it (\"Breaking a block shows crack stages: hold the left button on a block and watch\"). Mark the ones the user asked for with (asked). Keep what the user asked for exactly; add only what a great version clearly needs, not wishes.`,
+        `Write only ${specAt()}; don't write code.`,
+        "", RULES,
+        "When you're done, end with a short report: the sources you used and the 5 requirements that matter most.",
+      ],
       architect: [
-        `Your job: before anyone builds, design exactly how the pieces fit and write it to ${contractAt}. Every builder gets that file word for word and must follow it, so be precise:`,
+        `Your job: before anyone builds, design exactly how the pieces fit and write it to ${contractAt}. If the team has a checklist (below), the design must make room for every item on it. Every builder gets that file word for word and must follow it, so be precise:`,
         "- every name shared between files: globals and modules, functions with their parameters and return values, events, element ids and classes, storage keys, routes;",
         "- the data shapes passed between files (fields and types), and which file owns (creates and changes) each piece of state;",
         "- the startup order (what loads first, who calls init on whom) and the main loop or request flow, step by step;",
@@ -342,7 +368,7 @@ module.exports = function create(d) {
       ],
       spec: [
         "Your job: check the finished work against the user's request, item by item. This is a READ-ONLY check: don't edit files.",
-        "First list every requirement in the request: each feature, file, behaviour, control and constraint (read it closely; 'and a high score saved' is its own item). Then for each one say DONE, PARTLY or MISSING, with the file and line you checked or what yAI's checks below showed.",
+        "First list every requirement: every item on the team's checklist if it has one (below), and everything in the request: each feature, file, behaviour, control and constraint (read it closely; 'and a high score saved' is its own item). Then for each one say DONE, PARTLY or MISSING, with the file and line you checked or what yAI's checks below showed.",
         CHECKS, "", RULES,
         "When you're done, end with the list, then a one-line summary, then a line exactly like SCORE: 24/27 (requirements DONE / requirements in your list; PARTLY doesn't count as done).", verdictRule("OK", "PROBLEMS") + " Answer OK only if every item is DONE.",
       ],
@@ -383,7 +409,7 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...notesLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...notesLines(), ...(a.role !== "researcher" ? specLines() : []), ...chatLines(), "", CHAT, ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || lp(a.phase) === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -394,12 +420,12 @@ module.exports = function create(d) {
   // The fixer (phase 3) gets the reports that found something, and fixes those problems.
   function fixerBrief(task, all, me = {}) {
     // a second round (after yAI's re-check still failed) works only from what the re-check found
-    const found = me.round === 2 ? all.filter((x) => x.role === "recheck" && x.state === "done" && BAD.test(x.verdict || "")) : all.filter(concern);
+    const found = me.fixRound === 2 ? all.filter((x) => x.role === "recheck" && rnd(x) === rnd(me) && x.state === "done" && BAD.test(x.verdict || "")) : all.filter((x) => concern(x) && rnd(x) === rnd(me));
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
-      ...(me.round === 2 ? ["A first fixer already worked on this. yAI then re-checked the result itself (the tests, the page, and playing it), and it still fails. Fix exactly what the re-check below found; that is the whole job.", ""] : []),
+      ...(me.fixRound === 2 ? ["A first fixer already worked on this. yAI then re-checked the result itself (the tests, the page, and playing it), and it still fails. Fix exactly what the re-check below found; that is the whole job.", ""] : []),
       ...workersLines(all), "",
-      ...contractLines(), ...notesLines(), ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
+      ...contractLines(), ...notesLines(), ...specLines(), ...chatLines(), "", CHAT, ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
       ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
@@ -553,8 +579,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   async function startRecheck(a, task, all) {
     Object.assign(a, { state: "working", step: "re-running the tests and the page", started: Date.now(), log: [{ k: "brief", text: a.task }] });
     d.wake();
-    const fixers = all.filter((x) => x.role === "fixer");
+    const fixers = all.filter((x) => x.role === "fixer" && rnd(x) === rnd(a));
     const fx = fixers.filter((x) => (x.phase || 1) < a.phase).pop();
+    const base = a.phase - lp(a.phase);
     const results = [];
     try {
       const cmds = testCommands(all);
@@ -593,12 +620,65 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     a.ended = Date.now();
     // still failing after the first fixer: a second round, then one more re-check
     if (failed.length && !state.interrupted && fixers.length < 2) {
-      const base = fixers[0];
-      all.push({ name: "fixer 2", task: "fixes what yAI's re-check still found failing", files: [], role: "fixer", round: 2, phase: 3.4, readOnly: false, hasVerdict: true, model: base && base.model, state: "waiting", step: "after the re-check", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
-      all.push({ name: "re-check 2", task: "yAI re-runs the tests and the page, and plays it, after the second fix", files: [], role: "recheck", phase: 3.6, readOnly: true, internal: true, hasVerdict: true, state: "waiting", step: "after fixer 2", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
+      const first = fixers[0];
+      all.push({ name: rnd(a) > 1 ? `fixer 2 · r${rnd(a)}` : "fixer 2", task: "fixes what yAI's re-check still found failing", files: [], role: "fixer", fixRound: 2, round: rnd(a), phase: base + 3.4, readOnly: false, hasVerdict: true, model: first && first.model, state: "waiting", step: "after the re-check", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
+      all.push({ name: rnd(a) > 1 ? `re-check 2 · r${rnd(a)}` : "re-check 2", task: "yAI re-runs the tests and the page, and plays it, after the second fix", files: [], role: "recheck", round: rnd(a), phase: base + 3.6, readOnly: true, internal: true, hasVerdict: true, state: "waiting", step: "after fixer 2", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
       all.sort((x, y) => (x.phase || 1) - (y.phase || 1));
       say(a.name, `${failed.length} check${failed.length === 1 ? "" : "s"} still fail → fixer 2`, "bad", failed[0].lines.slice(-1)[0] || failed[0].name);
     } else finished(a, all);
+    d.wake();
+  }
+
+  // The judge (2026-10-22): yAI plays the app in a real browser and a model that can see compares it with the request,
+  // like a demanding player, so the next round knows what to improve ("the animals are plain boxes"). It runs at the end
+  // of each round when there are rounds; the spec checker and the next round's lead read what it found.
+  const JUDGE_SYSTEM = "You judge a screenshot of an app or game against what the user asked for, like a demanding player or user. " +
+    "List what is missing, broken or unfinished compared with a polished version of what they asked for, most important first: at most 8 short lines, " +
+    "each specific enough for a developer to act on (what, where, what it should be). Don't praise and don't list what is fine. " +
+    "Then end with one line: VERDICT: GOOD if it already looks and plays like a finished version of the request, otherwise VERDICT: NEEDS WORK.";
+  async function startJudge(a, task, all) {
+    const fs = require("fs");
+    Object.assign(a, { state: "working", step: "playing it and comparing it with the request", started: Date.now(), log: [{ k: "brief", text: a.task }] });
+    d.wake();
+    const entry = entryPage(all);
+    const shot = path.join(root, "yai-media", `team-judge-r${rnd(a)}-${Date.now()}.jpg`);
+    let r = { lines: ["There's no page to look at."], frozen: false };
+    if (entry) {
+      const describe = (img) => X.withVision((m) => X.oneShot({ model: m.id, signal: state.abort?.signal, system: JUDGE_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: `What the user asked for: ${task}` }, X.imagePart(img, "image/jpeg")] }] }), state.abort?.signal).then((x) => String(x?.text || "").trim());
+      r = await require("./teamchecks").pageCheck({ entry: path.resolve(root, entry), keys: GAME.test(task) ? "KeyW:1200,Space,KeyD:500" : "", describe, saveTo: shot }).catch((err) => ({ lines: [`Couldn't open it: ${err.message}`], frozen: false }));
+    }
+    const said = r.lines.join("\n");
+    const at = said.indexOf("On screen");
+    // its findings: the lines of the description, without the verdict
+    a.findings = at < 0 ? [] : said.slice(at).split("\n").slice(1).map((l) => tidy(l)).filter((l) => l && !/^VERDICT/i.test(l)).slice(0, 8);
+    a.verdict = r.frozen ? "FAIL" : /VERDICT:\s*GOOD/i.test(said) ? "PASS" : /VERDICT:\s*NEEDS\s*WORK/i.test(said) ? "FAIL" : "";
+    a.text = [
+      r.frozen ? "The page froze." : a.findings.length ? `Round ${rnd(a)}, played and looked at:` : r.lines[0],
+      ...a.findings.map((x) => `- ${x}`),
+      ...r.lines.filter((l) => /^Errors in the browser|^Frame rate/.test(l)).map((l) => l.split("\n")[0]),
+      ...(fs.existsSync(shot) ? [`(screenshot ${path.relative(root, shot).split(path.sep).join("/")})`] : []),
+    ];
+    for (const l of a.text) a.log.push({ k: "text", line: l });
+    a.state = state.interrupted ? "stopped" : "done";
+    a.ended = Date.now();
+    finished(a, all);
+    d.wake();
+  }
+
+  async function startSkeleton(a, task, all) {
+    Object.assign(a, { state: "working", step: "opening the skeleton", started: Date.now(), log: [{ k: "brief", text: a.task }] });
+    d.wake();
+    const entry = entryPage(all);
+    const r = entry && require("fs").existsSync(path.resolve(root, entry))
+      ? await require("./teamchecks").pageCheck({ entry: path.resolve(root, entry), start: false, wait: 1500 }).catch((err) => ({ lines: [`Couldn't open it: ${err.message}`], frozen: false }))
+      : { lines: ["The architect didn't write the page."], frozen: false };
+    const errors = /Errors in the browser \(/.test(r.lines.join("\n"));
+    a.verdict = r.frozen || errors ? "FAIL" : entry ? "PASS" : "";
+    a.text = r.frozen || errors ? r.lines.filter((l) => /FROZEN|Errors in the browser|^- /.test(l)) : ["The skeleton loads and runs with no errors."];
+    for (const l of a.text) a.log.push({ k: "text", line: l });
+    a.state = state.interrupted ? "stopped" : a.verdict ? "done" : "skipped";
+    a.ended = Date.now();
+    finished(a, all);
     d.wake();
   }
 
@@ -628,6 +708,17 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // the last, re-read them until the repeat guard stopped it, and never edited). 80k leaves room in a 128k window for
   // the system prompt and the reply; builders keep 48k, which is cheaper and enough for their own files.
   const WIDE_ROLES = new Set(["merger", "integration", "reviewer", "fixer", "spec"]);
+  function relayChat(a, all, text, to) {
+    const m = { at: Date.now(), from: a.name, to: to || "", text };
+    chatLog.push(m);
+    const want = String(to || "").toLowerCase();
+    const named = want ? all.filter((x) => x !== a && (x.name.toLowerCase() === want || x.role === want || x.name.toLowerCase().startsWith(want))) : [];
+    const targets = (want ? named : all.filter((x) => x !== a)).filter((x) => x.send && (x.state === "working" || x.state === "starting"));
+    for (const x of targets) { x.send({ type: "chat", from: a.name, text, to: !!want }); x.log?.push({ k: "chat", from: a.name, text }); }
+    a.log.push({ k: "chat", to: to || "the team", text, sent: true });
+    const note = want && !targets.length ? (named.length ? " (it has finished)" : " (no agent by that name)") : "";
+    say(a.name, `${want ? `→ ${to}` : "→ team"}${note}`, "acc", text);
+  }
   function startAgent(a, task, all) {
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
     a.log = [{ k: "brief", text: a.task }];
@@ -655,6 +746,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       // the agent took in your notes (after its step): they're marked read, in its view and the feed
       else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
       else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost || a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
+      else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
       else if (e.type === "diff" && e.path) { a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
@@ -671,6 +763,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "done" && a.state === "working") {
         a.cost = e.cost?.session || 0;
         a.fallbacks = e.fallbacks || 0;
+        // it ended without a step, a word or an edit: it never got to work (the model refused, the allowance ran out…)
+        if (!a.error && !a.text.length && !a.changed.size && !a.log.some((x) => x.k === "step")) {
+          const why = [...a.log].reverse().find((x) => x.k === "error" || x.k === "note" || x.k === "out");
+          a.error = row1(why?.text || why?.line || "it stopped before doing anything (no answer from the model)");
+        }
+        if (/today'?s \$|allowance|resets at midnight|daily limit/i.test(a.error || "") && !state.interrupted) {
+          say("yAI", "today's yAI allowance ran out, so the team stopped", "bad", a.error);
+          state.teamStopReason = a.error;
+          setTimeout(() => state.abort?.abort(), 0);
+        }
         a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
@@ -690,6 +792,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // A finished agent, in the live feed: what it found (handed to the fixer), what it did, and a builder's hand-off
   function finished(a, all) {
     if (a.state !== "done") return;
+    if (a.role === "spec" && scoreOf(a)) roundScores[rnd(a)] = scoreOf(a);
     a.summary = summaryOf(a);
     if (a.role && a.role !== "fixer" && BAD.test(a.verdict || "")) {
       const p = a.internal ? (a.text || []).filter((l) => l.trim() && !/^\W*VERDICT/i.test(l)).map(tidy) : problemsOf(a);
@@ -787,6 +890,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (lines.length > 40) out.push(`     ${c.faint(`… ${lines.length - 40} more lines`)}`);
       }
       else if (e.k === "note") out.push(`   ${c.dim(clip(row1(e.text), w - 4))}`);
+      // the team chat: what it said, and what the others told it
+      else if (e.k === "chat") { blank(); out.push(e.sent ? ` ${c.accent("◇")} ${c.dim(`to ${e.to}:`)} ${c.ink(clip(row1(e.text), w - 20))}` : ` ${c.accent("◆")} ${c.bold(c.ink(e.from))} ${c.ink(clip(row1(e.text), w - 20))}`); blank(); }
       // a note you sent it: waiting until its current step ends, then read
       else if (e.k === "you") { blank(); out.push(` ${c.accent("›")} ${c.bold(c.ink("you"))} ${c.ink(clip(row1(e.text), w - 40))}  ${e.read ? c.green("✓ read") : c.faint("· it reads this after its current step")}`); blank(); }
       else if (e.k === "out") out.push(`   ${clip(String(e.line).replace(/[\r\t]/g, " "), w + 40)}`);
@@ -865,11 +970,17 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     { name: "PLAN", has: (p) => p < 1 }, { name: "BUILD", has: (p) => p === 1 }, { name: "JOIN", has: (p) => p > 1 && p < 1.5 },
     { name: "CHECK", has: (p) => p >= 1.5 && p < 3 }, { name: "FIX", has: (p) => p >= 3 },
   ];
-  const stageOf = (a) => STAGES.find((s) => s.has(a.phase || 1))?.name || "BUILD";
+  const stageOf = (a) => STAGES.find((s) => s.has(lp(a.phase)))?.name || "BUILD";
   // the live feed (newest first): hand-offs, problems found, agents finishing or stuck, your notes
   let feed = [], teamStarted = 0, teamNotes = [];
+  // rounds (2026-10-22): how many were asked for, each round's spec score, and whether the next is being planned
+  let plannedRounds = 1, roundScores = {}, planningRound = false, planFolder = "", costCap = Infinity;
+  // between rounds: { round, until, go } while the board waits for you to play it and say what to change
+  let feedbackWait = null;
+  // the team chat (2026-10-22): agents tell each other what affects them; { at, from, to, text }
+  let chatLog = [];
   const say = (who, what, tone = "", quote = "") => {
-    if (feed[0] && feed[0].who === who && feed[0].what === what && Date.now() - feed[0].at < 5000) return; // said just now
+    if (feed[0] && feed[0].who === who && feed[0].what === what && feed[0].quote === tidy(quote) && Date.now() - feed[0].at < 5000) return; // said just now
     feed.unshift({ at: Date.now(), who, what, tone, quote: tidy(quote) });
     if (feed.length > 80) feed.pop();
   };
@@ -907,6 +1018,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   function summaryOf(a) {
     const said = (a.text || []).filter((l) => l.trim() && !/^\W*VERDICT/i.test(l)).map(tidy);
     // (without the screenshot's file path, which says nothing on the board or in the report)
+    if (a.role === "judge") return `${a.verdict === "PASS" ? "Looks finished" : a.verdict ? "Needs work" : "Looked at it"}${a.findings?.length ? ` · ${a.findings[0]}` : ""}`;
+    if (a.role === "planner") return a.summary || "Planned the next round";
     if (a.internal) return `${a.verdict ? (BAD.test(a.verdict) ? "Fail" : "Pass") + " · " : ""}${(said[0] || a.step || "").replace(/[;,]?\s*\(?screenshot:?\s+\S+\.(?:jpe?g|png)\)?/gi, "").trim()}`;
     if (a.role === "fixer") return `${a.verdict === "FIXED" ? "Fixed" : a.verdict === "PARTLY" ? "Partly fixed" : "Finished"}${a.changed.size ? ` · ${shortFiles([...a.changed])}` : ""}`;
     if (a.role === "spec" && scoreOf(a)) { const [done, of] = scoreOf(a); return `${done} of ${of} requirements done`; }
@@ -949,8 +1062,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const doneN = agents.filter((a) => ENDED.includes(a.state)).length, working = agents.filter((a) => a.state === "working" || a.state === "starting").length;
     const cost = agents.reduce((s, a) => s + (a.cost || 0), 0);
     const stages = [];
-    for (const S of STAGES) {
-      const rows = agents.filter((a) => S.has(a.phase || 1));
+    // with rounds, each round's stages get their own groups ("R2 BUILD"), and the bar shows the rounds
+    const rounds = [...new Set(agents.map(rnd))].sort((x, y) => x - y);
+    for (const R of rounds) for (const S of STAGES) {
+      const rows = agents.filter((a) => rnd(a) === R && S.has(lp(a.phase)));
       if (!rows.length) continue;
       const w = rows.filter((a) => a.state === "working" || a.state === "starting").length;
       const bad = rows.filter((a) => a.state === "done" && BAD.test(a.verdict || "") && a.role !== "fixer").length;
@@ -958,13 +1073,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const span = all ? Math.max(...rows.map((a) => a.ended || 0)) - Math.min(...rows.map((a) => a.started || Date.now())) : 0;
       const note = all ? (rows.every((a) => a.state === "skipped") ? "not needed" : rows.every((a) => a.state === "stopped" || a.state === "skipped") ? "stopped" : `done in ${secs(span)}${S.name === "BUILD" && rows.length > 1 ? ` · ${rows.length} at the same time` : ""}`)
         : [w && `${w} working`, bad && `${bad} found problems`, !w && rows.every((a) => a.state === "waiting") && (S.name === "FIX" ? "only if needed" : "waiting")].filter(Boolean).join(" · ");
-      stages.push({ name: S.name, note, current: w > 0, all, total: rows.length, done: rows.filter((a) => ENDED.includes(a.state)).length, working: w,
+      stages.push({ name: R > 1 ? `R${R} ${S.name}` : S.name, round: R, note, current: w > 0, all, total: rows.length, done: rows.filter((a) => ENDED.includes(a.state)).length, working: w,
         rows: rows.map((a) => ({ n: agents.indexOf(a) + 1, st: stOf(a), name: a.name, act: actOf(a, agents), pct: pctOf(a),
           time: a.state === "waiting" || !ran(a) ? "" : secs((a.ended || Date.now()) - a.started),
           cost: !ran(a) ? "" : a.internal ? "free" : a.cost ? money(a.cost) : ENDED.includes(a.state) && a.state !== "skipped" ? "free" : "" })) });
     }
-    const strip = [...stages.map((g) => ({ label: `${cap(g.name.toLowerCase())}${g.current ? ` · ${g.working} working` : ""}`, total: g.total, done: g.done, working: g.working, current: g.current, past: g.all })),
-      { label: "Done", total: 0, done: 0, past: doneN === agents.length }];
+    const byRound = rounds.length > 1 || plannedRounds > 1;
+    const strip = byRound
+      ? [...Array.from({ length: Math.max(plannedRounds, rounds.length) }, (_, i) => {
+          const rows = agents.filter((a) => rnd(a) === i + 1), w = rows.filter((a) => a.state === "working" || a.state === "starting").length;
+          const sc = roundScores[i + 1];
+          return { label: `Round ${i + 1}${sc ? ` · ${sc[0]}/${sc[1]}` : w ? ` · ${w} working` : ""}`, total: Math.max(1, rows.length), done: rows.filter((a) => ENDED.includes(a.state)).length, working: w, current: w > 0, past: rows.length > 0 && rows.every((a) => ENDED.includes(a.state)) };
+        }), { label: "Done", total: 0, done: 0, past: doneN === agents.length && !planningRound }]
+      : [...stages.map((g) => ({ label: `${cap(g.name.toLowerCase())}${g.current ? ` · ${g.working} working` : ""}`, total: g.total, done: g.done, working: g.working, current: g.current, past: g.all })),
+        { label: "Done", total: 0, done: 0, past: doneN === agents.length }];
     return {
       title: `${c.bold(c.ink(clip(task, 60)))}${c.faint(` · ${agents.length} agents`)}`,
       stats: [`${c.bold(c.ink(`${doneN} / ${agents.length}`))} ${c.faint("done")}`, working ? `${c.bold(c.ink(String(working)))} ${c.faint("working")}` : "",
@@ -1002,6 +1124,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     return {
       task, total: agents.length, done: agents.filter((x) => ENDED.includes(x.state)).length, working: agents.filter((x) => x.state === "working" || x.state === "starting").length,
       elapsed: secs(Date.now() - teamStarted), cost: money(cost) || "$0.000", estimate: estimate ? money(estimate) : "", over: !!over,
+      waiting: feedbackWait ? { round: feedbackWait.round, seconds: Math.max(0, Math.ceil((feedbackWait.until - Date.now()) / 1000)) } : null,
       strip: v.strip, feed: v.feed,
       stages: v.stages.map((g) => ({ name: g.name, note: g.note, current: g.current, rows: g.rows.map((r) => ({ ...r, model: agents[r.n - 1].internal ? "built-in" : modelShort(agents[r.n - 1].model), canRetry: canRetry(agents[r.n - 1]), canSkip: canSkip(agents[r.n - 1]), paused: !!agents[r.n - 1].paused })) })),
       agent: a && { n: a.side.n, name: a.side.name, where: a.side.where, desc: a.side.desc, stats: a.side.stats, steps: a.side.steps, touch: a.side.touch, waiting: a.side.waiting,
@@ -1034,7 +1157,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const dir = contractFile ? path.dirname(contractFile) : root;
     const changed = [...new Set(agents.flatMap((a) => [...(a.changed || [])]))].filter((p) => !/TEAM_CONTRACT|TEAM_REPORT/i.test(p) && fs.existsSync(path.join(root, p))).sort();
     const files = changed.map((p) => ({ path: path.relative(dir, path.join(root, p)).split(path.sep).join("/"), lines: linesIn([p]) }));
-    const spec = agents.find((a) => a.role === "spec" && a.state === "done");
+    const spec = agents.filter((a) => a.role === "spec" && a.state === "done").pop(); // the last round's
     // the spec checker's list: a line per requirement, with DONE, PARTLY or MISSING in it
     const requirements = [];
     for (const l of spec ? spec.text : []) {
@@ -1052,13 +1175,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     for (const a of agents.filter((x) => x.internal)) for (const l of a.text || []) for (const m of String(l).matchAll(/\(screenshot ([^)]+\.(?:jpe?g|png))\)/g)) {
       const abs = path.join(root, m[1]);
       // embedded, so the page is one file that still works once published (and after yai-media is cleared)
-      if (fs.existsSync(abs) && shots.length < 12) shots.push({ src: `data:image/${/png$/i.test(abs) ? "png" : "jpeg"};base64,${fs.readFileSync(abs).toString("base64")}`, label: `${a.name}: ${a.role === "playtester" ? "playing it" : a.role === "mobile" ? "at phone, tablet and laptop sizes" : "what it looked like"}` });
+      if (fs.existsSync(abs) && shots.length < 12) shots.push({ src: `data:image/${/png$/i.test(abs) ? "png" : "jpeg"};base64,${fs.readFileSync(abs).toString("base64")}`, label: a.role === "judge" ? `Round ${rnd(a)}: ${a.findings?.[0] ? `the judge saw: ${a.findings[0]}` : "how it looked"}` : `${a.name}: ${a.role === "playtester" ? "playing it" : a.role === "mobile" ? "at phone, tablet and laptop sizes" : "what it looked like"}` });
     }
     const cost = agents.reduce((x, a) => x + (a.cost || 0), 0), tokens = agents.reduce((x, a) => x + (a.tokens || 0), 0);
     const score = spec ? scoreOf(spec) : null;
     const html = require("./teamreport").build({
       task, date: new Date().toLocaleString("en-CA", { dateStyle: "long", timeStyle: "short" }), folder: path.relative(root, dir).split(path.sep).join("/"),
-      stats: [[String(agents.filter((a) => a.state !== "skipped").length), "agents worked"], [secs(Date.now() - teamStarted), "start to finish"], [money(cost) || "$0.000", "cost in all"], [tokensOf(tokens), "tokens"], [String(files.length), "files built"], [String(files.reduce((x, f) => x + f.lines, 0)), "lines of code"], ...(score ? [[`${score[0]}/${score[1]}`, "requirements done"]] : [])],
+      stats: [[String(agents.filter((a) => a.state !== "skipped").length), "agents worked"], [secs(Date.now() - teamStarted), "start to finish"], [money(cost) || "$0.000", "cost in all"], [tokensOf(tokens), "tokens"], [String(files.length), "files built"], [String(files.reduce((x, f) => x + f.lines, 0)), "lines of code"], ...(score ? [[`${score[0]}/${score[1]}`, "requirements done"]] : []), ...(Object.keys(roundScores).length > 1 ? [[Object.keys(roundScores).sort().map((k) => `${roundScores[k][0]}/${roundScores[k][1]}`).join(" → "), "score, round by round"]] : [])],
       score, requirements, recheck,
       agents: agents.map((a) => ({ n: agents.indexOf(a) + 1, name: a.name, stage: cap(stageOf(a).toLowerCase()), model: a.internal ? "built-in" : modelShort(a.model) || "", time: a.state === "waiting" || !ran(a) ? "" : secs((a.ended || Date.now()) - a.started), cost: !ran(a) ? "" : a.internal ? "free" : a.cost ? money(a.cost) : "free", st: stOf(a), summary: actOf(a, agents) })),
       feed: feed.map((x) => ({ t: clock(x.at - teamStarted), who: x.who, tone: x.tone, what: x.what, quote: x.quote })),
@@ -1117,9 +1240,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       let folder = "";
       try { folder = String(planJson(text).folder || "").replace(/\\/g, "/").replace(/^\.?\/+|\/+$/g, ""); } catch {}
       if (folder && !folder.includes("..")) for (const a of agents) a.files = a.files.map((f) => (f.startsWith(folder + "/") ? f : `${folder}/${f}`));
+      planFolder = folder && !folder.includes("..") ? folder : "";
     } catch (err) {
       return print(c.red(`   ${state.interrupted ? "Stopped." : err.message}`));
     }
+    let left = null;
+    try { const u = (await api.hub("usage"))?.today?.ultra; if (u && u.limitUsd != null) left = Math.max(0, u.limitUsd - (u.spentUsd || 0)); } catch {}
+    state.teamStopReason = "";
     // 2. You pick the team: the lead's builders, the checkers after them, and the fixer. The picks are remembered.
     const saved = api.cfg.team?.roles || {};
     const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task, agents.length) : r.on }));
@@ -1135,7 +1262,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // a tester gave no verdict), Ultra for the architect's one big design job. Each list is tried in order. They
     // replaced the picks saved before they existed once (suggestedV); after that your picks are remembered as before.
     const CHEAP = ["glm-4.7-flash", "deepseek-v4.1-flash"], MID = ["deepseek-v4.1-flash", "deepseek-v4-pro"], TOP = ["deepseek-v4-pro", "deepseek-v4.1-flash"];
-    const SUGGESTED = { architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
+    const SUGGESTED = { researcher: MID, architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
     const savedModels = api.cfg.team?.suggestedV === 1 ? api.cfg.team?.models || {} : {};
     const modelFor = (key) => [savedModels[key], ...(SUGGESTED[key] || []), state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
     const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r, model: r.internal ? undefined : modelFor(r.key) }))] : []; };
@@ -1155,7 +1282,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const items = rows.filter((r) => r.kind !== "head");
     // a role's typical run: [requests, prompt in thousands of tokens, output in thousands, minutes], from real runs
     // (2026-10-22: the desktop OS team made ~15 requests an agent, 93% of each prompt cached, ~4k tokens out)
-    const PROFILE = { architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
+    const PROFILE = { researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
     const estOf = (r) => {
       if (r.role?.internal) return { usd: 0, min: 0.5 };
       const [req, ctx, out, min] = PROFILE[r.role?.key || "builder"] || PROFILE.builder;
@@ -1176,15 +1303,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       { key: "e", label: "Everything", on: () => true },
       // quality first, for a run you'll show (2026-10-22): every check that proves it works, Ultra where judgement
       // decides the result, Ultra Flash everywhere else (Lite drifted on whole-project roles)
-      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["merger", "tester", "reviewer", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
+      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["researcher", "architect", "merger", "tester", "reviewer", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
     ];
     const pickModel = (list) => list.find((id) => models.some((m) => m.id === id));
+    let rounds = 1; // build → judge → improve, up to this many times (+ and − in the picker; Showcase sets 3)
     const count = (p) => items.filter((r) => (r.role ? p.on(r) : r.on)).length;
     const NOTES = { PLAN: "first", BUILD: `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
     // VS Code (yai --stdio): the panel shows the same picker and sends back each row's tick and model
     const pickInPanel = async () => {
       const ans = await state.pickTeamHook({
-        task, builders: agents.length,
+        task, builders: agents.length, rounds,
         models: models.map((m) => ({ ...m, price: state.models.find((x) => x.id === m.id)?.price || null })),
         presets: PRESETS.map((p) => ({ key: p.key, label: p.label })),
         groups: STAGES.map((S) => ({ name: S.name, note: NOTES[S.name], rows: items.filter((r) => S.has(r.role ? r.role.phase : 1)).map((r) => ({
@@ -1195,6 +1323,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       });
       if (!ans) return null;
       if (ans.chat) return { chat: true };
+      if (ans.rounds) rounds = Math.max(1, Math.min(5, Number(ans.rounds) || 1));
       for (const x of ans.rows || []) { const r = items[x.i]; if (!r) continue; r.on = !!x.on; if (x.model && r.model && models.some((m) => m.id === x.model)) r.model = x.model; }
       return items.map((r) => !!r.on);
     };
@@ -1207,24 +1336,29 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           title: "Pick your team", width: screenW(), sel,
           sub: `The lead split "${clip(task, 60)}" into ${agents.length} builder job${agents.length === 1 ? "" : "s"}. Choose who else joins and which model each one uses.`,
           presets: PRESETS.map((p) => ({ label: p.label, count: count(p), on: items.every((r) => !r.role || !!r.on === p.on(r)) })),
-          start: { n: b ? n : 0, time: `~${Math.max(1, Math.round(t.min))} min`, cost: t.usd ? `~${money(t.usd)}` : "free", parallel: b },
+          start: { n: b ? n : 0, time: `~${Math.max(1, Math.round(t.min * rounds))} min`, cost: t.usd ? `~${money(t.usd * rounds)}` : "free", parallel: b, rounds, cap: rounds > 1 ? money(Math.max(0.3, t.usd * rounds * 2)) : "", short: left != null && t.usd * rounds > left ? money(left) || "$0" : "" },
           groups: groups.map((g) => ({ ...g, rows: g.rows.map((r) => ({ n: items.indexOf(r) + 1, label: r.label, on: r.on, model: modelShort(r.model), desc: r.desc, est: estText(r), builtIn: !!r.role?.internal })) })),
         });
       },
       onKey: (s, key, { draw, finish }) => {
         const p = !key.ctrl && PRESETS.find((x) => x.key === s);
-        if (p) { for (const r of items) { if (r.role) r.on = p.on(r); if (p.models && r.model) r.model = pickModel(p.models(r)) || r.model; } draw(); return true; }
+        if (p) { for (const r of items) { if (r.role) r.on = p.on(r); if (p.models && r.model) r.model = pickModel(p.models(r)) || r.model; } if (p.key === "s") rounds = 3; draw(); return true; }
+        if ((s === "+" || s === "=") && rounds < 5) { rounds++; draw(); return true; }
+        if (s === "-" && rounds > 1) { rounds--; draw(); return true; }
         if (s === "c" && !key.ctrl) { finish({ chat: true }); return true; }
         return false;
       },
-      keys: [["↑↓", "move"], ["space", "toggle"], ["← →", "model"], ["q r e s", "presets"], ["enter", "start"], ["c", "chat"], ["esc", "cancel"]],
+      keys: [["↑↓", "move"], ["space", "toggle"], ["← →", "model"], ["q r e s", "presets"], ["+ −", "rounds"], ["enter", "start"], ["c", "chat"], ["esc", "cancel"]],
     });
     if (!picked) return print(c.dim("   Cancelled."));
     if (picked.chat) {
       state.pendingContext.push(`I ran /team for: "${task}". The lead split it into: ${agents.map((a) => `${a.name} (${a.task}${a.files.length ? `; files: ${a.files.join(", ")}` : ""})`).join("; ")}. I want to talk the plan over before starting; when it's right I'll run /team again.`);
       return print(c.dim("   Not started. Say what you'd change about the plan, then run /team again."));
     }
-    const estimate = totals().usd;
+    const estimate = totals().usd * rounds;
+    plannedRounds = Math.max(1, picked.rounds || rounds);
+    // the cost cap: twice the estimate, so a run that goes long stops planning more rounds instead of running away
+    costCap = Math.max(0.3, estimate * 2);
     items.forEach((r, i) => (r.on = picked[i]));
     const builderRows = items.filter((r) => !r.role);
     agents.forEach((a, i) => (a.model = builderRows[i].model));
@@ -1275,6 +1409,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     if (entryPage(agents)) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
     // the finish gate: yAI's re-check after the fixer (see startRecheck)
     if (agents.some((a) => a.role === "fixer")) agents.push({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", files: [], role: "recheck", phase: 3.2, readOnly: true, internal: true, hasVerdict: true });
+    // the skeleton check (2026-10-22): the architect's skeleton must load and run before builders fill it in
+    if (agents.some((a) => a.role === "architect") && entryPage(agents)) agents.push({ name: "skeleton check", task: "yAI opens the architect's skeleton page: it must load and run, with no errors, before the builders start", files: [], role: "skeleton", phase: 0.8, readOnly: true, internal: true, hasVerdict: true });
+    if (plannedRounds > 1 && entryPage(agents)) agents.push({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", files: [], role: "judge", phase: 3.8, readOnly: true, internal: true, hasVerdict: true });
     // the board lists them in the order they run (2026-10-22: the architect, which runs first, was listed 9th)
     agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
     const layout = layoutLines(agents);
@@ -1297,7 +1434,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     let viewing = null; // the agent you're watching, or null for the board
     d.wake = () => wake();
     let sel = 0; // the agent picked on the board with ↑↓
-    feed = []; teamNotes = []; teamStarted = Date.now();
+    feed = []; teamNotes = []; teamStarted = Date.now(); roundScores = {}; planningRound = false; chatLog = [];
     recording = { start: Date.now(), last: 0, lastKey: "", dict: [], index: new Map(), frames: [] };
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
@@ -1333,6 +1470,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (m.action === "retry") retry(a);
       else if (m.action === "skip") skip(a);
       else if (m.action === "pause") togglePause(a);
+      else if (m.action === "go") feedbackWait = null;
+      else if (m.action === "open") openPage();
       else if (m.action === "note" && String(m.text || "").trim()) {
         const keep = viewing;
         viewing = a || null;
@@ -1401,6 +1540,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         return false;
       }
       if (typing) return false;
+      if (feedbackWait && s === "o") { openPage(); return true; }
+      if (feedbackWait && s === "g") { feedbackWait = null; return true; }
       if (key.name === "up") { sel = (sel + agents.length - 1) % agents.length; draw(); return true; }
       if (key.name === "down") { sel = (sel + 1) % agents.length; draw(); return true; }
       if (key.name === "return" || key.name === "enter") { open(agents[sel]); return true; }
@@ -1410,7 +1551,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       if (/^[1-9]$/.test(s || "") && Number(s) <= agents.length) { open(agents[Number(s) - 1]); return true; }
       return false;
     };
-    state.teamKeys = () => viewing
+    state.teamKeys = () => feedbackWait && !viewing
+      ? [["o", "open it to play"], ["type", "what to change"], ["g", "go on"], ["esc", "stop all"]]
+      : viewing
       ? [["esc", "back to team"], ["tab", "next agent"], ...(viewing.state === "working" ? [["p", viewing.paused ? "resume it" : "pause it"]] : []), ...(["failed", "stopped"].includes(viewing.state) || stuck(viewing) ? [["r", "restart it"]] : [])]
       : [["↑↓", "pick agent"], ["enter", "watch it"], ...(agents[sel] && (stuck(agents[sel]) || ["failed", "stopped"].includes(agents[sel].state)) ? [["r", "retry"]] : []), ...(agents[sel] && (stuck(agents[sel]) || agents[sel].paused) ? [["s", "skip"]] : []), ["esc", "stop all"]];
     // what you type goes to the whole team (now, and in the briefs of agents that start later), or to the agent you're watching
@@ -1423,6 +1566,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         teamNotes.push(text);
         for (const a of agents) if (a.send && a.state === "working") { a.send({ type: "note", text }); a.log.push({ k: "you", text: `(to the whole team) ${text}` }); }
         say("you", `note: ${text}`, "you");
+        // between rounds, a note is feedback for the next round: a few more seconds for another, then it goes on
+        if (feedbackWait) feedbackWait.until = Math.min(feedbackWait.until, Date.now() + 15000);
       }
       draw();
     };
@@ -1434,13 +1579,119 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const a = agents.find((x) => new RegExp(`^\\s*\\d+\\s\\S\\s${x.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s`).test(row));
       if (a) open(a);
     });
+    // Rounds (2026-10-22): after a round's spec checker and judge, the lead plans the next round from what's still
+    // missing, what the judge saw, what still fails and what you said, and new feature builders improve it while the
+    // same checks run again. It stops when the rounds you asked for are used, the cost cap is reached, or the request
+    // is all done and the judge calls it GOOD. (A single yAI Code session, iterating with a player's feedback, made a
+    // better Minecraft clone than a one-pass team.)
+    const ROUND_SYSTEM = "You are the lead of a coding team between rounds. The app exists and runs; plan the next round of improvements that close the gaps below, " +
+      "most valuable first: what's broken, then what's missing, then what looks or plays unfinished. Split the work by FEATURE among agents working at the same time. " +
+      'Reply with only JSON, no prose and no code fence: {"summary":"one line: what this round improves","agents":[{"name":"2-3 word name","task":"exactly what to improve or add, ' +
+      'concrete, naming the files and the shared names involved","files":["files this agent may rewrite or create, relative to the project root, each file under at most one agent"]}]}. ' +
+      "An agent may also make small edit_file hooks in other files. If nothing important is left, return {\"summary\":\"done\",\"agents\":[]}. No tool calls.";
+    const fresh = (o) => ({ files: [], changed: new Set(), created: new Set(), text: [], cost: 0, asks: [], state: "waiting", started: Date.now(), ...o, step: WAIT_STEP[lp(o.phase)] || "later" });
+    const roundKeys = new Set(["tester", "reviewer", "designer", "security", "fixer", "spec", "mobile", "performance", "accessibility", "playtester"]);
+    const roundCost = () => agents.reduce((x, a) => x + (a.cost || 0), 0);
+    const lastRound = () => Math.max(...agents.map(rnd));
+    const roundDone = (r) => {
+      const sc = roundScores[r], judge = agents.filter((a) => a.role === "judge" && rnd(a) === r).pop();
+      return sc && sc[0] >= sc[1] && (!judge || judge.verdict === "PASS");
+    };
+    const canPlanMore = () => !state.interrupted && lastRound() < plannedRounds && roundCost() < costCap && !roundDone(lastRound());
+    let notesFrom = 0; // your notes since the last round
+    // opens the page in your browser (o between rounds)
+    const openPage = () => {
+      const entry = entryPage(agents);
+      if (!entry) return;
+      const abs = path.resolve(root, entry);
+      try {
+        if (process.platform === "win32") spawn("cmd", ["/c", "start", "", abs], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+        else spawn(process.platform === "darwin" ? "open" : "xdg-open", [abs], { detached: true, stdio: "ignore" }).unref();
+        say("you", "opened it to play", "you");
+      } catch {}
+    };
+    // A copy of every file the team has changed so far, in .yai-team/round-N, to go back to a round that was better
+    function snapshot(r) {
+      const fs = require("fs");
+      const dir = path.join(root, ".yai-team", `round-${r}`);
+      const files = [...new Set(agents.flatMap((a) => [...(a.changed || [])]))].filter((p) => fs.existsSync(path.join(root, p)));
+      for (const p of files) { try { fs.mkdirSync(path.dirname(path.join(dir, p)), { recursive: true }); fs.copyFileSync(path.join(root, p), path.join(dir, p)); } catch {} }
+      return files.length ? path.relative(root, dir).split(path.sep).join("/") : "";
+    }
+    // Between rounds, the board waits up to 90 s for you: o opens it to play, what you type becomes the next round's
+    // first job, g goes on. (A single yAI Code session with the user playing each round beat the one-pass team.)
+    const waitForYou = (r, planner) => (!process.stdout.isTTY && !state.stdio) ? Promise.resolve() : new Promise((go) => {
+      feedbackWait = { round: r, until: Date.now() + 90000, go };
+      planner.step = `round ${r} is done: o opens it to play · type what to change · g goes on`;
+      say("lead", `round ${r} is done: press o to play it, type what to change, or g to go on (90 s)`, "acc");
+      const t = setInterval(() => {
+        if (!feedbackWait || state.interrupted || Date.now() > feedbackWait.until) { clearInterval(t); feedbackWait = null; go(); }
+        else planner.step = `round ${r} is done: o opens it to play · type what to change · g goes on · ${Math.ceil((feedbackWait.until - Date.now()) / 1000)}s`;
+      }, 500);
+    });
+    async function planNextRound() {
+      const r = lastRound(), base = 10 * r;
+      const planner = fresh({ name: `lead · round ${r + 1}`, task: "plans the next round from the score, the judge and what still fails", role: "planner", round: r + 1, phase: base + 0.4, internal: true, readOnly: true, hasVerdict: false, state: "working", step: "reading the score and the judge's notes", log: [{ k: "brief", text: "plans the next round" }] });
+      agents.push(planner);
+      agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
+      wake();
+      const snap = snapshot(r);
+      if (snap) say("yAI", `saved round ${r}'s files in ${snap}`, "you");
+      await waitForYou(r, planner);
+      planner.step = "reading the score, the judge's notes and yours";
+      const spec = agents.filter((a) => a.role === "spec" && rnd(a) === r && a.state === "done").pop();
+      const judge = agents.filter((a) => a.role === "judge" && rnd(a) === r && a.state === "done").pop();
+      const missing = spec ? spec.text.filter((l) => /\b(PARTLY|MISSING)\b/.test(l)).map(tidy).slice(0, 30) : [];
+      const failing = agents.filter((a) => a.role === "recheck" && rnd(a) === r && BAD.test(a.verdict || "")).flatMap((a) => a.text).slice(0, 12);
+      const said = teamNotes.slice(notesFrom);
+      notesFrom = teamNotes.length;
+      const builders = agents.filter((a) => !a.role && rnd(a) === 1).length;
+      const prompt = [
+        `The task: ${task}`, "",
+        roundScores[r] ? `Round ${r} is done. The spec checker's score: ${roundScores[r][0]} of ${roundScores[r][1]} requirements done.` : `Round ${r} is done.`,
+        ...(missing.length ? ["", "Still missing or only partly done:", ...missing.map((x) => `- ${x}`)] : []),
+        ...(judge?.findings?.length ? ["", "The judge played it and saw (most important first):", ...judge.findings.map((x) => `- ${x}`)] : []),
+        ...(failing.length ? ["", "yAI's re-check still found failing:", ...failing] : []),
+        ...(said.length ? ["", "What the user said (do this first):", ...said.map((x) => `- ${x}`)] : []),
+        "", `Project files now:\n${projectFiles()}`,
+        "", `Plan round ${r + 1} with at most ${Math.max(2, Math.min(6, builders))} agents.`,
+      ].join("\n");
+      let plan = null, list = [];
+      try {
+        const text = await X.oneShot({ model: lead, system: ROUND_SYSTEM, messages: [{ role: "user", content: prompt }], signal: state.abort?.signal });
+        plan = planJson(text);
+        list = (Array.isArray(plan.agents) ? plan.agents : []).slice(0, 6).filter((x) => x && x.task);
+      } catch (err) { planner.error = err.message; }
+      const seen = new Set();
+      const added = list.map((x, i) => fresh({
+        name: clip(String(x.name || `improve ${i + 1}`).trim(), 24), task: String(x.task).trim(), round: r + 1, phase: base + 1,
+        files: (Array.isArray(x.files) ? x.files : []).map((p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "")).map((p) => (planFolder && !p.startsWith(planFolder + "/") && !require("fs").existsSync(path.join(root, p)) ? `${planFolder}/${p}` : p)).filter((p) => p && !seen.has(p) && seen.add(p)),
+        model: agents.find((a) => !a.role && rnd(a) === 1)?.model,
+      }));
+      if (added.length) {
+        const like = (key) => agents.find((a) => a.role === key && rnd(a) === 1);
+        const members = agents.filter((a) => rnd(a) === 1 && a.role && roundKeys.has(a.role)).map((m) => fresh({ name: m.name, task: m.task, role: m.role, round: r + 1, phase: base + lp(m.phase), readOnly: m.readOnly, internal: m.internal, hasVerdict: m.hasVerdict, model: m.model }));
+        if (like("browser")) members.push(fresh({ name: "browser", task: like("browser").task, role: "browser", round: r + 1, phase: base + 1.5, readOnly: true, hasVerdict: true, internal: true }));
+        if (members.some((m) => m.role === "fixer")) members.push(fresh({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", role: "recheck", round: r + 1, phase: base + 3.2, readOnly: true, internal: true, hasVerdict: true }));
+        members.push(fresh({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", role: "judge", round: r + 1, phase: base + 3.8, readOnly: true, internal: true, hasVerdict: true }));
+        agents.push(...added, ...members);
+        agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
+      }
+      planner.text = added.length ? [`Round ${r + 1}: ${plan?.summary || "improvements"}`, ...added.map((a) => `- ${a.name}: ${clip(a.task, 160)}`)] : [planner.error ? `Couldn't plan the next round: ${planner.error}` : "Nothing important left to improve."];
+      for (const l of planner.text) planner.log.push({ k: "text", line: l });
+      planner.summary = added.length ? `Round ${r + 1}: ${added.length} improvement${added.length === 1 ? "" : "s"} · ${clip(plan?.summary || "", 120)}` : planner.text[0];
+      Object.assign(planner, { state: "done", ended: Date.now() });
+      say("lead", added.length ? `round ${r + 1}: ${plan?.summary || "improvements"}` : "no more rounds needed", "acc", added.map((a) => a.name).join(" · "));
+      if (!added.length) plannedRounds = r; // nothing left: the run ends here
+    }
+
     const started = Date.now();
     // The builders start now; the checkers wait for them, so they check finished work, not files half-written; the
     // fixer waits for the checkers and only runs if one of them found something.
     const ended = (a) => ENDED.includes(a.state) && !a.asks.length;
     const phase = (n) => agents.filter((a) => (a.phase || 1) === n);
     const hasArchitect = agents.some((a) => a.role === "architect");
-    agents.forEach((a) => Object.assign(a, { state: "waiting", step: WAIT_STEP[a.phase || 1] || "later", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }));
+    agents.forEach((a) => Object.assign(a, { state: "waiting", step: WAIT_STEP[lp(a.phase)] || "later", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }));
     if (!hasArchitect) for (const a of agents) if (!a.role) a.step = "starting";
     const PHASES = () => [...new Set(agents.map((a) => a.phase || 1))].sort((x, y) => x - y); // fixer 2 can join mid-run
     // Integration costs a whole agent (2026-10-22: ~$0.20 a run). The reviewer takes it on when both run; and when the
@@ -1469,11 +1720,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
           else if (a.role === "integration" && integrationNotNeeded(a)) Object.assign(a, { state: "skipped", ended: Date.now() });
-          else if (n === 3 && !agents.filter((x) => x.role && (x.phase || 1) < 3).some(concern))
+          else if (lp(n) === 3 && a.role === "fixer" && !a.fixRound && !agents.filter((x) => x.role && rnd(x) === rnd(a) && (x.phase || 1) < n).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           // the re-check only runs after a fixer that ran
-          else if (a.role === "recheck" && !agents.some((x) => x.role === "fixer" && (x.phase || 1) < a.phase && x.state === "done")) Object.assign(a, { state: "skipped", step: "nothing was fixed", ended: Date.now() });
+          else if (a.role === "recheck" && !agents.some((x) => x.role === "fixer" && rnd(x) === rnd(a) && (x.phase || 1) < a.phase && x.state === "done")) Object.assign(a, { state: "skipped", step: "nothing was fixed", ended: Date.now() });
           else if (a.role === "recheck") startRecheck(a, task, agents);
+          else if (a.role === "judge") startJudge(a, task, agents);
+          else if (a.role === "skeleton") startSkeleton(a, task, agents);
           else if (a.role === "browser") startBrowser(a, task, agents);
           else if (a.internal) startInternal(a, task, agents);
           else {
@@ -1499,6 +1752,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         wake = async () => {
           if (over) return;
           next();
+          // a round is over: plan the next one while there are rounds left (the board shows the lead planning it)
+          if (agents.every(ended) && !planningRound && canPlanMore()) {
+            planningRound = true;
+            planNextRound().catch(() => {}).finally(() => { planningRound = false; wake(); });
+            return;
+          }
+          if (planningRound) return;
           if (agents.every(ended)) { clearInterval(timer); if (recording) { recording.last = 0; recordFrame(agents, task, estimate, 0); } draw(); over = true; return resolve(); }
           if (asking) return;
           const a = agents.find((x) => x.asks.length);
@@ -1598,10 +1858,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...fixers.map((f) => (f.state === "skipped" ? c.faint("nothing to fix") : `${c.dim(f.name)} ${outcome(f)}${f.changed.size ? c.faint(` · ${shortFiles([...f.changed])}`) : ""}`)),
       ...(fixerA.recheck || []).map((r) => `${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.dim(clip(r.cmd, 40))}${r.counts ? c.dim(` ${r.counts.passed} passed, ${r.counts.failed} failed`) : ""}`),
     ]);
-    const spec = crew.find((a) => a.role === "spec" && a.state === "done");
+    const spec = crew.filter((a) => a.role === "spec" && a.state === "done").pop(); // the last round's
     if (spec) row("Request", [scoreOf(spec) ? `${c.bold(c.ink(`${scoreOf(spec)[0]} of ${scoreOf(spec)[1]}`))} ${c.dim("requirements done")}` : outcome(spec)]);
     // what needs a look, one line each
     const attention = [
+      ...(state.teamStopReason ? [`The team stopped because today's yAI allowance ran out (${clip(state.teamStopReason, 120)}). It resets at midnight UTC, and an admin can raise it on /people.`] : []),
       ...agents.filter((a) => a.state === "failed").map((a) => `${a.name} failed${a.error ? `: ${row1(a.error)}` : ""}`),
       ...agents.filter((a) => a.flag).map((a) => `${a.name}: ${a.flag}`),
       ...quiet.map((a) => `${a.role} gave no verdict, so its check may be incomplete`),

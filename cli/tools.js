@@ -364,6 +364,24 @@ const tools = {
   },
   // 2026-10-22: see the app as it is right now (cli/teamchecks.js pageCheck), so an agent checks its work in the real
   // page instead of guessing or writing a Node harness for browser code
+  // The team chat (2026-10-22): a /team agent tells the others something that affects them. The board passes it on;
+  // the others read it after their current step. Only team agents have it (index.js leaves it out otherwise).
+  team_say: {
+    params: ["message", "to"],
+    describe: "Team chat: tell the other agents on your team something that affects them: a hook you added in a file they own, a shared name you renamed or need, a question about how a piece fits, or an answer to one. Optional <to>: one agent's name (default: everyone). Keep it to one or two sentences; don't post routine progress. Their replies reach you after your next step.",
+    readOnly: true,
+    async run(ctx, a) {
+      const text = String(a.message || "").replace(/\s+/g, " ").trim();
+      if (!text) throw new ToolError("<message> is required.");
+      ctx.chatCount = (ctx.chatCount || 0) + 1;
+      if (ctx.chatCount > 10) throw new ToolError("You've used the team chat 10 times; get on with your part and put anything else in your report.");
+      const to = String(a.to || "").replace(/^@/, "").trim();
+      toolHeader("Team chat", `${to ? `@${to} ` : ""}${text.slice(0, 80)}`);
+      require("./ui").event({ type: "chat", text: text.slice(0, 600), to });
+      toolResult(to ? `sent to ${to}` : "sent to the team");
+      return to ? `Sent to ${to}. A reply, if any, reaches you after your next step.` : "Sent to the team. Replies, if any, reach you after your next step.";
+    },
+  },
   check_page: {
     params: ["path", "keys", "look_for"],
     describe: "Open the web page (or game) in a real browser as it is right now, press its start button, and report: errors, a frozen page, the frame rate, the buttons and text on it, and a description of what's on screen. " +

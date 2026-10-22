@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.159",
+      "date": "2026-10-22",
+      "title": "/team in rounds",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Rounds: build, play, improve",
+          "text": "Set rounds with + and − in the picker (Showcase sets 3). After each round a judge plays it in a real browser and a model that can see compares it with your request; the lead then plans the next round from what is missing, what the judge saw and what still fails, and new feature builders improve it while the checks run again. It stops when the request is all done and the judge calls it good, the rounds run out, or the cost cap (twice the estimate) is reached. The bar shows each round with its score."
+        },
+        {
+          "area": "yAI Code",
+          "title": "You in the loop",
+          "text": "Between rounds the board waits up to 90 s: o opens it to play, what you type becomes the next round's first job, g goes on. In VS Code: Open it to play and Go on."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Researcher and skeleton check",
+          "text": "A researcher searches the web for what a great version needs and writes TEAM_SPEC.md, a checklist with how to check each item, which everyone works to. After the architect, yAI opens the skeleton to make sure it runs before builders start."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Team chat",
+          "text": "Agents can tell each other what affects them with team_say (to everyone or one agent); messages arrive after their next step, show in the live feed and transcripts, and agents that start later get the recent chat."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Snapshots and safety",
+          "text": "Each round's files are saved in .yai-team/round-N. The picker warns when the estimate is more than today's allowance left; if it runs out mid-run the team stops with that reason instead of starting agents that are refused; an agent that never got to work shows as failed with why. Checkers are no longer switched on by browser features (\"Web Audio API\")."
+        }
+      ]
+    },
+    {
       "version": "1.0.158",
       "date": "2026-10-22",
       "title": "Agents that see the app",

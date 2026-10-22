@@ -76,7 +76,7 @@ module.exports = function create({ ui }) {
     const onStart = sel === k;
     const border = onStart ? c.accent : c.line;
     const button = onStart ? c.soft(c.bold(c.accent(` ▶ Start ${start.n} agent${start.n === 1 ? "" : "s"} `))) : c.bold(c.accent(` ▶ Start ${start.n} agent${start.n === 1 ? "" : "s"} `));
-    const factList = [start.time && `${c.bold(c.ink(start.time))} ${c.faint("est.")}`, start.cost && `${c.bold(c.ink(start.cost))} ${c.faint("est.")}`, start.parallel && c.dim(`${start.parallel} at once`), c.faint("edits without asking · commands still ask")].filter(Boolean);
+    const factList = [start.time && `${c.bold(c.ink(start.time))} ${c.faint("est.")}`, start.cost && `${c.bold(c.ink(start.cost))} ${c.faint("est.")}`, start.parallel && c.dim(`${start.parallel} at once`), start.rounds > 1 && c.accent(`${start.rounds} rounds`), start.cap && c.faint(`stops at ${start.cap}`), start.short && c.red(`only ${start.short} left today`), c.faint("edits without asking · commands still ask")].filter(Boolean);
     const right = c.faint("c chat about the plan ");
     const inner = W - 4, room = inner - 2; // the text sits one space in from each side
     // on a narrow terminal the least important facts go first

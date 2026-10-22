@@ -711,6 +711,8 @@ function add(a, b) {
 const TEAM_AGENT = !!process.env.YAI_TEAM_AGENT;
 // (connected services are allowed since 2026-10-22, read-only ones only: see the service tool)
 const TEAM_SKIP = new Set(["ask_user"]);
+const TEAM_ONLY = new Set(["team_say"]); // tools only a /team agent has (the team chat)
+const toolAllowed = (name) => (TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
@@ -749,7 +751,7 @@ ${toolDocs}${CONN.promptBlock({ readOnly: true })}${FOCUS.block()}
 // a string, as in the text format; the site turns the model's calls back into <tool> blocks.
 function nativeTools() {
   return Object.entries(T.tools)
-    .filter(([name]) => !(TEAM_AGENT && TEAM_SKIP.has(name)))
+    .filter(([name]) => toolAllowed(name))
     .map(([name, t]) => ({ name, description: String(t.describe || "").slice(0, 1500), params: t.params.slice(0, 20) }));
 }
 
@@ -758,7 +760,7 @@ function systemPrompt() {
     ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
     : `bash on ${os.type()}`;
   const toolDocs = Object.entries(T.tools)
-    .filter(([name]) => !(TEAM_AGENT && TEAM_SKIP.has(name)))
+    .filter(([name]) => toolAllowed(name))
     .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
     .join("\n");
   if (TEAM_AGENT) return teamPrompt(shell, toolDocs);
@@ -2032,6 +2034,7 @@ async function runAgent(content) {
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result
+      if (state.chat?.length) pushUser(`Team chat, from the other agents:\n${state.chat.splice(0).map((m) => `- ${m}`).join("\n")}\nReply with team_say only if it needs an answer from you.`);
       if (state.notes?.length) {
         const n = state.notes.length;
         pushUser(state.notes.splice(0).map((x) => `A note from the user, sent while you work: ${x}`).join("\n"));
@@ -3185,6 +3188,8 @@ async function stdioMode() {
     else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
     // from the /team board: a note read with the agent's next step result, and pause / resume between steps
     else if (msg.type === "note" && String(msg.text || "").trim()) (state.notes ||= []).push(String(msg.text).slice(0, 2000));
+    // a message on the team chat from another agent (the board passes it on)
+    else if (msg.type === "chat" && String(msg.text || "").trim()) (state.chat ||= []).push(`${String(msg.from || "an agent").slice(0, 40)}${msg.to ? " (to you)" : ""}: ${String(msg.text).slice(0, 600)}`);
     else if (msg.type === "pause") state.paused = true;
     else if (msg.type === "resume") state.paused = false;
   });
