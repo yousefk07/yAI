@@ -128,7 +128,7 @@ async function warmup(model, { signal, onProgress }) {
 
 // One model reply in agent mode. onText gets each piece of text; return false from it to stop early.
 // onStatus gets what the cloud GPU is doing (queued, starting...) until the reply starts.
-async function chat({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus }) {
+async function chat({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus, tools, toolFormat }) {
   // YAI_DEBUG_DIR=<folder>: keep each request (model, system prompt, messages) as JSON, to replay a model's odd reply.
   if (process.env.YAI_DEBUG_DIR) {
     try {
@@ -139,7 +139,9 @@ async function chat({ messages, model, system, context, conversationId, signal, 
   const res = await request("/api/chat", {
     method: "POST",
     signal,
-    body: { agent: true, system, context, messages, model, temperature: 0.3, conversationId },
+    // tools/toolFormat: for a host with native tool calling (DeepSeek's API), the site swaps the text format for the
+    // tool list; other hosts ignore them
+    body: { agent: true, system, context, messages, model, temperature: 0.3, conversationId, ...(tools && { tools, toolFormat }) },
   });
   if (res.status === 401) throw Object.assign(new Error("Your session expired. Run /login."), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));

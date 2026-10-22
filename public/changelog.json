@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.136",
+      "date": "2026-10-22",
+      "title": "Native tool calls on DeepSeek",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Steps work on yAI Ultra and Ultra Flash",
+          "text": "On DeepSeek’s API the models can’t write their tool-call markup as plain text, so they wrote look-alikes that yAI Code didn’t recognise and steps didn’t run. yAI Code now sends its tools through DeepSeek’s documented function-calling interface and gets each step back in its usual form. Modal works as before."
+        }
+      ]
+    },
+    {
       "version": "1.0.135",
       "date": "2026-10-22",
       "title": "yAI Ultra is now DeepSeek V4 Pro",

@@ -718,6 +718,14 @@ ${toolDocs}${FOCUS.block()}
 - Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.${projectNotes()}`;
 }
 
+// The tools as an OpenAI-style list, for hosts that call tools natively (DeepSeek's API, 2026-10-22). Every argument is
+// a string, as in the text format; the site turns the model's calls back into <tool> blocks.
+function nativeTools() {
+  return Object.entries(T.tools)
+    .filter(([name]) => !(TEAM_AGENT && TEAM_SKIP.has(name)))
+    .map(([name, t]) => ({ name, description: String(t.describe || "").slice(0, 1500), params: t.params.slice(0, 20) }));
+}
+
 function systemPrompt() {
   const shell = process.platform === "win32"
     ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
@@ -1433,6 +1441,8 @@ async function callModel() {
       model: state.model,
       system: systemPrompt(),
       context: envContext(),
+      tools: nativeTools(),
+      toolFormat: toolFormat(),
       conversationId: state.conversationId,
       signal: local.signal,
       onStatus: (status) => {
