@@ -261,7 +261,8 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
     if (!img) { lines.push("The screenshot timed out: the page stopped drawing."); return { frozen: true, lines }; }
     if (saveTo) { try { require("fs").mkdirSync(path.dirname(saveTo), { recursive: true }); require("fs").writeFileSync(saveTo, img); lines.push(`Screenshot saved: ${saveTo}`); } catch {} }
     at.step = "describing the screenshot";
-    if (describe) { const seen = await within(describe(img, lookFor), 45000, ""); if (seen) lines.push(`On screen (described by a model that can see it):\n${seen}`); }
+    // 25 s: when the image model is down it fails slowly, and a check an agent runs often must stay quick
+    if (describe) { const seen = await within(describe(img, lookFor), 25000, ""); lines.push(seen ? `On screen (described by a model that can see it):\n${seen}` : "(No description of the screen this time: the image model didn't answer. Judge by the errors, frame rate and text above.)"); }
     return { frozen: false, lines };
   }
 }

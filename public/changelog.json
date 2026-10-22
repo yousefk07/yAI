@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.166",
+      "date": "2026-10-22",
+      "title": "Quicker page checks",
+      "items": [
+        {
+          "area": "Team",
+          "title": "check_page waits less on the image model",
+          "text": "The screen description gives up after 25 s and says so, so a check stays quick when the image model is down."
+        },
+        {
+          "area": "Models",
+          "title": "Why a fallback happened",
+          "text": "When every host fails, the error now includes what the earlier ones said (for example Gemini before Modal)."
+        }
+      ]
+    },
+    {
       "version": "1.0.165",
       "date": "2026-10-22",
       "title": "Rides out a dropped connection",
