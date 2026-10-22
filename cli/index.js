@@ -2734,7 +2734,9 @@ const MACHINE_ID = crypto.createHash("sha1").update(`${os.hostname()}|${root.toL
 async function remoteMode() {
   if (state.remote) return print(c.dim("   Already listening for tasks."));
   if (!state.user) await ensureLogin();
-  const hello = () => api.hub("remote-hello", { method: "POST", body: { machine: MACHINE_ID, name: os.hostname(), folder: root, model: modelLabel() } });
+  // a session: this run of yai remote (the phone shows it as one chat, with every task sent to it)
+  const SESSION = crypto.randomBytes(8).toString("hex");
+  const hello = () => api.hub("remote-hello", { method: "POST", body: { machine: MACHINE_ID, session: SESSION, name: os.hostname(), folder: root, model: modelLabel() } });
   try {
     await hello();
   } catch (err) {
@@ -2797,22 +2799,21 @@ async function remoteMode() {
       R.current = task;
       const before = state.mode;
       state.mode = ["default", "acceptEdits", "yolo", "plan"].includes(task.mode) ? task.mode : "default";
-      await push(task, [{ t: "out", text: `› ${task.text}\n` }], "running");
+      await push(task, [], "running");
       print("");
       ui.userLine(task.text);
       ui.note(c.dim(`from your phone · ${{ default: "asks before changes", acceptEdits: "edits without asking", yolo: "auto-accepts everything", plan: "plan only" }[state.mode]}`));
-      // What yai prints goes to the phone too, in batches.
-      const write = process.stdout.write.bind(process.stdout);
-      let buf = "";
-      process.stdout.write = (chunk, ...rest) => { buf += String(chunk); return write(chunk, ...rest); };
+      // What yAI says and does goes to the phone as events (its words, each step and result, each edit), in batches,
+      // so the phone draws it like a chat (2026-10-21; it used to be the terminal's text).
+      let queue = [];
+      ui.setTap((ev) => { if (ev.type !== "user") queue.push({ t: "ev", ev }); });
       const flush = async () => {
-        const cut = buf.lastIndexOf("\n");
-        if (cut < 0) return;
-        const text = plainLines(buf.slice(0, cut + 1));
-        buf = buf.slice(cut + 1);
-        if (text.trim()) await push(task, [{ t: "out", text }]);
+        if (!queue.length) return;
+        const batch = queue;
+        queue = [];
+        await push(task, batch);
       };
-      const timer = setInterval(flush, 900);
+      const timer = setInterval(flush, 700);
       state.askHook = async ({ title, detail, options, edit }) => {
         const id = crypto.randomBytes(4).toString("hex");
         await flush();
@@ -2831,9 +2832,8 @@ async function remoteMode() {
         failedMsg = err.message;
       } finally {
         clearInterval(timer);
-        buf += "\n";
+        ui.setTap(null);
         await flush();
-        process.stdout.write = write;
         state.askHook = null;
         state.mode = before;
         R.current = null;

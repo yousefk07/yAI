@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.117",
+      "date": "2026-10-21",
+      "title": "Remote, redesigned",
+      "items": [
+        {
+          "area": "Remote",
+          "title": "Remote looks like a yAI chat",
+          "text": "Run on your PC is now Remote. Each run of yai remote is a session: the live one at the top with a green dot, past ones below. Open one to see it as a chat: your tasks as messages, yAI's replies, its steps with results, its edits as diffs you can open, and its questions as buttons. Send the next task from the box at the bottom; tasks in a session remember what came before. Output is now kept for a week."
+        }
+      ]
+    },
+    {
       "version": "1.0.116",
       "date": "2026-10-21",
       "title": "A team that fits together",

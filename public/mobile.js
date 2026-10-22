@@ -512,7 +512,7 @@
         <div><div class="m-label">More</div><div class="m-group-box">
           ${row("Study", chev, 'data-href="/study"')}
           ${row("Scheduled tasks", chev, 'data-href="/scheduled"')}
-          ${row("Run on your PC", chev, 'data-href="/remote"')}
+          ${row("Remote (yAI Code on your PC)", chev, 'data-href="/remote"')}
           ${row("yAI Code for your terminal", chev, 'data-set="code"')}
           ${row("API keys", chev, 'data-href="/developers"')}
           ${row("What's new", chev, 'data-href="/changelog"')}

@@ -229,6 +229,11 @@ let output = false; // the last line was a step's output (the │ gutter), not a
 // as events instead of being drawn as terminal text. Anything else printed still arrives, as plain "out" text.
 let sink = null;
 const setSink = (fn) => (sink = fn);
+// Remote Control (2026-10-21): while a phone task runs, the same events also go to the phone (the terminal still draws
+// everything), so the phone can show a chat instead of a terminal dump.
+let tap = null;
+const setTap = (fn) => (tap = fn);
+const tapped = (ev) => { if (tap) try { tap(ev); } catch {} };
 
 function rawPrint(text) {
   if (sink) return sink({ type: "out", text: String(text) + "\n" });
@@ -267,6 +272,15 @@ function inline(s) {
 // to one and trailing blank lines are dropped.
 function markdownWriter() {
   let inCode = false, first = true, blank = false;
+  if (tap && !sink) {
+    tapped({ type: "text-start" });
+    const draw = markdownWriterDraw();
+    return (line) => { tapped({ type: "text", line: String(line) }); draw(line); };
+  }
+  return markdownWriterDraw();
+}
+function markdownWriterDraw() {
+  let inCode = false, first = true, blank = false;
   if (sink) {
     sink({ type: "text-start" });
     return (line) => sink({ type: "text", line: String(line) });
@@ -298,6 +312,7 @@ const textWidth = () => Math.max(36, width() - 4);
 
 // The user's message, on the panel background: "› fix the billing tests".
 function userLine(text) {
+  tapped({ type: "user", text: String(text) });
   if (sink) return sink({ type: "user", text: String(text) });
   const lines = String(text).split("\n");
   const first = clip(lines[0], width() - 6) + (lines.length > 1 ? c.faint(`  (+${lines.length - 1} lines)`) : "");
@@ -329,6 +344,7 @@ function flushRow() {
 
 // The row is held back until its result is known, so the result, the ✓ / ✕ and the time sit on it.
 function toolHeader(name, arg) {
+  tapped({ type: "step", verb: VERB[name] || String(name).charAt(0).toUpperCase() + String(name).slice(1), arg: String(arg || "") });
   if (sink) return sink({ type: "step", verb: VERB[name] || String(name).charAt(0).toUpperCase() + String(name).slice(1), arg: String(arg || "") });
   flushRow();
   if (last === "step" && output) rawPrint(""); // a step that showed output gets room after it
@@ -338,6 +354,7 @@ function toolHeader(name, arg) {
 }
 // Drops the waiting row (used before asking to run a command, which shows the command instead).
 function cancelRow() {
+  tapped({ type: "step-cancel" });
   if (sink) return sink({ type: "step-cancel" });
   const p = pending;
   pending = null;
@@ -347,6 +364,7 @@ function cancelRow() {
 // │ gutter, cut to the terminal width. `summary` puts a short label on the row as well, and `quiet`
 // keeps the lines under it dim even when the row is red (a failed command shows ✕, not a red wall).
 function toolResult(text, { color: col, summary, quiet } = {}) {
+  tapped({ type: "step-result", text: stripAnsi(String(text || "")).slice(0, 4000), summary: summary ? stripAnsi(summary) : "", tone: col === c.red ? "error" : col === c.yellow ? "warn" : "" });
   if (sink) return sink({ type: "step-result", text: stripAnsi(String(text || "")), summary: summary ? stripAnsi(summary) : "", tone: col === c.red ? "error" : col === c.yellow ? "warn" : "" });
   const lines = text ? String(text).split("\n") : [];
   if (pending && summary === undefined && lines.length === 1 && vis(lines[0]) < 60) {
@@ -364,6 +382,7 @@ function toolResult(text, { color: col, summary, quiet } = {}) {
 }
 // A short note under a step, at the step's indent: "   ✓ applied · 1 file changed".
 function note(text) {
+  tapped({ type: "note", text: stripAnsi(String(text)) });
   if (sink) return sink({ type: "note", text: stripAnsi(String(text)) });
   print("   " + text);
   if (last) last = "step";
@@ -406,7 +425,7 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
   const ops = lineDiff(splitLines(before), splitLines(after));
   let added = 0, removed = 0;
   for (const o of ops) o.t === "+" ? added++ : o.t === "-" ? removed++ : 0;
-  if (sink) {
+  if (sink || tap) {
     // The changed lines with three lines around them, as [kind, line number, text] (kind: " ", "+", "-", "…").
     const keep = ops.map((o, i) => ops.slice(Math.max(0, i - 3), i + 4).some((x) => x.t !== " "));
     const lines = [];
@@ -417,8 +436,9 @@ function diffBox(title, before, after, { created = false, maxLines = 40 } = {}) 
       gap = false;
       if (lines.length < 200) lines.push([o.t, o.t === "-" ? o.an : o.bn, o.text]);
     });
-    sink({ type: "diff", path: title, created, added, removed, lines });
-    return { added, removed };
+    const ev = { type: "diff", path: title, created, added, removed, lines };
+    if (sink) { sink(ev); return { added, removed }; }
+    tapped(ev);
   }
   const show = ops.map(() => false);
   ops.forEach((o, i) => {
@@ -541,6 +561,6 @@ function resetSections() {
 
 module.exports = {
   c, print, spinner, setSink, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
-  welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
+  welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, setTap, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };
