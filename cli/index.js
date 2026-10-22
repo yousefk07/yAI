@@ -1959,7 +1959,7 @@ async function runAgent(content) {
             output: (everything
               ? `A search for everything just reads the whole file again. Search for one name (a function, a variable, an id), or read a line range (path:120-180).`
               : again
-                ? `${again.join(", ")} ${again.length === 1 ? "is a long file you already read whole" : "are long files you already read whole"}, and ${again.length === 1 ? "it hasn't" : "they haven't"} changed since; the text was removed to save space. Don't read it whole again: read only the lines you need (path:120-180, several ranges in one read_file), or search for one name.`
+                ? `${again.join(", ")} ${again.length === 1 ? "is a long file you already read whole" : "are long files you already read whole"}, and ${again.length === 1 ? "it hasn't" : "they haven't"} changed since: the text is further up, or was removed to save space. Don't read it whole again: read only the lines you need (path:120-180, several ranges in one read_file), or search for one name.`
                 : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
               (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
           };
