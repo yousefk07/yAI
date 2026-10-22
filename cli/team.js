@@ -141,10 +141,20 @@ module.exports = function create(d) {
   }
 
   // The lead's split, as [{ name, task, files }].
+  // The lead's JSON, read leniently: a code fence, trailing commas, unquoted names and single quotes are repaired
+  function planJson(text) {
+    const m = String(text).replace(/```(?:json)?/gi, "").match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("the lead didn't return a plan");
+    try { return JSON.parse(m[0]); } catch (err) {
+      const fixed = m[0]
+        .replace(/,\s*([}\]])/g, "$1")
+        .replace(/([{,]\s*)([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
+        .replace(/'([^'\\\n]*)'/g, (all, s) => JSON.stringify(s));
+      try { return JSON.parse(fixed); } catch { throw new Error(`the plan isn't valid JSON: ${err.message}`); }
+    }
+  }
   function parsePlan(text, max) {
-    const m = String(text).match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("The lead didn't return a plan.");
-    const plan = JSON.parse(m[0]);
+    const plan = planJson(text);
     const seen = new Set();
     const agents = (Array.isArray(plan.agents) ? plan.agents : []).slice(0, max).map((a, i) => ({
       name: clip(String(a.name || `agent ${i + 1}`).trim(), 24),
@@ -950,16 +960,24 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
 
     // 1. The lead splits the work.
-    const lead = X.partnerModel()?.id || state.model;
+    // yAI Lite writes the plan's JSON badly (2026-10-22, in VS Code: "Expected property name or '}'"), and the split
+    // decides everything after it, so on Lite the lead is Ultra Flash (a fraction of a cent)
+    const lead = X.partnerModel()?.id || (state.model === "glm-4.7-flash" && state.models.some((m) => m.id === "deepseek-v4.1-flash") ? "deepseek-v4.1-flash" : state.model);
     let agents;
     try {
-      const text = await X.busy("splitting the work", (signal) => X.oneShot({
-        model: lead, system: LEAD_SYSTEM, signal,
-        messages: [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents${max > MAX_AGENTS ? " (the user asked for many: use as many as the work splits into cleanly)" : ""}.` }],
-      }));
-      agents = parsePlan(text, max);
-      try { contract = String(JSON.parse(String(text).match(/\{[\s\S]*\}/)[0]).contract || "").trim().slice(0, 6000); } catch { contract = ""; }
-      const folder = (/"folder"\s*:\s*"([^"]*)"/.exec(String(text)) || [])[1]?.replace(/\\/g, "/").replace(/^\.?\/+|\/+$/g, "") || "";
+      const ask = (messages) => X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, signal, messages }));
+      const first = [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents${max > MAX_AGENTS ? " (the user asked for many: use as many as the work splits into cleanly)" : ""}.` }];
+      let text = await ask(first);
+      // a plan that still can't be read: the lead is asked once more, with the exact error
+      try { agents = parsePlan(text, max); }
+      catch (err) {
+        if (state.interrupted) throw err;
+        text = await ask([...first, { role: "assistant", content: String(text) }, { role: "user", content: `That plan couldn't be read (${err.message}). Reply with only the JSON object, valid JSON with double-quoted names, nothing before or after it.` }]);
+        agents = parsePlan(text, max);
+      }
+      try { contract = String(planJson(text).contract || "").trim().slice(0, 6000); } catch { contract = ""; }
+      let folder = "";
+      try { folder = String(planJson(text).folder || "").replace(/\\/g, "/").replace(/^\.?\/+|\/+$/g, ""); } catch {}
       if (folder && !folder.includes("..")) for (const a of agents) a.files = a.files.map((f) => (f.startsWith(folder + "/") ? f : `${folder}/${f}`));
     } catch (err) {
       return print(c.red(`   ${state.interrupted ? "Stopped." : err.message}`));

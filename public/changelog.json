@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.155",
+      "date": "2026-10-22",
+      "title": "/team starts on yAI Lite",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "A plan that can be read",
+          "text": "On yAI Lite the lead that splits a /team task is yAI Ultra Flash (Lite wrote the plan as broken JSON and /team stopped with \"Expected property name\"). Small JSON mistakes in a plan are repaired, and a plan that still can't be read is asked for once more."
+        }
+      ]
+    },
+    {
       "version": "1.0.154",
       "date": "2026-10-22",
       "title": "VS Code catches up",
