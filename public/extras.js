@@ -266,6 +266,7 @@
     if (done) window.yaiViz?.render(el);
     window.yaiCanvasAfterFill?.(el, visible, done);
     window.yaiVoiceAfterFill?.(el, visible, done);
+    window.yaiAnswerTools?.(el, visible, done); // Check, Another answer, Slides (answers.js)
   };
   window.yaiAfterHistory = () => window.yaiCanvasAfterHistory?.();
 

@@ -266,3 +266,48 @@
   .conn-row { flex-direction: column; }
   .conn-act { align-self: flex-start; }
 }
+
+/* ---------- Under an answer: Check, Another answer, Slides (answers.js, 2026-10-21) ---------- */
+.fc-card { margin: 10px 0 4px; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.fc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.fc-head b { font-weight: 600; }
+.fc-head span { font-size: 12.5px; color: var(--muted); }
+.fc-row { display: flex; gap: 10px; align-items: flex-start; }
+.fc-ico { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; margin-top: 1px; }
+.fc-row.supported .fc-ico { background: var(--pos, #2e9e5b); }
+.fc-row.wrong .fc-ico { background: var(--bad, #d14b3c); }
+.fc-row.doubtful .fc-ico { background: #c98a14; }
+.fc-row.unclear .fc-ico { background: var(--muted); }
+.fc-claim { font-size: 14px; font-weight: 500; }
+.fc-why { font-size: 13px; color: var(--muted); margin: 2px 0 0; line-height: 1.5; }
+.fc-src { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.fc-src a { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text); text-decoration: none; }
+.fc-src a:hover { background: var(--hover); }
+.alt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 8px; }
+.alt-col { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.alt-col .content { flex: 1; font-size: 14.5px; }
+.alt-h { font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+.alt-h span { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.alt-keep { align-self: flex-start; height: 32px; padding: 0 12px; font-size: 13px; width: auto; }
+@media (max-width: 720px) { .alt-pair { grid-template-columns: 1fr; } }
+.slides-dialog { width: min(1000px, calc(100vw - 24px)); max-height: calc(100dvh - 40px); padding: 0; border: 1px solid var(--border); border-radius: 18px; background: var(--bg, var(--surface)); color: var(--text); overflow: hidden; }
+.slides-dialog[open] { display: flex; flex-direction: column; }
+.slides-dialog::backdrop { background: rgba(0,0,0,.4); }
+.sd-head { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.sd-head > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sd-head small { color: var(--muted); font-size: 12.5px; }
+.sd-head button { height: 34px; width: auto; padding: 0 14px; font-size: 13.5px; }
+.sd-body { overflow: auto; padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.sd-slide { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.sd-slide figcaption { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.sd-slide figcaption span { color: var(--text-2, var(--muted)); }
+.sl { aspect-ratio: 16 / 9; border-radius: 10px; border: 1px solid var(--border); background: #fff; color: #1b1b1a; padding: 7% 7% 5%; overflow: hidden; position: relative; font-family: "Segoe UI", system-ui, sans-serif; }
+.sl::before { content: ""; position: absolute; left: 7%; top: 5%; width: 6%; height: 1.2%; background: #6d4fd8; }
+.sl h3 { margin: 2% 0 4%; font-size: 15px; line-height: 1.25; }
+.sl ul { margin: 0; padding-left: 1.1em; }
+.sl li { font-size: 11px; line-height: 1.4; margin-bottom: 3px; }
+.sl-title { display: flex; flex-direction: column; justify-content: center; background: #f8f8f6; border-left: 6px solid #6d4fd8; }
+.sl-title::before { display: none; }
+.sl-title h2 { margin: 0 0 6px; font-size: 20px; line-height: 1.2; }
+.sl-title p { margin: 0; color: #6b6a66; font-size: 12px; }
+@media (max-width: 640px) { .slides-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; } .sd-head b { font-size: 14px; } }
