@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.147",
+      "date": "2026-10-22",
+      "title": "Suggested models for /team",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Each role starts on a suggested model",
+          "text": "yAI Ultra for the architect; yAI Lite for the builders, designer, docs, api and setup; yAI Ultra Flash for the merger, integration, tester, reviewer, security, fixer and spec checker, which read the whole project. A model that is not available falls to the next one. Change any of them with ← → in the picker; your picks are remembered."
+        }
+      ]
+    },
+    {
       "version": "1.0.146",
       "date": "2026-10-22",
       "title": "Room for the whole project",

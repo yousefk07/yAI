@@ -782,8 +782,14 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // Each agent's model (2026-10-22): the hosted models, picked per row with ← →; the picks are remembered per role
     // (and one for the builders). yAI's own checks use no model.
     const models = state.models.filter((m) => m.cloud).map((m) => ({ id: m.id, short: m.label.replace(/^yAI\s+/, "") }));
-    const savedModels = api.cfg.team?.models || {};
-    const modelFor = (key) => [savedModels[key], state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
+    // Suggested models per role (2026-10-22): the free model where the job is narrow, Ultra Flash where an agent must
+    // read the whole project and reason across files (Lite drifted there: a merger re-read files until it was stopped,
+    // a tester gave no verdict), Ultra for the architect's one big design job. Each list is tried in order. They
+    // replaced the picks saved before they existed once (suggestedV); after that your picks are remembered as before.
+    const CHEAP = ["glm-4.7-flash", "deepseek-v4.1-flash"], MID = ["deepseek-v4.1-flash", "deepseek-v4-pro"], TOP = ["deepseek-v4-pro", "deepseek-v4.1-flash"];
+    const SUGGESTED = { architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
+    const savedModels = api.cfg.team?.suggestedV === 1 ? api.cfg.team?.models || {} : {};
+    const modelFor = (key) => [savedModels[key], ...(SUGGESTED[key] || []), state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
     const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r, model: r.internal ? undefined : modelFor(r.key) }))] : []; };
     const rows = [
       ...group("Before the builders", (p) => p < 1),
@@ -807,7 +813,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     items.forEach((r, i) => (r.on = picked[i]));
     const builderRows = items.filter((r) => !r.role);
     agents.forEach((a, i) => (a.model = builderRows[i].model));
-    api.cfg.team = { ...(api.cfg.team || {}), roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])),
+    api.cfg.team = { ...(api.cfg.team || {}), suggestedV: 1, roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])),
       models: { ...savedModels, ...Object.fromEntries(items.filter((r) => r.role && r.model).map((r) => [r.role.key, r.model])), ...(builderRows[0]?.model && { builders: builderRows[0].model }) } };
     api.save();
     agents = agents.filter((a, i) => builderRows[i].on);
