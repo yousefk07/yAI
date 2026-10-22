@@ -308,7 +308,7 @@
     if (g === "connected") { googleOn = true; store.set("googleMode", true); }
     setTimeout(() => toast(g === "connected" ? "Google connected. Calendar and email is on in Tools." : g === "cancelled" ? "Google wasn't connected." : "Couldn't connect Google. Try again."), 800);
   }
-  // Links that do something (2026-10-21, widgets and app shortcuts): ?q=… asks it at once, ?voice=1 opens voice chat.
+  // Links that do something (2026-10-21, app shortcuts): ?q=… asks it at once, ?voice=1 opens voice chat.
   const askNow = p.get("q"), voiceNow = p.get("voice");
   if (askNow || voiceNow) history.replaceState(null, "", "/");
   // Signed in (the page's start finished): the per-account parts.

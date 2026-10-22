@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.138",
+      "date": "2026-10-22",
+      "title": "Widgets removed",
+      "items": [
+        {
+          "area": "Website",
+          "title": "No more home-screen widgets",
+          "text": "The home-screen widget page, its private links and its menu entries are gone. App shortcuts and links that start a question (?q=…) still work."
+        }
+      ]
+    },
+    {
       "version": "1.0.137",
       "date": "2026-10-22",
       "title": "Formatted agent reports",

@@ -513,7 +513,6 @@
           ${row("Study", chev, 'data-href="/study"')}
           ${row("Scheduled tasks", chev, 'data-href="/scheduled"')}
           ${row("Remote (yAI Code on your PC)", chev, 'data-href="/remote"')}
-          ${row("Home-screen widget", chev, 'data-href="/widget"')}
           ${row("yAI Code for your terminal", chev, 'data-set="code"')}
           ${row("API keys", chev, 'data-href="/developers"')}
           ${row("What's new", chev, 'data-href="/changelog"')}
