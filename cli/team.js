@@ -727,7 +727,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(!a.role && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: "100000", // no step limit: the watcher redirects or stops an agent that wanders (2026-10-22, Yousef)
+      YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(!a.role && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -1772,6 +1773,53 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
       }
     };
+    // The watcher (2026-10-22, Yousef: "one agent active at all times probing what the active agents are doing, telling
+    // them to stop or to change what they're doing"). Agents have no step limit and are never stopped for repeating
+    // themselves; instead, every 75 s a cheap model reads what each working agent did since it last looked, and sends
+    // it a note, or stops one that kept looping after a note. Off with "team": { "watcher": false } in ~/.yai/config.json.
+    const WATCH_SYSTEM = [
+      "You supervise a team of AI coding agents building one project together. About every minute you see what each working agent did lately: its tool steps, newest last.",
+      "Catch an agent wasting time or going wrong: re-reading the same files, running near-identical commands or test harnesses without editing anything, drifting from its job, editing files another agent owns, redoing work that is done, or chasing a problem that doesn't matter for the task. Tell it plainly what to do instead.",
+      "Leave alone an agent that is making progress (reading what it needs, then editing; testing what it just changed). Most of the time the right answer is no action.",
+      "Reply with JSON only: {\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"stop\" ends it: only when it already had a note from you and is still looping, or its job is clearly done and it's only checking again. An empty list is fine.",
+    ].join("\n");
+    let watching = false;
+    const watch = async () => {
+      if (watching || over || state.interrupted || api.cfg.team?.watcher === false) return;
+      const busy = agents.filter((a) => a.state === "working" && !a.internal && a.log && !a.paused && a.send);
+      const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 4);
+      if (!fresh.length) return;
+      watching = true;
+      try {
+        const show = (x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 140)}` : x.k === "result" ? `    → ${clip(row1(x.text), 110)}` : x.k === "diff" ? `- changed ${x.path}` : x.k === "you" ? `- (a note it got: ${clip(row1(x.text), 140)})` : `- (${x.k}: ${clip(row1(x.text || x.line), 120)})`;
+        const lines = fresh.map((a) => [
+          `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}`,
+          `Its job: ${clip(row1(a.task), 300)}`, "Recent steps:",
+          ...a.log.filter((x) => ["step", "result", "diff", "note", "you", "error"].includes(x.k)).slice(-20).map(show),
+        ].join("\n"));
+        const model = ["deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
+        const out = await X.oneShot({ model, system: WATCH_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The task: ${task}\n\n${lines.join("\n\n")}` }] });
+        for (const a of fresh) a.watchedAt = a.log.length;
+        let acts = [];
+        try { acts = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]).actions || []; } catch {}
+        for (const act of acts.slice(0, 4)) {
+          const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
+          if (!a || !msg || a.state !== "working") continue;
+          if (act.do === "stop" && a.watchNotes) {
+            a.flag = "stopped by the watcher";
+            a.log.push({ k: "you", text: `(the watcher stopped it) ${msg}` });
+            say("watcher", `stopped ${a.name}`, "warn", msg);
+            a.send({ type: "stop" });
+          } else {
+            a.watchNotes = (a.watchNotes || 0) + 1;
+            a.send({ type: "note", text: `From the team's watcher, who sees what every agent is doing: ${msg}` });
+            a.log.push({ k: "you", text: `(the watcher) ${msg}` });
+            say("watcher", `→ ${a.name}`, "acc", msg);
+          }
+        }
+      } catch {} finally { watching = false; }
+    };
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else watch(); }, 75000);
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {

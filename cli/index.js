@@ -2026,7 +2026,7 @@ async function runAgent(content) {
         // began the same way, each a little different, and never edited anything): the 5th like it isn't run
         const runKey = call.name === "run" ? String(call.args?.command || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
         const like = runKey.length >= 30 ? sameRuns.get(runKey) : null;
-        const samey = !!like && like.undo === state.undo.length && like.n >= 4;
+        const samey = !TEAM_AGENT && !!like && like.undo === state.undo.length && like.n >= 4;
         if ((before && !lost) || again || everything || inside || samey) {
           repeats++;
           result = {
@@ -2045,6 +2045,8 @@ async function runAgent(content) {
         } else {
           result = await execTool(call);
           if (runKey.length >= 30) sameRuns.set(runKey, like && like.undo === state.undo.length ? { n: like.n + 1, undo: like.undo } : { n: 1, undo: state.undo.length });
+          // a /team agent's command still runs (the watcher decides when it's gone on too long); it's told, though
+          if (TEAM_AGENT && like && like.undo === state.undo.length && like.n >= 4) result.output += `\nYou have now run commands starting "${runKey}" ${like.n + 1} times without changing a file. More variations rarely tell you more: change the code, use check_page, or finish.`;
           if (sig) doneSteps.set(sig, (resultOf = { step, msg: null }));
           if (call.name === "read_file") { noteWhole(call); if (resultOf && !String(result.output).startsWith("Error")) noteRanges(call, resultOf); }
         }
@@ -2083,7 +2085,7 @@ async function runAgent(content) {
         if (!process.env.YAI_REPORT_ONLY && state.undo.length === undoStart && LOOK_STEPS.has(call.name)) {
           reads++;
           if (reads === 20) result.output += "\nYou have looked at the project 20 times without changing anything. Stop reading: make the fixes you've found now, or, if the pieces already fit, finish with your report saying so.";
-          if (reads >= 32) { ui.note(`${c.yellow("!")} ${c.ink("yAI kept reading without changing anything, so it was stopped.")}`); ui.event({ type: "error", message: "it kept looking without changing anything, so yAI stopped it" }); pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`); break; }
+          if (reads >= 32 && !TEAM_AGENT) { ui.note(`${c.yellow("!")} ${c.ink("yAI kept reading without changing anything, so it was stopped.")}`); ui.event({ type: "error", message: "it kept looking without changing anything, so yAI stopped it" }); pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`); break; }
         }
       }
       // The plan's progress depends on the model saying <done>N</done>, which it often forgets (2026-10-22: boards sat on
@@ -2101,24 +2103,24 @@ async function runAgent(content) {
         pushUser(state.notes.splice(0).map((x) => `A note from the user, sent while you work: ${x}`).join("\n"));
         ui.event({ type: "note-read", count: n }); // the board marks the note as read
       }
-      if (idle >= 25) {
+      if (idle >= 25 && !TEAM_AGENT) { // /team agents: the watcher decides when to stop them (2026-10-22, Yousef)
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept checking without changing anything, so it was stopped.")} ${c.dim("Its changes are kept.")}`);
         break;
       }
-      if (failedRuns >= 5) {
+      if (failedRuns >= 5 && !TEAM_AGENT) {
         ui.note(`${c.yellow("!")} ${c.ink("Five commands in a row failed, so yAI stopped.")} ${c.dim("Tell it what to do differently, or try a bigger model (/model).")}`);
         break;
       }
       // The same failing step over and over (a small model stuck on one mistake): stop after three.
       if (String(result.output).startsWith("Error") && result.output === lastError) {
-        if (++sameError >= 2) {
+        if (++sameError >= 2 && !TEAM_AGENT) {
           ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating the same failing step, so it was stopped.")} ${c.dim("Try a bigger model (/model) or rephrase the request.")}`);
           break;
         }
       } else sameError = 0;
       lastError = result.output;
       if (result.stop) return;
-      if (repeats >= 6) {
+      if (repeats >= 6 && !TEAM_AGENT) {
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim(TEAM_AGENT ? "Its report is what it found so far." : "Try a bigger model (/model) or say what to do next.")}`);
         break;
       }

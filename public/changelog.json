@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.169",
+      "date": "2026-10-22",
+      "title": "The watcher",
+      "items": [
+        {
+          "area": "Team",
+          "title": "A watcher for the whole run",
+          "text": "Every 75 s a cheap model reads what each working agent did lately and sends it a note when it is wasting time or going wrong, or stops one that keeps looping after a note. Its notes show in the feed and the agent's view."
+        },
+        {
+          "area": "Team",
+          "title": "No step limits, no automatic stops",
+          "text": "Team agents have no step limit and are no longer stopped for repeating themselves; they are told, and the watcher decides."
+        }
+      ]
+    },
+    {
       "version": "1.0.168",
       "date": "2026-10-22",
       "title": "No more command loops",
