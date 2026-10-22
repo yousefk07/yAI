@@ -1180,6 +1180,7 @@
     function fillAssistant(el, raw, done = false, stats = null, sources = null) {
       const { visible } = splitThinking(raw);
       const content = el.querySelector(".content");
+      if (sources?.length) el._sources = sources; // for hover citations
       if (visible.trim()) content.innerHTML = linkCitations(renderMarkdown(visible), sources);
       else if (done) content.innerHTML = "";
       el.dataset.text = visible.trim();
@@ -1789,13 +1790,77 @@
       try { renderMemory(await memoryCall("DELETE")); } catch (err) { $("memError").textContent = err.message; }
     });
 
+    // ---------- Hover citations (2026-10-21) ----------
+    // Hovering (or tapping) a [n] shows the source: its site, title and the sentence from the page that best matches the
+    // sentence of the answer it backs (the most words in common), with the shared words marked. A second tap opens it.
+    const citeTip = document.createElement("div");
+    citeTip.className = "cite-tip";
+    citeTip.hidden = true;
+    document.body.appendChild(citeTip);
+    const STOPW = new Set("the a an and or of to in on for with is are was were be been it its this that these those as at by from has have had not but which who what when where how than then also into about over more most can will would could should may might their there they them our your his her he she we you i".split(" "));
+    const wordsOf = (s) => String(s).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu)?.filter((w) => w.length > 2 && !STOPW.has(w)) || [];
+    function bestQuote(claim, text) {
+      const want = new Set(wordsOf(claim));
+      const sentences = String(text || "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+(?=[A-Z0-9"“(])/).filter((s) => s.length > 25 && s.length < 600);
+      let best = null, score = 0;
+      for (const s of sentences) {
+        const hit = new Set(wordsOf(s).filter((w) => want.has(w))).size;
+        if (hit > score) { score = hit; best = s; }
+      }
+      if (!best) return { html: "", score: 0 };
+      const html = escapeHtml(best.length > 320 ? best.slice(0, 317) + "…" : best).replace(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu, (w) => (want.has(w.toLowerCase()) && w.length > 2 ? `<mark>${w}</mark>` : w));
+      return { html, score };
+    }
+    function sourcesOf(el) {
+      const msg = el.closest(".msg");
+      const i = msg ? [...messagesEl.querySelectorAll(".msg")].indexOf(msg) : -1;
+      return (msg && msg._sources) || (i >= 0 && chat?.history?.filter((m) => m.role !== "system")?.[i]?.sources) || [];
+    }
+    function showCite(a) {
+      const n = Number(a.dataset.n);
+      const s = sourcesOf(a).find((x) => x.n === n);
+      if (!s) return;
+      const block = a.closest("p, li, td, blockquote") || a.parentElement;
+      const claim = (block?.textContent || "").replace(/\[\d+\]/g, " ");
+      const q = bestQuote(claim, s.text);
+      citeTip.innerHTML = `<div class="ct-top"><span class="ct-l">${escapeHtml((s.site || "?")[0])}</span><span class="ct-site">${escapeHtml(s.site || "")}</span><span class="ct-n">${n}</span></div>` +
+        `<a class="ct-title" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || s.url)}</a>` +
+        (q.score >= 2 ? `<blockquote class="ct-quote">“${q.html}”</blockquote>` : s.text ? `<p class="ct-quote plain">${escapeHtml(String(s.text).replace(/\s+/g, " ").slice(0, 220))}…</p>` : "");
+      citeTip.hidden = false;
+      const r = a.getBoundingClientRect();
+      const w = Math.min(360, innerWidth - 24);
+      citeTip.style.width = w + "px";
+      const left = Math.max(12, Math.min(innerWidth - w - 12, r.left + r.width / 2 - w / 2));
+      const below = r.bottom + 8 + citeTip.offsetHeight < innerHeight;
+      citeTip.style.left = left + "px";
+      citeTip.style.top = (below ? r.bottom + 8 : r.top - 8 - citeTip.offsetHeight) + "px";
+      citeTip.dataset.for = n;
+      citeTip._a = a;
+    }
+    let tipTimer;
+    const hideCite = () => { clearTimeout(tipTimer); tipTimer = setTimeout(() => { citeTip.hidden = true; citeTip._a = null; }, 180); };
+    messagesEl.addEventListener("mouseover", (e) => { const a = e.target.closest("a.cite"); if (a && matchMedia("(hover: hover)").matches) { clearTimeout(tipTimer); showCite(a); } });
+    messagesEl.addEventListener("mouseout", (e) => { if (e.target.closest("a.cite")) hideCite(); });
+    messagesEl.addEventListener("focusin", (e) => { const a = e.target.closest("a.cite"); if (a) showCite(a); });
+    messagesEl.addEventListener("focusout", (e) => { if (e.target.closest("a.cite")) hideCite(); });
+    citeTip.addEventListener("mouseover", () => clearTimeout(tipTimer));
+    citeTip.addEventListener("mouseout", hideCite);
+    // touch: the first tap shows the card, a second tap on the same [n] opens the page
+    messagesEl.addEventListener("click", (e) => {
+      const a = e.target.closest("a.cite");
+      if (!a || matchMedia("(hover: hover)").matches) return;
+      if (citeTip.hidden || citeTip._a !== a) { e.preventDefault(); showCite(a); }
+    });
+    document.addEventListener("click", (e) => { if (!citeTip.hidden && !e.target.closest(".cite-tip, a.cite")) citeTip.hidden = true; });
+    addEventListener("scroll", () => (citeTip.hidden = true), true);
+
     // [1], [2] in an answer become links to that source (never inside code).
     function linkCitations(html, sources) {
       if (!sources?.length) return html;
       const byN = new Map(sources.filter((s) => /^https?:\/\//.test(s.url)).map((s) => [s.n, s]));
       return html.split(/(<pre[\s\S]*?<\/pre>)/).map((part, i) => (i % 2 ? part : part.replace(/\[(\d{1,2})\](?!\()/g, (m, n) => {
         const s = byN.get(Number(n));
-        return s ? `<a class="cite" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(s.title)}">${n}</a>` : m;
+        return s ? `<a class="cite" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" data-n="${n}" aria-label="Source ${n}: ${escapeHtml(s.title)}">${n}</a>` : m;
       }))).join("");
     }
     function renderSources(el, sources) {

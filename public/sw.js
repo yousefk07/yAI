@@ -1,7 +1,7 @@
 // yAI as an installed app (2026-10-20). The pages and their files come from the network first (so an update shows
 // at once) and from this cache when offline; the API is never cached. Offline, a page that was never opened shows
 // a short note instead.
-const CACHE = "yai-v12";
+const CACHE = "yai-v13";
 const SHELL = ["/", "/styles.css", "/extras.css", "/md.js", "/data.js", "/canvas.js", "/voice.js", "/extras.js", "/connections.js", "/mobile.js", "/mobile.css", "/viz.js", "/logo.svg", "/icon-192.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
