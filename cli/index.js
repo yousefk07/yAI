@@ -1222,15 +1222,17 @@ async function loadModels() {
 // kept) becomes a one-line note until it is back near 60%.
 // /team agents set YAI_TRIM_TOKENS (2026-10-22): every step re-sends the whole conversation, so a long agent paid for
 // the same old file contents dozens of times. Past that size, old tool output and the text of files it wrote are cut
-// in one go, down to about half of it. Cutting rewrites the start of the conversation, which the model's prompt cache
+// in one go, down to about 60% of it (never the last 8 steps). Cutting rewrites the start of the conversation, which the model's prompt cache
 // then has to pay for once more, so it is done rarely and in one big step rather than a little every turn.
 const TRIM_TOKENS = Number(process.env.YAI_TRIM_TOKENS) || 0;
 function trimContext() {
   const limit = TRIM_TOKENS ? Math.min(contextChars() * TRIM_AT, TRIM_TOKENS * 3.6) : contextChars() * TRIM_AT;
   if (usedChars() < limit) return;
-  const goal = TRIM_TOKENS ? limit * 0.5 : contextChars() * 0.6;
+  const goal = TRIM_TOKENS ? limit * 0.6 : contextChars() * 0.6;
+  // a team agent keeps its last 8 steps whole: a reviewer reads the whole project in a few steps and needs it all at once
+  const keep = TRIM_TOKENS ? 16 : 4;
   let cut = false;
-  for (let i = 1; i < state.messages.length - 4 && usedChars() > goal; i++) {
+  for (let i = 1; i < state.messages.length - keep && usedChars() > goal; i++) {
     const m = state.messages[i];
     if (typeof m.content !== "string" || m.content.length <= 400) continue;
     if (m.role === "user" && m.content.startsWith("<tool_result")) {
@@ -1810,6 +1812,7 @@ async function runAgent(content) {
   const failedCommands = new Set();
   const doneSteps = new Map(); // look-only step + what had changed when it ran -> its step number
   let repeats = 0; // look-only steps asked for again with nothing changed
+  let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
   const undoStart = state.undo.length;
   const costStart = state.cost.session;
   state.task = { files: new Map(), tests: null, failure: null, offerFix: false, reads: 0, searches: 0 };
@@ -1873,6 +1876,7 @@ async function runAgent(content) {
         break;
       }
       let result;
+      resultOf = null;
       if (call.cutOff) {
         // No </tool>: either the reply really hit its length limit (a long one), or a small model simply
         // stopped without finishing the step (a short one). They need different advice. Two in a row
@@ -1898,19 +1902,25 @@ async function runAgent(content) {
         if (LOOK_STEPS.has(call.name)) {
           let mtime = "";
           if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p)).mtimeMs; } catch { return 0; } }).join(",");
-          // a trim (below) removes old results, so a step from before it may need to run again
-          sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length}.${state.trims || 0} ${mtime}`;
+          sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
         }
-        if (sig && doneSteps.has(sig)) {
+        // A result that was trimmed away (trimContext) may be run once more, but only once: 2026-10-22 a reviewer
+        // read the whole game, had it trimmed, re-read it, had it trimmed again… 48 reads until the step limit.
+        const before = sig && doneSteps.get(sig);
+        const lost = before && !before.reread && /old tool output removed/.test(String(before.msg?.content || ""));
+        if (lost) before.reread = true;
+        if (before && !lost) {
           repeats++;
           result = {
-            output: `You already did this exact step (step ${doneSteps.get(sig) + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.` +
+            output: (/old tool output removed/.test(String(before.msg?.content || ""))
+              ? `You already read this twice and nothing has changed since; its full text was removed to save space, so don't read it again: work from what you noted, or search for the specific lines you need.`
+              : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
               (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
           };
           ui.note(c.dim(`· same step as before (${call.name}) · not run again`));
         } else {
           result = await execTool(call);
-          if (sig) doneSteps.set(sig, step);
+          if (sig) doneSteps.set(sig, (resultOf = { step, msg: null, reread: !!lost }));
         }
       }
       if (state.interrupted) {
@@ -1937,6 +1947,7 @@ async function runAgent(content) {
         }
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
+      if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       if (failedRuns >= 5) {
         ui.note(`${c.yellow("!")} ${c.ink("Five commands in a row failed, so yAI stopped.")} ${c.dim("Tell it what to do differently, or try a bigger model (/model).")}`);
         break;

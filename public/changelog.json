@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.129",
+      "date": "2026-10-22",
+      "title": "Trimming without the loop",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "No more read, trim, read again",
+          "text": "A /team reviewer read the whole game, had it trimmed to save space, read it again, had it trimmed again, and hit the step limit. Team agents now trim only past about 48k tokens, never cut their last 8 steps, and may re-read something that was trimmed once, not again and again."
+        }
+      ]
+    },
+    {
       "version": "1.0.128",
       "date": "2026-10-22",
       "title": "Cheaper /team runs",
