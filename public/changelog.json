@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.161",
+      "date": "2026-10-22",
+      "title": "Images through Gemini",
+      "items": [
+        {
+          "area": "Models",
+          "title": "Gemini reads the images",
+          "text": "With GEMINI_API_KEY set, a message with an image (a photo on the website, a screenshot from check_page or the /team judge) goes to Gemini 3.5 Flash-Lite first, with Modal as the fallback. Text still goes to DeepSeek. DeepSeek's API is text-only, so images used to depend on Modal alone."
+        }
+      ]
+    },
+    {
       "version": "1.0.160",
       "date": "2026-10-22",
       "title": "The /team lead on DeepSeek",
