@@ -1203,6 +1203,7 @@
           const el = addAssistant();
           if (m.research) el.dataset.research = "1";
           fillAssistant(el, m.content, true, m.stats, m.sources);
+          if (m.cards) window.yaiCards?.render(el, m.cards.map((c) => ({ ...c, at: 0 }))); // refreshed as soon as they're seen
           if (m.run) renderRun(el, m.run);
           if (m.remembered?.length) renderRemembered(el, m.remembered);
         }
@@ -1262,6 +1263,7 @@
       let answer = "";
       let sources = null;
       let remembered = null;
+      let cards = null; // live data cards (cards.js)
       const researching = researchOn && !opts.hidden;
       const searching = webSearch && !researching && !opts.hidden;
       const steps = [];
@@ -1329,6 +1331,7 @@
               if (!answer && !el.querySelector(".tool-steps")) el.querySelector(".content").innerHTML = `<div class="searching">Read ${sources.length} source${sources.length === 1 ? "" : "s"} · writing</div>`;
             }
             // The connected tools it used (weather, arXiv, GitHub…), above the answer.
+            if (msg.cards?.length) { cards = msg.cards.map((c) => ({ ...c, at: Date.now() })); window.yaiCards?.render(el, cards); }
             if (msg.toolsUsed?.length) {
               el.dataset.tools = msg.toolsUsed.join(" · ");
               renderSources(el, sources || []);
@@ -1366,7 +1369,7 @@
         fillAssistant(el, answer, true, stats, sources);
         if (steps.length) renderSteps(el, steps, true);
         const clean = splitThinking(answer).visible.trim();
-        if (clean) chat.history.push({ role: "assistant", content: clean, ...(stats.out && { stats }), ...(sources && { sources }), ...(researching && { research: true }), ...(remembered && { remembered }) });
+        if (clean) chat.history.push({ role: "assistant", content: clean, ...(stats.out && { stats }), ...(sources && { sources }), ...(cards && { cards }), ...(researching && { research: true }), ...(remembered && { remembered }) });
         else chat.history.pop(); // drop the unanswered question so the next turn stays valid
         saveChat();
         controller = null;
@@ -2209,6 +2212,7 @@
   <script src="/extras.js"></script>
   <script src="/connections.js"></script>
   <script src="/answers.js"></script>
+  <script src="/cards.js"></script>
   <script src="/mobile.js"></script>
 </body>
 </html>

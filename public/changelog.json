@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.121",
+      "date": "2026-10-21",
+      "title": "Live cards",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Live weather, stock and score cards",
+          "text": "Ask about the weather, a stock or crypto price, or tonight's games, and a live card sits above the answer: the forecast for the week, the price with today's chart, or the scores with team logos. Cards update themselves while they're on screen (scores and prices every 30 seconds)."
+        }
+      ]
+    },
+    {
       "version": "1.0.120",
       "date": "2026-10-21",
       "title": "Check, compare, present, watch",
