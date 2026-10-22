@@ -1221,12 +1221,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
 
     // 1. The lead splits the work.
-    // yAI Lite writes the plan's JSON badly (2026-10-22, in VS Code: "Expected property name or '}'"), and the split
-    // decides everything after it, so on Lite the lead is Ultra Flash (a fraction of a cent)
-    const lead = X.partnerModel()?.id || (state.model === "glm-4.7-flash" && state.models.some((m) => m.id === "deepseek-v4.1-flash") ? "deepseek-v4.1-flash" : state.model);
+    // The lead decides everything after it, so it's yAI Ultra (DeepSeek V4 Pro), else Ultra Flash: both on DeepSeek's
+    // own API. (2026-10-22: Lite wrote the plan as broken JSON; the partner model, Q3.8 Max on Modal, failed on a Modal
+    // billing limit and a run hung for 25 minutes.) If the first choice fails, the next one is tried.
+    const has = (id) => state.models.some((m) => m.id === id);
+    const leads = [...new Set(["deepseek-v4-pro", "deepseek-v4.1-flash"].filter(has).concat(state.model))];
+    let lead = leads[0];
     let agents;
     try {
-      const ask = (messages) => X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, signal, messages }));
+      const ask = async (messages) => {
+        for (let i = 0; ; i++) {
+          try { return await X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, signal, messages })); }
+          catch (err) { if (state.interrupted || i + 1 >= leads.length) throw err; lead = leads[i + 1]; }
+        }
+      };
       const first = [{ role: "user", content: `Project files:\n${projectFiles()}\n\nTask: ${task}\n\nUse at most ${max} agents${max > MAX_AGENTS ? " (the user asked for many: use as many as the work splits into cleanly)" : ""}.` }];
       let text = await ask(first);
       // a plan that still can't be read: the lead is asked once more, with the exact error

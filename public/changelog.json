@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.160",
+      "date": "2026-10-22",
+      "title": "The /team lead on DeepSeek",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "A lead that doesn't depend on Modal",
+          "text": "The lead that splits a /team task and plans each round is yAI Ultra (DeepSeek V4 Pro), falling back to Ultra Flash, both on DeepSeek's own API. It used the partner model, yAI Q3.8 Max on Modal, and a Modal billing limit left a run waiting."
+        }
+      ]
+    },
+    {
       "version": "1.0.159",
       "date": "2026-10-22",
       "title": "/team in rounds",
