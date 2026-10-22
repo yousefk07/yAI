@@ -2791,6 +2791,10 @@ async function handleInput(input) {
   if (state.prefix && !text.startsWith("/")) text = state.prefix + text;
   state.prefix = "";
   if (state.mcpStart) await state.mcpStart; // MCP servers start in the background; their tools are needed now
+  // A long paste stands in the prompt as [Pasted text #N]; a pasted "/team …" (2026-10-22) is still a command, and so
+  // is "/team " followed by a paste. /team's task may be pasted over several lines.
+  const pasted = text.replace(/\[Pasted text #(\d+) \+\d+ lines?\]/g, (m, n) => state.pastedText[Number(n) - 1] ?? m).trim();
+  if (pasted !== text && /^\/[a-z?]+(\s|$)/i.test(pasted)) text = /^\/team\s/i.test(pasted) ? pasted.replace(/\s*\n\s*/g, " ") : pasted;
   try {
     if (text.startsWith("/") && !text.includes("\n") && /^\/[a-z?]+(\s|$)/i.test(text)) await command(text);
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());

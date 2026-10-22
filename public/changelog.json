@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.131",
+      "date": "2026-10-22",
+      "title": "Paste a long /team prompt",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Pasted commands work",
+          "text": "A long paste shows as [Pasted text #1] in the prompt, so a pasted “/team …” was sent to the model as a message instead of starting the team. Pasted commands now run as commands, “/team ” followed by a paste works too, and a /team task pasted over several lines is joined into one."
+        }
+      ]
+    },
+    {
       "version": "1.0.130",
       "date": "2026-10-22",
       "title": "The spec checker sees the fixed version",
