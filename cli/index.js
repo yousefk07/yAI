@@ -2799,6 +2799,20 @@ async function remoteMode() {
       R.current = task;
       const before = state.mode;
       state.mode = ["default", "acceptEdits", "yolo", "plan"].includes(task.mode) ? task.mode : "default";
+      // Background tasks (2026-10-21): the work goes on a new branch that's committed and pushed when it's done, then
+      // the PC goes back to the branch it was on, so you can start it from your phone and review a branch later.
+      const gitRun = (args) => { const r = require("child_process").spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }); return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim() }; };
+      let bg = null;
+      if (task.mode === "background") {
+        state.mode = "acceptEdits";
+        if (!gitRun(["rev-parse", "--is-inside-work-tree"]).ok) ui.note(c.yellow("This folder isn't a git repository, so the work stays as plain changes (no branch)."));
+        else if (gitRun(["status", "--porcelain"]).out) ui.note(c.yellow("There are uncommitted changes here, so the work isn't put on a separate branch."));
+        else {
+          const from = gitRun(["branch", "--show-current"]).out;
+          const name = `yai/${task.text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "task"}-${task.id.slice(0, 5)}`;
+          if (gitRun(["switch", "-c", name]).ok) { bg = { from, name }; ui.note(c.dim(`working on a new branch: ${name}`)); push(task, [{ t: "ev", ev: { type: "note", text: `Working on a new branch: ${name} (it gets committed and pushed when done)` } }]); }
+        }
+      }
       await push(task, [], "running");
       print("");
       ui.userLine(task.text);
@@ -2837,6 +2851,25 @@ async function remoteMode() {
         state.askHook = null;
         state.mode = before;
         R.current = null;
+      }
+      // the background branch: commit, push, and go back
+      if (bg) {
+        const ui2 = (t) => { ui.setTap((ev) => queue2.push({ t: "ev", ev })); ui.note(t); ui.setTap(null); };
+        const queue2 = [];
+        gitRun(["add", "-A"]);
+        if (gitRun(["diff", "--cached", "--quiet"]).ok) {
+          ui2(c.dim(`nothing changed, so ${bg.name} was removed`));
+          gitRun(["switch", bg.from]);
+          gitRun(["branch", "-D", bg.name]);
+        } else {
+          const msg = `yAI: ${task.text.split("\n")[0].slice(0, 70)}\n\nDone by yAI Code from a Remote task.`;
+          const committed = gitRun(["-c", "user.name=yAI Code", "-c", `user.email=${api.cfg.user || "yai"}@users.noreply.yai`, "commit", "-q", "-m", msg]).ok;
+          const hasRemote = gitRun(["remote"]).out.split("\n").includes("origin");
+          const pushed = committed && hasRemote && gitRun(["push", "-u", "origin", bg.name]).ok;
+          gitRun(["switch", bg.from]);
+          ui2(committed ? (pushed ? `Committed on ${bg.name} and pushed to origin. Back on ${bg.from}.` : `Committed on ${bg.name}${hasRemote ? " (the push failed; push it yourself)" : " (no remote to push to)"}. Back on ${bg.from}.`) : c.yellow(`Couldn't commit on ${bg.name}; the changes are there, uncommitted.`));
+        }
+        await push(task, queue2);
       }
       const status = failedMsg ? "error" : state.interrupted ? "stopped" : "done";
       await push(task, [failedMsg ? { t: "error", text: failedMsg } : { t: "done", text: state.lastStats || "" }], status);

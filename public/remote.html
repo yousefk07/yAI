@@ -137,7 +137,7 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const ago = (ms) => { const s = (Date.now() - ms) / 1000; return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
     const md = (t) => (window.renderMarkdown ? renderMarkdown(t) : `<p>${esc(t)}</p>`);
-    const MODES = { default: "Ask me before changes", acceptEdits: "Edit without asking", plan: "Plan only" };
+    const MODES = { default: "Ask me before changes", acceptEdits: "Edit without asking", background: "On a new branch, then push", plan: "Plan only" };
     let sessions = [], current = null, follow = null, running = null;
 
     async function hub(op, opts = {}) {

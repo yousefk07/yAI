@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.122",
+      "date": "2026-10-21",
+      "title": "Background tasks from your phone",
+      "items": [
+        {
+          "area": "Remote",
+          "title": "On a new branch, then push",
+          "text": "Pick \"On a new branch, then push\" when you send a task from Remote: your PC does the work on a new branch, commits it, pushes it, and goes back to the branch it was on, so you can review it later. Your phone gets a notification when any Remote task finishes."
+        }
+      ]
+    },
+    {
       "version": "1.0.121",
       "date": "2026-10-21",
       "title": "Live cards",
