@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.133",
+      "date": "2026-10-22",
+      "title": "yAI Ultra Flash through DeepSeek",
+      "items": [
+        {
+          "area": "Models",
+          "title": "Cheaper Ultra Flash",
+          "text": "When a DeepSeek API key is set, yAI Ultra Flash runs on DeepSeek’s own API: cached input costs a fifth of what it did, and outside DeepSeek’s peak hours everything is half price. Modal stays as the fallback, and messages with images still go to Modal. The daily allowance counts the price of whichever one answered."
+        }
+      ]
+    },
+    {
       "version": "1.0.132",
       "date": "2026-10-22",
       "title": "Builders that finish",
