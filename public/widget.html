@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f8f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+  <title>Widgets · yAI</title>
+  <meta name="description" content="yAI on your phone's home screen: a daily brief widget and quick shortcuts." />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Widgets (2026-10-21, lib/widget.js): the daily brief on a phone's home screen. With ?t=<link>&view=1 this page is
+       the compact widget itself (for Android web-widget apps); otherwise it sets the widget up. */
+    .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
+    .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
+    .head p { margin: 0; font-size: 14px; color: var(--text-2, var(--muted)); line-height: 1.55; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    .panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    .panel p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row .grow { flex: 1; }
+    input[type=text] { height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: 14px var(--sans); flex: 1; min-width: 180px; }
+    .btn-primary, .btn-ghost { width: auto; padding: 0 14px; height: 38px; }
+    .link { font: 12.5px var(--mono); padding: 8px 10px; border-radius: 10px; background: var(--surface-2); word-break: break-all; }
+    pre.code { margin: 0; max-height: 300px; overflow: auto; padding: 12px 14px; border-radius: 12px; background: #151514; color: #e8e7e2; font: 11.5px/1.5 var(--mono); }
+    ol { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.7; }
+    .previews { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    .page-title { font-weight: 600; font-size: 15px; display: none; }
+    @media (max-width: 900px) { .stage { padding: 4px 14px 24px; } .head h1 { display: none; } .page-title { display: block; } }
+    @media (max-width: 600px) { .topbar { display: grid; } .page-title { grid-column: 2; justify-self: center; } }
+
+    /* the widget itself */
+    .wg { width: 340px; max-width: 100%; border-radius: 22px; padding: 16px 18px; background: linear-gradient(160deg, #1d1b2e, #141413 70%); color: #f2f1ee; display: flex; flex-direction: column; gap: 10px; font-family: var(--sans); box-shadow: 0 10px 30px rgba(0,0,0,.25); text-decoration: none; }
+    .wg.small { width: 160px; height: 160px; padding: 14px; gap: 6px; }
+    .wg-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #b9b6ff; font-weight: 600; }
+    .wg-top span { margin-left: auto; color: #9a988f; font-weight: 400; }
+    .wg-wx { display: flex; align-items: center; gap: 8px; }
+    .wg-wx b { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; }
+    .wg-wx small { color: #c9c7c0; font-size: 12px; line-height: 1.35; }
+    .wg-sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #8f8d86; margin-top: 2px; }
+    .wg-item { font-size: 12.5px; display: flex; gap: 8px; }
+    .wg-item time { color: #b9b6ff; flex: none; min-width: 74px; }
+    .wg-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wg-live { font-size: 12px; color: #6fdc96; }
+    .wg-none { font-size: 12px; color: #8f8d86; }
+    body.widget-only { background: transparent; }
+    body.widget-only .wg { width: 100%; min-height: 100vh; border-radius: 0; box-shadow: none; }
+  </style>
+</head>
+<body data-page="widget">
+  <div class="shell" id="shell">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <button class="icon-btn side-toggle" id="sideToggle" type="button" aria-label="Show chats" hidden>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h10"/></svg>
+          </button>
+          <span class="page-title">Widgets</span>
+        </div>
+        <div class="topbar-right"><a class="avatar page-avatar" href="/" title="Back to chat" style="text-decoration:none"></a></div>
+      </header>
+      <main class="stage">
+        <div class="wrap">
+          <div class="head"><h1>Widgets</h1><p>yAI on your home screen: a daily brief with your weather, LEARN due dates, the latest scheduled task and your PC's Remote status. Phones only allow widgets from installed apps, so it's drawn by a free widget app that reads your private brief link.</p></div>
+
+          <section class="panel">
+            <h2>1 · Your brief</h2>
+            <p>Pick the place for the weather, then make your private link. Anyone with the link can read the brief (not your chats), so keep it to yourself; you can renew or turn it off any time.</p>
+            <div class="row"><input type="text" id="place" placeholder="City for the weather, e.g. Waterloo, ON" maxlength="80" aria-label="Place for the weather" /><button type="button" class="btn-primary" id="make">Make my link</button></div>
+            <div id="linkBox" hidden>
+              <div class="link" id="link"></div>
+              <div class="row" style="margin-top:8px"><button type="button" class="btn-ghost" id="copyLink">Copy link</button><button type="button" class="btn-ghost" id="renew">Renew link</button><button type="button" class="btn-ghost" id="off">Turn off</button></div>
+            </div>
+            <div class="previews" id="previews"></div>
+          </section>
+
+          <section class="panel" id="ios" hidden>
+            <h2>2 · iPhone: Scriptable</h2>
+            <ol>
+              <li>Install <b>Scriptable</b> from the App Store (free).</li>
+              <li>In Scriptable, tap <b>+</b>, paste the script below (it already has your link), and name it <b>yAI</b>.</li>
+              <li>On your home screen, long-press → <b>+</b> → Scriptable → pick a small or medium widget → tap it → Script: <b>yAI</b>.</li>
+            </ol>
+            <div class="row"><button type="button" class="btn-primary" id="copyScript">Copy the script</button></div>
+            <pre class="code" id="script"></pre>
+          </section>
+
+          <section class="panel" id="android" hidden>
+            <h2>2 · Android</h2>
+            <ol>
+              <li>Install a web widget app from the Play Store (search <b>web widget</b>, any app that shows a web page as a widget).</li>
+              <li>Add its widget to your home screen and give it this page: <span class="link" id="viewLink" style="display:inline-block"></span></li>
+              <li>Set it to refresh every 15–30 minutes.</li>
+            </ol>
+          </section>
+
+          <section class="panel">
+            <h2>Shortcuts</h2>
+            <p>Install yAI as an app (account menu → Install the app), then long-press its icon for <b>New chat</b>, <b>Ask by voice</b>, <b>Remote</b> and <b>Scheduled</b>. Links like <span class="link" style="display:inline-block">/?q=what's due this week</span> open yAI and ask straight away, handy for iOS Shortcuts or a launcher.</p>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const WX = (code) => (code === 0 ? "☀️" : code <= 2 ? "🌤️" : code === 3 ? "☁️" : code <= 48 ? "🌫️" : code <= 57 ? "🌦️" : code <= 67 ? "🌧️" : code <= 77 ? "🌨️" : code <= 82 ? "🌧️" : code <= 86 ? "🌨️" : "⛈️");
+    const params = new URLSearchParams(location.search);
+    const feed = (t) => `${location.origin}/api/hub?op=widget&t=${encodeURIComponent(t)}`;
+    const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
+
+    // the widget, drawn from the brief (the same layout Scriptable draws)
+    function widgetHtml(d, small) {
+      const wx = d.weather ? `<div class="wg-wx"><span style="font-size:${small ? 22 : 28}px">${WX(d.weather.code)}</span><b>${d.weather.temp}°</b><small>${esc(d.weather.label)}<br>${d.weather.hi}° / ${d.weather.lo}°${small ? "" : ` · ${esc(d.weather.place)}`}</small></div>` : "";
+      const due = (d.deadlines || []).slice(0, small ? 2 : 3);
+      return `<a class="wg${small ? " small" : ""}" href="${location.origin}/" target="_blank" rel="noopener">
+        <div class="wg-top">yAI<span>${small ? "" : greeting()}</span></div>${wx}
+        ${due.length ? `<div class="wg-sec">Due soon</div>${due.map((x) => `<div class="wg-item"><time>${esc(x.when)}</time><span>${esc(x.what)}</span></div>`).join("")}` : small ? "" : '<div class="wg-none">Nothing due on LEARN this week.</div>'}
+        ${!small && d.remote ? `<div class="wg-live">● ${esc(d.remote.name)} is live in Remote · ${esc(d.remote.folder)}</div>` : ""}
+        ${!small && d.scheduled?.text ? `<div class="wg-sec">${esc(d.scheduled.title)}</div><div class="wg-item"><span style="white-space:normal">${esc(d.scheduled.text.slice(0, 110))}</span></div>` : ""}
+        ${!small && !d.scheduled?.text && d.watch ? `<div class="wg-sec">Watcher</div><div class="wg-item"><span>${esc(d.watch.text)}</span></div>` : ""}
+      </a>`;
+    }
+
+    // ---------- the widget on its own (Android web-widget apps) ----------
+    if (params.get("view") && params.get("t")) {
+      document.body.className = "widget-only";
+      document.body.innerHTML = '<div id="w"></div>';
+      const load = async () => {
+        try { const d = await (await fetch(feed(params.get("t")), { cache: "no-store" })).json(); document.getElementById("w").innerHTML = d.error ? `<div class="wg"><div class="wg-none">${esc(d.error)}</div></div>` : widgetHtml(d, innerWidth < 220); }
+        catch { document.getElementById("w").innerHTML = '<div class="wg"><div class="wg-none">Offline</div></div>'; }
+      };
+      load();
+      setInterval(load, 15 * 60000);
+    } else {
+      // the site's sidebar only on the setup view (the widget view has none of its elements)
+      const side = document.createElement("script");
+      side.src = "/side.js";
+      document.body.appendChild(side);
+      setup();
+    }
+
+    // ---------- setting it up ----------
+    async function hub(op, opts = {}) {
+      const r = await fetch(`/api/hub?op=${op}`, { cache: "no-store", ...opts, headers: { "Content-Type": "application/json" } });
+      if (r.status === 401) { location.href = "/"; throw new Error("Log in"); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      return d;
+    }
+    function script(link) {
+      return `// yAI widget for Scriptable (small or medium). Your private brief link:
+const URL_ = ${JSON.stringify(link)};
+const SITE = ${JSON.stringify(location.origin)};
+const d = await new Request(URL_).loadJSON().catch(() => null);
+const w = new ListWidget();
+const g = new LinearGradient(); g.colors = [new Color("#1d1b2e"), new Color("#141413")]; g.locations = [0, 1]; w.backgroundGradient = g;
+w.url = SITE; w.setPadding(14, 16, 14, 16);
+const small = config.widgetFamily === "small";
+const t = (s, size, color, bold) => { const x = w.addText(String(s)); x.font = bold ? Font.semiboldSystemFont(size) : Font.systemFont(size); x.textColor = new Color(color); x.lineLimit = 1; return x; };
+const WX = (c) => c === 0 ? "☀️" : c <= 2 ? "🌤️" : c === 3 ? "☁️" : c <= 48 ? "🌫️" : c <= 57 ? "🌦️" : c <= 67 ? "🌧️" : c <= 77 ? "🌨️" : c <= 82 ? "🌧️" : c <= 86 ? "🌨️" : "⛈️";
+t("yAI", 12, "#b9b6ff", true);
+if (!d || d.error) { w.addSpacer(6); t(d && d.error ? d.error : "Offline", 12, "#c9c7c0"); }
+else {
+  if (d.weather) { w.addSpacer(4); t(WX(d.weather.code) + " " + d.weather.temp + "°  " + d.weather.label, small ? 15 : 17, "#f2f1ee", true); t(d.weather.hi + "° / " + d.weather.lo + "°" + (small ? "" : " · " + d.weather.place), 11, "#c9c7c0"); }
+  const due = (d.deadlines || []).slice(0, small ? 2 : 3);
+  if (due.length) { w.addSpacer(6); t("DUE SOON", 9, "#8f8d86", true); for (const x of due) t(x.when + "  " + x.what, 11, "#f2f1ee"); }
+  if (!small && d.remote) { w.addSpacer(4); t("● " + d.remote.name + " is live in Remote", 11, "#6fdc96"); }
+  if (!small && d.scheduled && d.scheduled.text && !d.remote) { w.addSpacer(4); t(d.scheduled.title.toUpperCase(), 9, "#8f8d86", true); const s = t(d.scheduled.text, 11, "#f2f1ee"); s.lineLimit = 2; }
+}
+w.addSpacer();
+w.refreshAfterDate = new Date(Date.now() + 20 * 60000);
+Script.setWidget(w); Script.complete();
+if (config.runsInApp) small ? w.presentSmall() : w.presentMedium();`;
+    }
+    async function show(token) {
+      $("linkBox").hidden = !token;
+      $("ios").hidden = $("android").hidden = !token;
+      if (!token) { $("previews").innerHTML = ""; return; }
+      $("link").textContent = feed(token);
+      $("script").textContent = script(feed(token));
+      $("viewLink").textContent = `${location.origin}/widget?t=${token}&view=1`;
+      $("make").textContent = "Save the place";
+      $("previews").innerHTML = '<p>Loading a preview…</p>';
+      try {
+        const d = await (await fetch(feed(token), { cache: "no-store" })).json();
+        $("previews").innerHTML = widgetHtml(d, false) + widgetHtml(d, true);
+      } catch { $("previews").innerHTML = "<p>Couldn't load the preview.</p>"; }
+    }
+    async function setup() {
+      const s = await hub("widget-setup").catch(() => ({}));
+      $("place").value = s.place || "";
+      show(s.token);
+      $("make").addEventListener("click", async () => { const r = await hub("widget-setup", { method: "POST", body: JSON.stringify({ place: $("place").value }) }); show(r.token); });
+      $("renew").addEventListener("click", async () => { if (!confirm("Make a new link? The old one stops working, so update your widget.")) return; const r = await hub("widget-setup", { method: "POST", body: JSON.stringify({ renew: true }) }); show(r.token); });
+      $("off").addEventListener("click", async () => { await hub("widget-setup", { method: "DELETE" }); show(null); $("make").textContent = "Make my link"; });
+      const copy = (text, btn) => navigator.clipboard.writeText(text).then(() => { const o = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = o), 1500); });
+      $("copyLink").addEventListener("click", (e) => copy($("link").textContent, e.target));
+      $("copyScript").addEventListener("click", (e) => copy($("script").textContent, e.target));
+    }
+  </script>
+</body>
+</html>

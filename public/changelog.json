@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.123",
+      "date": "2026-10-21",
+      "title": "yAI on your home screen",
+      "items": [
+        {
+          "area": "App",
+          "title": "A home-screen widget",
+          "text": "The new Widgets page sets up a daily brief widget: your weather, LEARN due dates, the latest scheduled task and whether a PC is live in Remote. On iPhone it runs in the free Scriptable app (the script is ready to copy, with your private link in it); on Android any web-widget app can show it."
+        },
+        {
+          "area": "App",
+          "title": "Shortcuts and quick-ask links",
+          "text": "Long-press the installed app for New chat, Ask by voice, Remote and Scheduled. Links like /?q=your question open yAI and ask straight away, handy for iOS Shortcuts and launchers."
+        }
+      ]
+    },
+    {
       "version": "1.0.122",
       "date": "2026-10-21",
       "title": "Background tasks from your phone",

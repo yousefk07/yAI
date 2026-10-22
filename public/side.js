@@ -66,6 +66,7 @@
         <a class="side-link${on("study")}" href="/study">${I.study}<span class="grow">Study</span></a>
         <a class="side-link${on("scheduled")}" href="/scheduled">${I.clock}<span class="grow">Scheduled</span></a>
         <a class="side-link${on("remote")}" href="/remote">${I.phone}<span class="grow">Remote</span></a>
+        <a class="side-link${on("widget")}" href="/widget">${I.phone}<span class="grow">Widgets</span></a>
         <div class="side-me"><span class="avatar" id="sideAvatar"></span><div class="side-me-text"><b id="sideName"></b><small id="sideRole"></small></div></div>
       </div>
     </aside>
