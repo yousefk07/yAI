@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.164",
+      "date": "2026-10-22",
+      "title": "check_page never hangs",
+      "items": [
+        {
+          "area": "Team",
+          "title": "Time limits on every page check",
+          "text": "Pressing keys, reading the page, the screenshot and its description each have a time limit, and the whole check stops at 100 s. A page that hangs is reported as frozen instead of leaving the agent stuck on \"opening it in a browser\"."
+        }
+      ]
+    },
+    {
       "version": "1.0.163",
       "date": "2026-10-22",
       "title": "A faster, truer team",

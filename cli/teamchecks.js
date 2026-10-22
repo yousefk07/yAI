@@ -213,10 +213,24 @@ async function playtest({ root, entry, task, X, signal }) {
 // presses its start button, holds any keys asked for, and reports errors, a frozen page, the frame rate, what the page
 // says and (with `describe`, a model that can see) what's on screen. No model of its own, so it's cheap and can't loop.
 // keys: "KeyW:1500,Space,ArrowLeft:500" (a key code, held for the ms after the colon, default 150)
-async function pageCheck({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo }) {
+// Every step has a time limit, and the whole check one of 100 s (2026-10-22: a builder's check_page sat on "opening it
+// in a browser" for minutes: a key press, a read or the screenshot waits forever on a page that hangs mid-check).
+async function pageCheck(o) {
+  const lines = [], at = { step: "opening the browser" }, p = {};
+  let timer;
+  const cap = new Promise((ok) => { timer = setTimeout(() => ok({ frozen: true, lines: [...lines, `check_page gave up after 100 s while ${at.step}: the page (or the browser) stopped answering. Treat it as frozen: look for a loop that never ends, or a step that waits on something that never comes.`] }), 100000); });
+  // the steps go on after a time-out until the browser is closed under them; their error then is expected
+  const run = pageCheckSteps(o, lines, at, p);
+  run.catch(() => {});
+  try { return await Promise.race([run, cap]); }
+  finally { clearTimeout(timer); p.close?.(); }
+}
+const within = (pr, ms, fallback) => Promise.race([Promise.resolve(pr).catch(() => fallback), sleep(ms).then(() => fallback)]);
+async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo }, lines, at, out) {
   const p = await openPage(entry);
-  const lines = [];
-  try {
+  out.close = p.close;
+  {
+    at.step = "starting the page";
     await sleep(1200);
     const pressed = start ? await Promise.race([B.evaluate(p.b, START), sleep(6000).then(() => "")]).catch(() => "") : "";
     if (start) lines.push(pressed ? `Pressed "${pressed}".` : "No start button to press.");
@@ -225,26 +239,31 @@ async function pageCheck({ entry, start = true, keys = "", wait = 2500, describe
       lines.push(`FROZEN: the page stopped answering${pressed ? ` after "${pressed}"` : ""} for over 10 s: a loop that never ends (a Set or array growing while it is walked, a while loop that never exits).`);
       return { frozen: true, lines };
     }
+    at.step = "pressing the keys";
     for (const k of String(keys || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 12)) {
       const [code, ms] = k.split(":");
       const key = code.replace(/^Key/, "").replace(/^Digit/, "").toLowerCase();
-      await p.b.send("Input.dispatchKeyEvent", { type: "keyDown", code, key: code === "Space" ? " " : key });
+      if ((await within(p.b.send("Input.dispatchKeyEvent", { type: "keyDown", code, key: code === "Space" ? " " : key }).then(() => true), 6000, false)) === false) { lines.push(`FROZEN: the page stopped answering when ${code} was pressed.`); return { frozen: true, lines }; }
       await sleep(Math.min(Number(ms) || 150, 5000));
-      await p.b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key: code === "Space" ? " " : key });
+      if ((await within(p.b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key: code === "Space" ? " " : key }).then(() => true), 6000, false)) === false) { lines.push(`FROZEN: the page stopped answering after ${code}.`); return { frozen: true, lines }; }
     }
     if (keys) { lines.push(`Held: ${keys}.`); if (!(await alive(p.b))) { lines.push("FROZEN after the keys."); return { frozen: true, lines }; } }
     const fps = await Promise.race([B.evaluate(p.b, `new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else r(n); }; requestAnimationFrame(f); })`), sleep(4000).then(() => 0)]);
-    const info = await B.evaluate(p.b, `(() => ({ title: document.title, text: document.body.innerText.replace(/\\s+/g, " ").trim().slice(0, 300), buttons: [...document.querySelectorAll("button, [role=button]")].filter((b) => b.offsetParent).map((b) => b.textContent.trim()).filter(Boolean).slice(0, 10), canvas: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).slice(0, 3) }))()`);
+    at.step = "reading the page";
+    const info = await within(B.evaluate(p.b, `(() => ({ title: document.title, text: document.body.innerText.replace(/\\s+/g, " ").trim().slice(0, 300), buttons: [...document.querySelectorAll("button, [role=button]")].filter((b) => b.offsetParent).map((b) => b.textContent.trim()).filter(Boolean).slice(0, 10), canvas: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).slice(0, 3) }))()`), 8000, null);
     lines.push(`Frame rate: about ${fps} fps (a headless browser without a graphics card, so a real one is faster).`);
     if (info?.canvas?.length) lines.push(`Canvas: ${info.canvas.join(", ")}.`);
     if (info?.buttons?.length) lines.push(`Buttons on screen: ${info.buttons.join(" · ")}.`);
     if (info?.text) lines.push(`Text on the page: ${info.text}`);
     lines.push(p.errors.length ? `Errors in the browser (${p.errors.length}):\n${[...new Set(p.errors)].slice(0, 8).map((e) => `- ${e}`).join("\n")}` : "No errors in the browser.");
-    const img = await B.screenshot(p.b, { quality: 60 });
+    at.step = "taking the screenshot";
+    const img = await within(B.screenshot(p.b, { quality: 60 }), 15000, null);
+    if (!img) { lines.push("The screenshot timed out: the page stopped drawing."); return { frozen: true, lines }; }
     if (saveTo) { try { require("fs").mkdirSync(path.dirname(saveTo), { recursive: true }); require("fs").writeFileSync(saveTo, img); lines.push(`Screenshot saved: ${saveTo}`); } catch {} }
-    if (describe) { const seen = await describe(img, lookFor).catch(() => ""); if (seen) lines.push(`On screen (described by a model that can see it):\n${seen}`); }
+    at.step = "describing the screenshot";
+    if (describe) { const seen = await within(describe(img, lookFor), 45000, ""); if (seen) lines.push(`On screen (described by a model that can see it):\n${seen}`); }
     return { frozen: false, lines };
-  } finally { p.close(); }
+  }
 }
 
 module.exports = { mobile, performance, accessibility, playtest, pageCheck };
