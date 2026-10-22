@@ -145,8 +145,9 @@ async function chat({ messages, model, system, context, conversationId, signal, 
   });
   if (res.status === 401) throw Object.assign(new Error("Your session expired. Run /login."), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));
-  let usage, error, cost;
+  let usage, error, cost, fallback;
   await readEvents(res, (ev) => {
+    if (ev.fallback) fallback = ev.fallback; // answered by the model's fallback (yAI Lite busy → DeepSeek Flash)
     if (ev.status && onStatus) onStatus(ev.status);
     if (ev.t) onTokens(ev.t);
     if (ev.error) error = ev.error;
@@ -156,7 +157,7 @@ async function chat({ messages, model, system, context, conversationId, signal, 
     if (ev.content) return onText(ev.content);
   });
   if (error) throw new Error(error);
-  return { usage, cost };
+  return { usage, cost, fallback };
 }
 
 // ---------- images and videos (the web app's Make Image / Make Video) ----------

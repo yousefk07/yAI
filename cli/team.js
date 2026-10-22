@@ -59,6 +59,7 @@
 const path = require("path");
 const readline = require("readline");
 const { spawn, spawnSync } = require("child_process");
+const PM = require("./projmap");
 
 const MAX_AGENTS = 4; // the default; "/team 6 …" or "as many agents as possible" allows up to MAX_ASKED
 const MAX_ASKED = 8;
@@ -234,6 +235,22 @@ module.exports = function create(d) {
     return ["", `yAI opened the page in a headless browser after the builders (VERDICT: ${b.verdict || "?"}):`, ...b.text];
   };
 
+  // yAI's map of the project (cli/projmap.js), for the roles that must see all of it (merger, integration, reviewer,
+  // fixer, spec): what each file defines and the names that don't line up, worked out at no cost, and how to read a
+  // project too big to hold at once. Made when the agent starts, so it shows the files as they are then.
+  const mapLines = (all) => {
+    const files = [...new Set(all.flatMap((a) => [...(a.files || []), ...(a.changed || [])]))].filter((f) => !/TEAM_CONTRACT/i.test(f));
+    let m;
+    try { m = PM.projectMap(root, files); } catch { return []; }
+    if (!m.text) return [];
+    return [
+      "", `yAI's map of the project (${m.total} lines; each file with what it defines and the line it starts on):`, m.text,
+      "", m.mismatches.length
+        ? `Possible mismatches yAI found by reading the code itself (check each before acting; most are real):\n${m.mismatches.map((x) => `- ${x}`).join("\n")}`
+        : "yAI found no name used in one file and missing from the others, no missing element id and no missing script.",
+      "", "How to read this project: don't read large files whole. You can't hold them all at once, and old file contents are removed from your memory as you go. Start from the map above, then read only the lines you need: read_file with a line range (js/world.js:120-180), several ranges in one read_file, or a search for one name. Never search for everything (\".*\").",
+    ];
+  };
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
   const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.";
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Don't leave scratch or debug files (like _test.js or _smoke.js) behind; delete them before you finish.";
@@ -341,7 +358,7 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -355,11 +372,14 @@ module.exports = function create(d) {
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
       ...workersLines(all), "",
-      ...contractLines(), ...handoffLines(all, "fixer"), ...browserLines(all), "",
+      ...contractLines(), ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
       ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
       "Don't break what works: after your edits, run the project's existing tests (the tester's, under tests/ or test/), and check that every behaviour the task asks for still works, not only the ones you touched. When you change how something is controlled (input, keys, the mouse, touch), check EVERY control again, because fixing one often breaks another.",
+      // 2026-10-22 (the habit tracker): a fixer made the store return copies where the contract promised the live list,
+      // and 13 of the tester's tests broke.
+      "Keep what the CONTRACT promises (names, what functions return, data shapes): the other files and the tests rely on it. Change a promise only when a checker shows the contract itself is wrong, and then update every file and test that relies on it.",
       "If one of your own checks fails, assume the app is wrong first. Change a check only when you can show why it's wrong, and list each one in your report under \"Checks I changed\" with the reason; never loosen a check just to make it pass.",
       "Be exact about checks: in your report, give each command you ran and its last result line (for example \"node --test test/ → 58 passed, 2 failed\"). Never say tests pass unless you ran them and they did. yAI re-runs the tests after you and shows the real result next to your verdict.",
       CHECKS, "", RULES,
@@ -561,6 +581,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "error") { a.error = e.message; log({ k: "error", text: e.message }); if (a.state !== "working") a.state = "failed"; }
       else if (e.type === "done" && a.state === "working") {
         a.cost = e.cost?.session || 0;
+        a.fallbacks = e.fallbacks || 0;
         a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
@@ -591,7 +612,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
       // an agent still waiting has no time of its own yet (it showed the team's time, 2026-10-22)
       const time = a.state === "waiting" ? "" : secs((a.ended || Date.now()) - a.started);
-      const model = a.model && !a.internal ? (state.models.find((m) => m.id === a.model)?.label || a.model).replace(/^yAI\s+/, "") + " · " : "";
+      // with how many of its replies came from the fallback model (yAI Lite busy → DeepSeek Flash)
+      const model = a.model && !a.internal ? (state.models.find((m) => m.id === a.model)?.label || a.model).replace(/^yAI\s+/, "") + (a.fallbacks ? ` (${a.fallbacks} via fallback)` : "") + " · " : "";
       const right = `${model}${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
       const what = a.state === "done" ? ["finished", a.verdict, a.flag].filter(Boolean).join(" · ") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
       const room = Math.max(8, w - nameW - right.length - 12);
@@ -708,7 +730,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) cmds.push("npm test");
       } catch {}
     }
-    return cmds;
+    // the team's own test suite always runs (2026-10-22: the habit tracker's re-run said "checks pass" while 13 of
+    // tests/run.js's tests failed, because the agents had only run single test files): its runner if it has one,
+    // else every test file the team wrote
+    const made = [...new Set(all.flatMap((a) => [...(a.created || []), ...(a.changed || [])]))].filter((f) => require("fs").existsSync(path.join(root, f)));
+    const q = (f) => (/\s/.test(f) ? `"${f}"` : f);
+    const runner = made.find((f) => /(^|\/)tests?\/run\.m?js$/.test(f));
+    const tests = made.filter((f) => /(^|\/)tests?\/[^/]+\.test\.m?js$/.test(f));
+    const own = runner ? `node ${q(runner)}` : tests.length ? `node --test ${tests.map(q).join(" ")}` : "";
+    if (own && !cmds.includes(own)) cmds.unshift(own);
+    return cmds.slice(0, 3);
   }
   // Runs each command in the project and keeps its exit code, pass/fail counts and last lines.
   function runChecks(cmds, signal) {

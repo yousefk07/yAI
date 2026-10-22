@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.148",
+      "date": "2026-10-22",
+      "title": "/team on big projects",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "A map of the project",
+          "text": "Before the merger, integration, reviewer, fixer and spec checker start, yAI maps the project itself, at no cost: what each file defines and where, and the names that don't line up (a name one file uses and no file defines, with the likely intended name; one defined twice; an element id no page has; a script that doesn't exist). They start from the map and read only the lines they need, so they no longer run out of memory on big projects."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Line ranges",
+          "text": "read_file takes a line range in the path (js/world.js:120-180), several at once. A long file read whole isn't read whole again unless it changed; the agent is pointed to the lines it needs, and a search for everything (.*) is refused."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fixer and tests",
+          "text": "The fixer keeps what the team contract promises. After it, yAI always re-runs the team's own test suite, not only the single test files the agents ran."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fallbacks on the board",
+          "text": "An agent whose replies came partly from the fallback model (yAI Lite busy, so DeepSeek Flash answered) shows how many, for example Lite (3 via fallback)."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Tidier agent views",
+          "text": "What an agent says is no longer cut into lines before the team view wraps it, so sentences don't break in the middle. A stopped team agent no longer suggests /model."
+        }
+      ]
+    },
+    {
       "version": "1.0.147",
       "date": "2026-10-22",
       "title": "Suggested models for /team",

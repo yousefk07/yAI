@@ -1442,7 +1442,7 @@ async function callModel() {
   try {
     const price = state.models.find((m) => m.id === state.model)?.price; // US$ per million tokens (yAI Ultra)
     const promptTokens = usedChars() / 3.6;
-    const { usage, cost } = await api.chat({
+    const { usage, cost, fallback } = await api.chat({
       messages: state.messages,
       model: state.model,
       system: systemPrompt(),
@@ -1471,10 +1471,11 @@ async function callModel() {
           emit(lineBuf.slice(0, i).replace(/\r$/, ""));
           lineBuf = lineBuf.slice(i + 1);
         }
-        // Show long paragraphs as they arrive, wrapped at the terminal width.
+        // Show long paragraphs as they arrive, wrapped at the terminal width. Not for the VS Code panel or a /team agent
+        // (--stdio): whatever shows it wraps it again at its own width, and pre-cut lines broke mid-sentence there.
         const width = ui.textWidth();
         // (a table row is never cut: it's drawn whole once the table ends)
-        while (!inTool && lineBuf.length > width && !/^\s*(<|```|\|)/.test(lineBuf) && !lineBuf.includes("<|")) {
+        while (!state.stdio && !inTool && lineBuf.length > width && !/^\s*(<|```|\|)/.test(lineBuf) && !lineBuf.includes("<|")) {
           const cut = lineBuf.lastIndexOf(" ", width);
           if (cut < width / 2) break;
           emit(lineBuf.slice(0, cut));
@@ -1492,6 +1493,7 @@ async function callModel() {
       },
     });
     state.usage.out += usage?.out ?? seen; // a reply cut at a tool call has no final usage event
+    if (fallback) state.fallbacks = (state.fallbacks || 0) + 1; // replies from the fallback model (the /team board shows them)
     if (cost) {
       state.cost.session += cost.usd;
       if (cost.todayUsd != null) state.cost.todayUsd = cost.todayUsd;
@@ -1834,6 +1836,21 @@ async function runAgent(content) {
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
   const doneSteps = new Map(); // look-only step + what had changed when it ran -> its step number
+  // Long files read whole (over 300 lines, no range), with the file's time then: path -> mtime. Only for /team agents
+  // (they trim old file contents early); see the repeat guard.
+  const readWhole = new Map();
+  const wholeOf = (call) => {
+    if (!TRIM_TOKENS || call.name !== "read_file" || call.args?.offset) return [];
+    return T.splitPaths(call.args?.path, root).filter((p) => !/:\d+(-\d+)?$/.test(p.trim())).map((p) => {
+      try {
+        const abs = path.resolve(root, p.trim());
+        const st = fs.statSync(abs);
+        return st.size > 9000 && fs.readFileSync(abs, "utf8").split("\n").length > 300 ? { p: p.trim(), abs, mtime: st.mtimeMs } : null;
+      } catch { return null; }
+    }).filter(Boolean);
+  };
+  const noteWhole = (call) => { for (const f of wholeOf(call)) readWhole.set(f.abs, f.mtime); };
+  const wholeAgain = (call) => { const hit = wholeOf(call).filter((f) => readWhole.get(f.abs) === f.mtime).map((f) => f.p); return hit.length ? hit : null; };
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
   let lastUndo = state.undo.length, idle = 0; // /team agents: steps since their last change
@@ -1928,23 +1945,29 @@ async function runAgent(content) {
           if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p)).mtimeMs; } catch { return 0; } }).join(",");
           sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
         }
-        // A result that was trimmed away (trimContext) may be run once more, but only once: 2026-10-22 a reviewer
-        // read the whole game, had it trimmed, re-read it, had it trimmed again… 48 reads until the step limit.
+        // A result that was trimmed away (trimContext) may be run again: its text is gone. What stops a reader thrashing
+        // (2026-10-22: a reviewer read a whole game, had it trimmed, re-read it… 48 reads; a merger on a 6,000-line
+        // Minecraft clone was refused the files it needed and stopped) is the rule below: a long file read whole is
+        // never read whole again unless it changed; the agent is pointed to the lines it needs instead.
         const before = sig && doneSteps.get(sig);
-        const lost = before && !before.reread && /old tool output removed/.test(String(before.msg?.content || ""));
-        if (lost) before.reread = true;
-        if (before && !lost) {
+        const lost = before && /old tool output removed/.test(String(before.msg?.content || ""));
+        const again = !before || lost ? wholeAgain(call) : null;
+        const everything = call.name === "search" && /^\s*(\^?\.[*+]?\$?|\^|\$|\\[sSwW][*+]?|\[\\s\\S\][*+]?)?\s*$/.test(String(call.args?.pattern ?? ""));
+        if ((before && !lost) || again || everything) {
           repeats++;
           result = {
-            output: (/old tool output removed/.test(String(before.msg?.content || ""))
-              ? `You already read this twice and nothing has changed since; its full text was removed to save space, so don't read it again: work from what you noted, or search for the specific lines you need.`
-              : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
+            output: (everything
+              ? `A search for everything just reads the whole file again. Search for one name (a function, a variable, an id), or read a line range (path:120-180).`
+              : again
+                ? `${again.join(", ")} ${again.length === 1 ? "is a long file you already read whole" : "are long files you already read whole"}, and ${again.length === 1 ? "it hasn't" : "they haven't"} changed since; the text was removed to save space. Don't read it whole again: read only the lines you need (path:120-180, several ranges in one read_file), or search for one name.`
+                : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
               (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
           };
-          ui.note(c.dim(`· same step as before (${call.name}) · not run again`));
+          ui.note(c.dim(everything ? "· a search for everything · not run" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
         } else {
           result = await execTool(call);
-          if (sig) doneSteps.set(sig, (resultOf = { step, msg: null, reread: !!lost }));
+          if (sig) doneSteps.set(sig, (resultOf = { step, msg: null }));
+          if (call.name === "read_file") noteWhole(call);
         }
       }
       if (state.interrupted) {
@@ -1997,7 +2020,7 @@ async function runAgent(content) {
       lastError = result.output;
       if (result.stop) return;
       if (repeats >= 6) {
-        ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim("Try a bigger model (/model) or say what to do next.")}`);
+        ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim(TEAM_AGENT ? "Its report is what it found so far." : "Try a bigger model (/model) or say what to do next.")}`);
         break;
       }
       if (step === MAX_STEPS - 1) {
@@ -3076,7 +3099,7 @@ async function stdioMode() {
     send({ type: "error", message: err.message });
     return process.exit(1);
   }
-  const info = () => ({ model: state.model, models: state.models.map((m) => ({ id: m.id, label: m.label, price: !!m.price })), mode: state.mode, cost: state.cost, context: contextPercent() });
+  const info = () => ({ model: state.model, models: state.models.map((m) => ({ id: m.id, label: m.label, price: !!m.price })), mode: state.mode, cost: state.cost, fallbacks: state.fallbacks || 0, context: contextPercent() });
   send({ type: "ready", version: VERSION, user: state.user, folder: root, ...info() });
 
   const work = [];
