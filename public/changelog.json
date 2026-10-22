@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.125",
+      "date": "2026-10-22",
+      "title": "A team that checks the controls",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "/team tries the controls",
+          "text": "For games, the browser check now holds the arrow keys (or WASD) and sweeps the mouse across the game, then a model that can see compares the screenshots. Dead keys or a dead mouse fail the check, and the page is checked again after the fixer."
+        },
+        {
+          "area": "yAI Code",
+          "title": "No more explaining away a failing check",
+          "text": "The fixer must re-run the existing tests and re-check every control after its edits, and any check it or the tester changes has to be listed with the reason. Read-only checkers can run several safe checks in one go, the contract can no longer take browser built-ins like Audio, briefs count builders correctly, the test re-run skips commands that never started, and /team warns when yAI Code is running in your home folder."
+        }
+      ]
+    },
+    {
       "version": "1.0.124",
       "date": "2026-10-22",
       "title": "Focus packs",

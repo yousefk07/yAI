@@ -1635,7 +1635,10 @@ async function execTool(call) {
     // and the tester, docs writer and fixer (YAI_SAFE_CHECKS) get this.
     if ((process.env.YAI_REPORT_ONLY || process.env.YAI_SAFE_CHECKS) && tool.kind === "run") {
       const command = String(call.args.command || "").trim();
-      if (command && !/[;&|`><]|\$\(/.test(command) && LOOK.riskOf(command).tag === "read-only" && String(call.args.background || "").trim() !== "true") {
+      // one plain command, or several joined by ; or && where every part is read-only on its own
+      const parts = command.split(/\s*(?:;|&&)\s*/).filter(Boolean);
+      const plain = (p) => !/[;&|`><]|\$\(/.test(p) && LOOK.riskOf(p).tag === "read-only";
+      if (command && parts.length <= 8 && parts.every(plain) && String(call.args.background || "").trim() !== "true") {
         ui.toolHeader(process.platform === "win32" ? "PowerShell" : "Bash", command);
         return { output: await T.execRun(ctx, call.args, state.abort.signal) };
       }

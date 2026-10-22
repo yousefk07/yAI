@@ -25,6 +25,12 @@
 //     created, and files made outside the plan are listed at the end;
 //   - up to 8 builders when you ask for more ("/team 6 …" or "as many agents as possible").
 //
+// From a Breakout run (2026-10-22): the fixer broke the mouse while fixing the keyboard and nothing noticed, agents
+// explained away their own failing checks, and the contract took the browser's own `Audio`. So: the browser check
+// tries the controls (keys and mouse, judged from before/after screenshots), the fixer must re-run the existing tests
+// and check every control, a changed check must be listed and justified, the contract avoids browser built-ins, the
+// re-run only uses test commands that worked for the team, and /team warns when started in the home folder.
+//
 // Watching an agent (2026-10-21): while the team works, press an agent's number (or click its row) to see what it's
 // doing: what it says, each step and its result, and its file edits as diffs, live. Esc goes back to the board.
 // After the team, /team log <number or name> prints an agent's whole log.
@@ -52,6 +58,9 @@ const LEAD_SYSTEM =
   "Write the contract BEFORE the tasks and use exactly its names in every task text: two agents must never be told different names for " +
   "the same thing (one calling render while the other defines renderWorld, or one page using health-bar while the script looks up healthBar). " +
   "If the folder already has files, decide in the tasks whether they are reused or replaced. " +
+  "Never name a shared global after something the browser or Node already has (Audio, Image, Event, Map, Set, Node, Element, Option, Text, " +
+  "Range, Request, Response, Notification, History, Location, Screen, Storage, Worker, File, Blob, URL, Proxy, Symbol, name, status, top, parent): " +
+  "prefix it instead (GameAudio, AppEvents). " +
   "Rules: split by independent pieces (for example the API, the page, the tests); every file belongs to at most one agent, " +
   "since two agents editing one file would overwrite each other; each task must make sense without waiting for another " +
   "(agree on names, routes and data shapes inside the task text so the pieces fit). If the task is small or can't be split " +
@@ -111,7 +120,7 @@ module.exports = function create(d) {
     const others = all.filter((a) => a !== me && !a.role);
     const roles = all.filter((a) => a.role).map((a) => a.role);
     return [
-      `You are one of ${all.length} agents working at the same time in this project, as a team. The team's overall task: ${task}`,
+      `You are one of ${all.filter((a) => !a.role).length} builder agents working at the same time in this project, as a team${roles.length ? " (checkers look at the work after you)" : ""}. The team's overall task: ${task}`,
       "", `Your part: ${me.task}`,
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
@@ -188,6 +197,8 @@ module.exports = function create(d) {
         "Use the project's test setup if it has one; if it has none, use the language's built-in runner (node --test, python -m unittest) without installing anything. Run the tests.",
         "If a test fails because of a bug in the app, leave the bug for the fixer: report the file, the line and what's wrong.",
         "Before you report a failure, check whether the test or the app is wrong (run the code path on its own); fix a wrong test instead of reporting it. Any fake page or DOM in a test must use the CONTRACT's exact ids and names.",
+        "Assume the app is wrong first. If you do change a test because it was wrong, list it in your report under \"Tests I changed\" with the reason, and never loosen a test just to make it pass.",
+        "Cover every behaviour the task asks for, including each control (every key, the mouse, touch) and that it really moves or changes what it should.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: the command you ran, the tests you wrote, what passed, and every failure with its file and line.",
         verdictRule("PASS", "FAIL") + " The VERDICT line is required: without it your check counts as unfinished.",
@@ -215,7 +226,8 @@ module.exports = function create(d) {
         "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
         "(4) the agents' changes don't contradict each other (two files defining the same thing differently);",
         "(5) every name in the CONTRACT is defined where it says and used with exactly that spelling everywhere (search for each one);",
-        "(6) every note the builders left for each other (below) is resolved; an unresolved one is a problem.",
+        "(6) every note the builders left for each other (below) is resolved; an unresolved one is a problem;",
+        "(7) no file overwrites a browser or Node built-in global (window.Audio, window.Image, window.Event, window.name…); that's a problem even if the page seems to work.",
         "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
@@ -240,6 +252,8 @@ module.exports = function create(d) {
       "After them, these checkers found problems. Their reports:", "",
       ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
+      "Don't break what works: after your edits, run the project's existing tests (the tester's, under tests/ or test/), and check that every behaviour the task asks for still works, not only the ones you touched. When you change how something is controlled (input, keys, the mouse, touch), check EVERY control again, because fixing one often breaks another.",
+      "If one of your own checks fails, assume the app is wrong first. Change a check only when you can show why it's wrong, and list each one in your report under \"Checks I changed\" with the reason; never loosen a check just to make it pass.",
       "Be exact about checks: in your report, give each command you ran and its last result line (for example \"node --test test/ → 58 passed, 2 failed\"). Never say tests pass unless you ran them and they did. yAI re-runs the tests after you and shows the real result next to your verdict.",
       CHECKS, "", RULES,
       "When you're done, end with a short report: each problem and what you did about it, file by file, the checks you ran with their results, and anything left for the user.",
@@ -249,6 +263,12 @@ module.exports = function create(d) {
 
   // ---------- the browser check (web work) ----------
   // yAI opens the page itself: no model writes this, so it can't say it passed when it didn't.
+  const CONTROLS_SYSTEM =
+    "You check whether a browser game's controls work. You get screenshots taken one after another while a script used the controls; " +
+    "each image is labelled with what was done just before it. Find the thing the player controls (a paddle, a ship, a character, a cursor) " +
+    "and say whether it moved the way that control should have moved it. Ignore things that move on their own (a ball, enemies). " +
+    "Reply with only these lines: KEYS: OK or DEAD or UNSURE, then MOUSE: OK or DEAD or UNSURE (or NOT_USED when the mouse wasn't used), then one short sentence on what you saw. " +
+    "DEAD means the control was used and the player's thing did not move; say DEAD whenever that's what you saw.";
   const QA_SYSTEM =
     "You look at a screenshot of a web page or browser game a team of coding agents just built, after its start button was pressed. " +
     "Say in 2-4 sentences what is on screen. Then list anything that looks broken: a blank or black screen, an upside-down or mirrored view, " +
@@ -285,6 +305,8 @@ module.exports = function create(d) {
         return { title: document.title, canvases: cs.length, blank, text: document.body.innerText.trim().slice(0, 200) };
       })()`).catch(() => ({}));
       const shot = await B.screenshot(b, { quality: 75 });
+      // try the controls: hold the movement keys, sweep the mouse across the game, and let a model that can see compare
+      const controls = await tryControls(b, B, task, pressed, page, signal).catch(() => null);
       const dir = path.join(root, "yai-media");
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `team-check-${Date.now()}.jpg`);
@@ -294,10 +316,17 @@ module.exports = function create(d) {
       // a model that can see describes it (an upside-down view, missing HUD… no test catches those)
       let looks = "";
       try {
-        const seen = await X.withVision((m) => X.oneShot({ model: m.id, system: QA_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: `The task: ${task}` }, X.imagePart(shot, "image/jpeg")] }] }), signal);
+        const seen = await X.withVision((m) => X.oneShot({ model: m.id, system: QA_SYSTEM, signal, messages: [{ role: "user", content: [{ type: "text", text: `The task: ${task}${pressed ? `
+
+The page's "${pressed}" button was pressed just before this screenshot, so its start screen is expected to be gone: judge the screen that follows it.` : ""}` }, X.imagePart(shot, "image/jpeg")] }] }), signal);
         looks = String(seen.text || "").trim();
       } catch {}
       if (looks) lines.push(`What it looks like: ${looks.replace(/\n+/g, " ")}`);
+      if (controls) {
+        lines.push(`Controls: ${controls.summary}`);
+        if (controls.keys === "DEAD") errors.push(`The keyboard controls don't move anything (${controls.keyNames} held for a moment each).`);
+        if (controls.mouse === "DEAD") errors.push("Moving the mouse across the game doesn't move what the player controls.");
+      }
       const unique = [...new Set(errors)].slice(0, 12);
       if (unique.length) lines.push("Errors in the browser:", ...unique.map((e) => `- ${e}`));
       else lines.push("No errors in the browser console.");
@@ -310,6 +339,43 @@ module.exports = function create(d) {
       server.close();
     }
   }
+  // Holds the movement keys and sweeps the mouse, with a screenshot after each, then asks a model that can see whether
+  // the player's thing responded. Only for pages that look like games (a canvas, or a start button that was pressed).
+  async function tryControls(b, B, task, pressed, page, signal) {
+    if (!pressed && !page.canvases) return null;
+    const wasd = /\bwasd\b/i.test(task) && !/arrow/i.test(task);
+    const keys = wasd ? [["KeyA", "a", 65, "A"], ["KeyD", "d", 68, "D"]] : [["ArrowLeft", "ArrowLeft", 37, "Left arrow"], ["ArrowRight", "ArrowRight", 39, "Right arrow"]];
+    const wantsMouse = /mouse|cursor|click|drag|aim/i.test(task);
+    const shots = [];
+    const snap = async (label) => shots.push({ label, img: await B.screenshot(b, { quality: 60 }) });
+    const hold = async ([code, key, vk]) => {
+      await b.send("Input.dispatchKeyEvent", { type: "keyDown", code, key, windowsVirtualKeyCode: vk });
+      await new Promise((r) => setTimeout(r, 700));
+      await b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key, windowsVirtualKeyCode: vk });
+    };
+    await snap("before using any control");
+    await hold(keys[0]); await snap(`after holding ${keys[0][3]} for 0.7 s`);
+    await hold(keys[1]); await hold(keys[1]); await snap(`after holding ${keys[1][3]} for 1.4 s`);
+    if (wantsMouse) {
+      const r = await B.evaluate(b, `(() => { const c = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0]; const x = (c || document.body).getBoundingClientRect(); return { x: x.left, y: x.top, w: x.width, h: x.height }; })()`);
+      const y = r.y + r.h * 0.75;
+      for (const f of [0.5, 0.35, 0.2, 0.12]) { await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: r.x + r.w * f, y }); await new Promise((res) => setTimeout(res, 60)); }
+      await new Promise((res) => setTimeout(res, 400));
+      await snap("after moving the mouse to the far LEFT of the game");
+      for (const f of [0.3, 0.5, 0.7, 0.88]) { await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: r.x + r.w * f, y }); await new Promise((res) => setTimeout(res, 60)); }
+      await new Promise((res) => setTimeout(res, 400));
+      await snap("after moving the mouse to the far RIGHT of the game");
+    }
+    const content = [{ type: "text", text: `The task: ${task}\nKeys used: ${keys.map((k) => k[3]).join(" and ")}. Mouse used: ${wantsMouse ? "yes, so answer MOUSE with OK, DEAD or UNSURE" : "no (MOUSE: NOT_USED)"}.` }];
+    for (const s of shots) content.push({ type: "text", text: s.label }, X.imagePart(s.img, "image/jpeg"));
+    const seen = await X.withVision((m) => X.oneShot({ model: m.id, system: CONTROLS_SYSTEM, signal, messages: [{ role: "user", content }] }), signal);
+    const text = String(seen.text || "");
+    const pick = (k) => (new RegExp(`${k}:\\s*(OK|DEAD|UNSURE|NOT_USED)`, "i").exec(text) || [])[1]?.toUpperCase() || "UNSURE";
+    const keysV = pick("KEYS"), mouseV = wantsMouse ? pick("MOUSE") : "NOT_USED";
+    const note = text.split("\n").filter((l) => l.trim() && !/^(KEYS|MOUSE):/i.test(l.trim())).join(" ").trim();
+    return { keys: keysV, mouse: mouseV, keyNames: keys.map((k) => k[3]).join(" and "), summary: `keys ${keysV.toLowerCase()}${wantsMouse ? `, mouse ${mouseV.toLowerCase()}` : ""}${note ? ` (${note.slice(0, 200)})` : ""}` };
+  }
+
   // the board's browser row: run by yAI, not a child process
   async function startBrowser(a, task, all) {
     Object.assign(a, { state: "working", step: "opening the page in a browser", started: Date.now(), log: [{ k: "brief", text: a.task }] });
@@ -433,14 +499,21 @@ module.exports = function create(d) {
 
   // The test commands the team ran (plain, read-only ones), newest last; or the project's own npm test script.
   function testCommands(all) {
-    const seen = new Set();
-    for (const a of all) for (const e of a.log || []) {
-      const cmd = e.k === "step" && e.verb === "Run" ? String(e.arg || "").trim() : "";
-      if (!cmd || !TESTISH.test(cmd) || /[;&|`><]|\$\(/.test(cmd) || d.riskOf(cmd).tag !== "read-only") continue;
-      seen.delete(cmd);
-      seen.add(cmd);
+    const seen = new Set(), worked = new Set();
+    for (const a of all) {
+      const log = a.log || [];
+      log.forEach((e, i) => {
+        const cmd = e.k === "step" && e.verb === "Run" ? String(e.arg || "").trim() : "";
+        if (!cmd || !TESTISH.test(cmd) || /[;&|`><]|\$\(/.test(cmd) || d.riskOf(cmd).tag !== "read-only") return;
+        seen.delete(cmd);
+        seen.add(cmd);
+        const res = log.slice(i + 1).find((x) => x.k === "result" || x.k === "step");
+        // a command that couldn't even start (a folder given as a file, a missing module) isn't a test result
+        if (res?.k === "result" && !/Cannot find module|ENOENT|is not recognized|not found/i.test(res.text || "")) worked.add(cmd);
+      });
     }
-    const cmds = [...seen].slice(-3);
+    const pool = [...seen].filter((c) => worked.has(c));
+    const cmds = (pool.length ? pool : [...seen]).slice(-3);
     if (!cmds.length) {
       try {
         const pkg = JSON.parse(require("fs").readFileSync(path.join(root, "package.json"), "utf8"));
@@ -495,6 +568,11 @@ module.exports = function create(d) {
     const task = arg.trim();
     if (!task) return print(c.yellow("   Usage: /team <task>   (or /team 6 <task> for up to 6 builders, at most 8). A lead splits it, the agents work at the same time."));
     if (state.mode === "plan" || state.tutor) return print(c.yellow("   /team changes files; leave plan or tutor mode first (⇧⇥ or /tutor)."));
+    // started in the home folder: the team's files (and yai-media) would land there among everything else
+    if (path.resolve(root) === path.resolve(require("os").homedir()) && process.stdout.isTTY) {
+      const i = await d.select({ title: "yAI Code is running in your home folder, so the team's files would go there.", detail: "Better: quit, make a folder for the project, and start yai inside it:\n  mkdir my-game && cd my-game && yai", options: ["Cancel", "Build here anyway"] });
+      if (i !== 1) return print(c.dim("   Cancelled. Start yai in a project folder and run /team there."));
+    }
 
     // 1. The lead splits the work.
     const lead = X.partnerModel()?.id || state.model;
@@ -777,5 +855,5 @@ module.exports = function create(d) {
     );
   }
 
-  return { team };
+  return { team, browserCheck }; // browserCheck: for trying the check on its own
 };
