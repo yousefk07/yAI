@@ -292,6 +292,8 @@ module.exports = function create(d) {
         "Your job: the builders worked separately; join their work so it runs as one thing. Read every file they made, the CONTRACT, and the notes they left for each other (below).",
         "Fix the mismatches between files: a name spelled differently, a function one file calls that another never defines, the wrong load or init order, a script or stylesheet not included, two files defining the same thing, a data shape that doesn't match.",
         "Make the smallest edits that join the pieces. Don't restyle, refactor or add features. Then run the syntax checks (node --check) and any tests.",
+        // 2026-10-22: a merger wrote a node -e script loading the whole browser game into Node's vm; it never finished
+        "Don't write node -e scripts or harnesses that load the project in Node: browser code never finishes there. node --check on each file, and reading the code, are the checks.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: each mismatch you fixed, file by file, and anything you couldn't resolve.",
       ],
@@ -570,6 +572,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
       else if (e.type === "status" && e.text) a.step = String(e.text);
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
+      // the agent took in your notes (after its step): they're marked read, in its view and the feed
+      else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
       else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost || a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
@@ -703,6 +707,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (lines.length > 40) out.push(`     ${c.faint(`… ${lines.length - 40} more lines`)}`);
       }
       else if (e.k === "note") out.push(`   ${c.dim(clip(row1(e.text), w - 4))}`);
+      // a note you sent it: waiting until its current step ends, then read
+      else if (e.k === "you") { blank(); out.push(` ${c.accent("›")} ${c.bold(c.ink("you"))} ${c.ink(clip(row1(e.text), w - 40))}  ${e.read ? c.green("✓ read") : c.faint("· it reads this after its current step")}`); blank(); }
       else if (e.k === "out") out.push(`   ${clip(String(e.line).replace(/[\r\t]/g, " "), w + 40)}`);
       else if (e.k === "ask") out.push(` ${c.yellow("?")} ${c.ink(row1(e.text))} ${c.dim(clip(row1(e.detail), w - row1(e.text).length - 6))}`);
       else if (e.k === "error") out.push(` ${c.red("✗")} ${c.red(clip(row1(e.text), w - 4))}`);
@@ -1186,11 +1192,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     state.teamInput = (text) => {
       if (over) return;
       if (viewing) {
-        if (viewing.send && viewing.state === "working") { viewing.send({ type: "note", text }); say("you", `→ ${viewing.name}: ${text}`, "you"); }
+        if (viewing.send && viewing.state === "working") { viewing.send({ type: "note", text }); viewing.log.push({ k: "you", text }); say("you", `→ ${viewing.name}: ${text}`, "you"); }
         else say("you", `(${viewing.name} isn't working, so it didn't get: ${text})`, "you");
       } else {
         teamNotes.push(text);
-        for (const a of agents) if (a.send && a.state === "working") a.send({ type: "note", text });
+        for (const a of agents) if (a.send && a.state === "working") { a.send({ type: "note", text }); a.log.push({ k: "you", text: `(to the whole team) ${text}` }); }
         say("you", `note: ${text}`, "you");
       }
       draw();

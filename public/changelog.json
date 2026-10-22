@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.153",
+      "date": "2026-10-22",
+      "title": "Notes you can see arrive",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Notes to agents show up",
+          "text": "A note you send to a /team agent (or the whole team) appears in its view at once, marked as waiting until its current step ends, then ✓ read; the live feed says when it read it."
+        },
+        {
+          "area": "yAI Code",
+          "title": "No more 2-minute scripts",
+          "text": "A team agent's node -e script stops after 30 s instead of 120 s, with a hint that browser code never finishes in Node; the merger is told not to write such scripts at all."
+        }
+      ]
+    },
+    {
       "version": "1.0.152",
       "date": "2026-10-22",
       "title": "Team agents can look things up",

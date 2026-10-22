@@ -578,7 +578,11 @@ function errorLine(lines) {
 async function execRun(ctx, a, signal) {
   const command = (a.command || "").trim();
   if (!command) throw new ToolError("<command> is required.");
-  const timeout = Math.min(Math.max(parseInt(a.timeout, 10) || 120, 1), 600);
+  let timeout = Math.min(Math.max(parseInt(a.timeout, 10) || 120, 1), 600);
+  // a /team agent's node -e script gets 30 s (2026-10-22: a merger's script loading a whole browser game into Node's
+  // vm never finished, and it waited 120 s twice); tests and builds keep the normal limit
+  const script = !!process.env.YAI_TEAM_AGENT && /^\s*node\s+(-e|--eval|-p)\b/.test(command);
+  if (script) timeout = Math.min(timeout, 30);
   spinner.start("running");
   const { out, code, killedFor } = await runCommand(ctx, command, timeout, signal);
   spinner.stop();
@@ -586,7 +590,8 @@ async function execRun(ctx, a, signal) {
   // worked, the last few when it failed, because that's where errors are.
   const lines = out ? out.split("\n") : [];
   const failed = !!(code || killedFor);
-  const result = clipOutput(out || "(no output)", ctx.budget) + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`);
+  const result = clipOutput(out || "(no output)", ctx.budget) + (killedFor ? `\n[command ${killedFor}]` : `\n[exit code ${code}]`) +
+    (killedFor && script ? "\nA script that loads browser code (a page, a game loop, the DOM) in Node never finishes. Don't run it again: check each file with node --check, and the code by reading it." : "");
   // A test run: the counts on the row ("2 failed, 6 passed") and a red dot per failing test.
   const tests = out && !killedFor ? testResults(out) : { names: [] };
   if (tests.names.length || tests.pass !== undefined) {

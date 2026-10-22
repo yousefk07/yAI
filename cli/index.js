@@ -2025,7 +2025,11 @@ async function runAgent(content) {
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result
-      if (state.notes?.length) pushUser(state.notes.splice(0).map((n) => `A note from the user, sent while you work: ${n}`).join("\n"));
+      if (state.notes?.length) {
+        const n = state.notes.length;
+        pushUser(state.notes.splice(0).map((x) => `A note from the user, sent while you work: ${x}`).join("\n"));
+        ui.event({ type: "note-read", count: n }); // the board marks the note as read
+      }
       if (idle >= 25) {
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept checking without changing anything, so it was stopped.")} ${c.dim("Its changes are kept.")}`);
         break;
