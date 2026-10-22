@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.156",
+      "date": "2026-10-22",
+      "title": "Sharper /team checks",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "The playtester starts more games, and catches freezes",
+          "text": "It now presses New World, Create World, Single player and Enter buttons too, and fails a game whose page stops answering after it starts (it used to play the title screen, and a game that froze on New World passed). A headless browser's pointer-lock error no longer counts against a game."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fewer false leads in the project map",
+          "text": "The map understands modules built as a private object and published (var Input = {…}; MC.Input = Input), members added later (Raycaster.cast = …) and fields set in methods (this.inv = …). On a Minecraft clone the false mismatches went from 11 to 0, while planted mistakes are still all caught."
+        }
+      ]
+    },
+    {
       "version": "1.0.155",
       "date": "2026-10-22",
       "title": "/team starts on yAI Lite",

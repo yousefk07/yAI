@@ -16,7 +16,12 @@ const BUILTIN = new Set(["window", "document", "console", "Math", "JSON", "Objec
 function readJs(text) {
   const lines = text.split(/\r?\n/);
   const defs = [], uses = [], ids = [];
-  let obj = null; // the dotted object literal being read: { name, indent }
+  // a file's own names (var Input = …, function build …) and the members of its private object literals, so that
+  // `MC.Input = Input` publishes Input's members (2026-10-22: a Minecraft clone built every module as a private
+  // object published this way, and the map called all of their members missing)
+  const declared = new Set(), localObjs = new Map();
+  for (const m of text.matchAll(/\b(?:var|let|const|function|class)\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  let obj = null; // the object literal being read: { name, indent, local }
   lines.forEach((raw, i) => {
     const line = raw.replace(/\/\/.*$/, "");
     const at = i + 1;
@@ -28,25 +33,43 @@ function readJs(text) {
     // ("closed"); anything else (= {}, = new World(), = { a: 1 } on one line) may get members later.
     const opens = (rhs) => /^\{\s*$/.test(rhs.trim());
     if ((m = /^\s*(?:window\.)?([A-Z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*=(?!=)\s*(.*)$/.exec(line)) && !BUILTIN.has(m[1].split(".")[0])) {
-      defs.push({ name: m[1], line: at, closed: opens(m[2]) });
+      const alias = (/^([A-Za-z_$][\w$]*)\s*;?\s*$/.exec(m[2].trim()) || [])[1];
+      const parts = m[1].split(".");
+      // Raycaster.cast = function …: a member added to a private object after it was made
+      if (parts.length === 2 && localObjs.has(parts[0])) localObjs.get(parts[0]).push({ key: parts[1], line: at });
+      else defs.push({ name: m[1], line: at, closed: opens(m[2]), alias });
       if (opens(m[2])) obj = { name: m[1], indent };
     } else if ((m = /^\s*window\.([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.*)$/.exec(line))) {
       defs.push({ name: m[1], line: at, closed: opens(m[2]) });
       if (opens(m[2])) obj = { name: m[1], indent };
     } else if ((m = /^\s{0,4}(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.*)$/.exec(line)) && indent <= 4) {
       defs.push({ name: m[1], line: at, closed: opens(m[2]) && indent === 0, local: indent > 0 });
-      if (opens(m[2]) && indent === 0) obj = { name: m[1], indent };
+      if (opens(m[2])) { obj = { name: m[1], indent, local: indent > 0 }; if (indent > 0) localObjs.set(m[1], []); }
     }
     // a key of the object literal being read: getBlock: function, getBlock(x) {, VERSION: 3
-    if (obj && indent > obj.indent && indent <= obj.indent + 4 && (m = /^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*(?::|\([^)]*\)\s*\{)/.exec(line)) && !/^(if|for|while|switch|return|case)$/.test(m[1]))
-      defs.push({ name: `${obj.name}.${m[1]}`, line: at, closed: false });
+    if (obj && indent > obj.indent && indent <= obj.indent + 4 && (m = /^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*(?::|\([^)]*\)\s*\{)/.exec(line)) && !/^(if|for|while|switch|return|case)$/.test(m[1])) {
+      if (obj.local) localObjs.get(obj.name).push({ key: m[1], line: at });
+      else defs.push({ name: `${obj.name}.${m[1]}`, line: at, closed: false });
+    }
+    // this.inv = … inside one of the object's methods: a member too
+    if (obj && indent >= obj.indent + 4) for (const t of line.matchAll(/\bthis\.([A-Za-z_$][\w$]*)\s*=(?!=)/g)) {
+      if (obj.local) localObjs.get(obj.name).push({ key: t[1], line: at });
+      else defs.push({ name: `${obj.name}.${t[1]}`, line: at, closed: false });
+    }
     if ((m = /^\s{0,4}(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/.exec(line))) defs.push({ name: m[1], line: at, closed: false, local: indent > 0 });
     if ((m = /^\s{0,4}(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/.exec(line))) defs.push({ name: m[1], line: at, closed: false, local: indent > 0 });
     // what it uses: dotted names (MC.world.getBlock), and element ids
     for (const u of line.matchAll(/(?<![\w$.'"`])([A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)+)/g)) if (!BUILTIN.has(u[1].split(".")[0])) uses.push({ name: u[1], line: at });
     for (const u of line.matchAll(/getElementById\(\s*['"]([\w-]+)['"]\s*\)|querySelector(?:All)?\(\s*['"]#([\w-]+)['"]/g)) ids.push({ id: u[1] || u[2], line: at });
   });
-  return { defs, uses, ids, lines: lines.length };
+  // MC.Input = Input: the published name gets the private object's members, and its own members are now known
+  for (const d of defs.slice()) {
+    const members = d.alias && localObjs.get(d.alias);
+    if (!members) continue;
+    d.closed = true;
+    for (const x of members) defs.push({ name: `${d.name}.${x.key}`, line: x.line, closed: false, member: true });
+  }
+  return { defs, uses, ids, declared, lines: lines.length };
 }
 
 // What one HTML page has: element ids and the scripts it loads, in order.
@@ -98,7 +121,9 @@ function projectMap(root, files) {
   for (const r of js) {
     const seen = new Set();
     for (const u of r.uses) {
-      if (!roots.has(u.name.split(".")[0])) continue;
+      const root = u.name.split(".")[0];
+      if (!roots.has(root)) continue;
+      if (r.declared.has(root) && !defined.has(root)) continue; // the file's own local (Input inside input.js)
       const name = missing(u.name);
       if (!name || seen.has(name)) continue;
       seen.add(name);
@@ -107,8 +132,10 @@ function projectMap(root, files) {
     }
   }
   for (const [name, list] of defined) {
-    const files = [...new Set(list.map((x) => x.f))];
-    if (files.length > 1 && name.includes(".")) mismatches.push(`\`${name}\` is defined in ${files.length} files: ${list.map((x) => `\`${x.f}:${x.line}\``).join(", ")}`);
+    // a member of a published object that another file sets (MC.Furnace.list = saved.list when loading) isn't a
+    // second definition: only two files each defining it themselves is
+    const files = [...new Set(list.filter((x) => !x.member).map((x) => x.f))];
+    if (files.length > 1 && !list.some((x) => x.member) && name.includes(".")) mismatches.push(`\`${name}\` is defined in ${files.length} files: ${list.map((x) => `\`${x.f}:${x.line}\``).join(", ")}`);
   }
   const allIds = new Set(html.flatMap((h) => [...h.ids]));
   if (html.length) for (const r of js) for (const u of r.ids) if (!allIds.has(u.id) && !new RegExp(`['"\`]${u.id}['"\`]`).test(fs.readFileSync(path.join(root, r.f), "utf8").replace(/getElementById\([^)]*\)|querySelector(All)?\([^)]*\)/g, ""))) mismatches.push(`\`${r.f}:${u.line}\` looks up #${u.id}, which no HTML file has`);

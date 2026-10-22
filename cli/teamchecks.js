@@ -12,16 +12,24 @@ const fs = require("fs");
 const path = require("path");
 const B = require("./browser");
 
-const START = String.raw`(() => { const el = [...document.querySelectorAll("button, a, [role=button], .btn")].find((e) => e.offsetParent && /^(\W*)(play|start|drop in|begin|new game|let'?s go)/i.test(e.textContent.trim())); if (!el) return ""; el.click(); return el.textContent.trim().slice(0, 30); })()`;
+// the button that starts the game (2026-10-22: "New World" wasn't one, so a Minecraft clone was "played" on its title
+// screen and its freeze on New World went unseen)
+const START = String.raw`(() => { const el = [...document.querySelectorAll("button, a, [role=button], .btn")].find((e) => e.offsetParent && /^(\W*)(play|start|drop in|begin|new (game|world|run)|create (a )?world|single ?player|enter|let'?s go)/i.test(e.textContent.trim())); if (!el) return ""; setTimeout(() => el.click(), 0); return el.textContent.trim().slice(0, 30); })()`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// does the page still answer? A page whose script never yields (an endless loop) doesn't, and waiting on it would
+// hang the check too
+const alive = (b, ms = 6000) => Promise.race([B.evaluate(b, "1").then(() => true, () => true), sleep(ms).then(() => false)]);
 
 // Opens the page in a fresh browser at a size; collects console errors. Call close() when done.
 async function openPage(entry, { width = 1280, height = 720, mobile = false, beforeLoad = "" } = {}) {
   const server = await B.serveFolder(path.dirname(entry));
   const b = await B.launch({ width, height });
   const errors = [];
-  b.on("Runtime.exceptionThrown", (p) => errors.push(`Uncaught: ${(p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]}`));
-  b.on("Runtime.consoleAPICalled", (p) => { if (p.type === "error") errors.push(`console.error: ${p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 200)}`); });
+  // a headless browser can't capture the mouse, so a game's pointer-lock request fails here and nowhere else: not
+  // the game's fault (2026-10-22: a working Minecraft clone failed its playtest on it)
+  const headlessOnly = (t) => /pointer ?lock|WrongDocumentError/i.test(t);
+  b.on("Runtime.exceptionThrown", (p) => { const t = (p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]; if (!headlessOnly(t)) errors.push(`Uncaught: ${t}`); });
+  b.on("Runtime.consoleAPICalled", (p) => { if (p.type !== "error") return; const t = p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 200); if (!headlessOnly(t)) errors.push(`console.error: ${t}`); });
   if (mobile || width !== 1280 || height !== 720) await B.setViewport(b, width, height, mobile);
   if (beforeLoad) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: beforeLoad });
   await B.open(b, `${server.url}/${encodeURIComponent(path.basename(entry))}`);
@@ -158,6 +166,10 @@ async function playtest({ root, entry, task, X, signal }) {
     const pressed = await B.evaluate(p.b, START).catch(() => "");
     notes.push(pressed ? `Pressed "${pressed}".` : "No Play/Start button found.");
     await sleep(600);
+    // a game that freezes as it starts: its script never yields, so nothing can be played (or even looked at)
+    if (!(await alive(p.b)) && !(await alive(p.b, 6000))) {
+      return { verdict: "FAIL", lines: [`The page froze${pressed ? ` after pressing "${pressed}"` : ""}: it stopped answering for over 10 s, so nothing could be played. Look for a loop that never ends in what that starts, such as a Set or array that keeps growing while it is walked, or a while loop that never exits.`] };
+    }
     const wasd = /\bwasd\b/i.test(task) && !/arrow/i.test(task);
     const L = wasd ? ["KeyA", "a", 65] : ["ArrowLeft", "ArrowLeft", 37], R = wasd ? ["KeyD", "d", 68] : ["ArrowRight", "ArrowRight", 39];
     const jump = /jump|space|shoot|fire|flap/i.test(task) ? ["Space", " ", 32] : null;
