@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "1.0.157",
+      "date": "2026-10-22",
+      "title": "/team: done means it works",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "The finish gate",
+          "text": "After the fixer, a re-check row on the board: yAI itself re-runs the team's tests, opens the page, re-runs any of its own checks that failed, and plays the game again. If anything still fails, a second fixer round starts with only that evidence, then one more re-check, before the spec checker."
+        },
+        {
+          "area": "yAI Code",
+          "title": "A score for the request",
+          "text": "The spec checker ends with SCORE: done/asked, shown on the board, in the summary (\"27 of 27 requirements done\") and in the report."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Skeleton files",
+          "text": "The architect starts every planned file as a skeleton with the shared names, ids and script tags; builders fill them in without renaming anything, so the pieces fit from the start."
+        },
+        {
+          "area": "yAI Code",
+          "title": "TEAM_REPORT.html",
+          "text": "Every run writes one self-contained page next to its contract: a replay of the board as it ran (play, speed, scrub), the stats, the requirement checklist, yAI's re-check, every agent with its model, time and cost, the playtest screenshots, the live feed and the files built."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Showcase preset",
+          "text": "s in the picker (and in VS Code): every check that proves it works, yAI Ultra for the architect and spec checker, Ultra Flash for the rest."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Stuck agents restart themselves",
+          "text": "An agent with no progress for 2 minutes is restarted once automatically; a second time it is flagged for you to retry or skip."
+        }
+      ]
+    },
+    {
       "version": "1.0.156",
       "date": "2026-10-22",
       "title": "Sharper /team checks",

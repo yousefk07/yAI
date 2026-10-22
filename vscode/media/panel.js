@@ -204,7 +204,7 @@
     });
     card.addEventListener("click", (e) => {
       const p = e.target.closest("[data-preset]");
-      if (p) { for (const r of rows) if (r.presets) r.on = !!r.presets[p.dataset.preset]; return draw(); }
+      if (p) { for (const r of rows) { if (r.presets) r.on = !!r.presets[p.dataset.preset]; if (r.presetModels && r.presetModels[p.dataset.preset]) r.model = r.presetModels[p.dataset.preset]; } return draw(); }
       if (e.target.closest(".start")) return finish({ rows: rows.map((r) => ({ i: r.i, on: r.on, model: r.model })) });
       if (e.target.closest("[data-chat]")) return finish({ chat: true });
       if (e.target.closest("[data-cancel]")) return finish(null);

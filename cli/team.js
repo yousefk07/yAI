@@ -88,7 +88,7 @@ const LEAD_SYSTEM =
 const WEB = /html|page|site|website|web ?app|game|canvas|\bui\b|frontend|landing|dashboard/i;
 const GAME = /\bgame\b|arcade|platformer|shooter|breakout|snake|tetris|pong|\bplayer\b/i;
 const ROLES = [
-  { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md" },
+  { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
   { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|look|beautiful|polish|pretty|modern|sleek|styl/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
   { key: "integration", phase: 2, readOnly: true, on: true, desc: "checks the pieces fit together (imports, routes, data shapes)" },
@@ -105,7 +105,7 @@ const ROLES = [
   { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
   { key: "spec", phase: 4, readOnly: true, on: true, desc: "checks the result against your request, item by item" },
 ];
-const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 4: "at the end" };
+const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 3.2: "after the fixer", 3.4: "after the re-check", 3.6: "after fixer 2", 4: "at the end" };
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
 // what the integration check looks at (the reviewer takes these on when both run)
 const INTEGRATION_ITEMS = [
@@ -175,6 +175,8 @@ module.exports = function create(d) {
       "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
       ...contractLines(), ...notesLines(),
+      // the architect's skeletons (2026-10-22): every file starts with the shared names, so the pieces fit from the start
+      ...(roles.includes("architect") ? ["", "The architect already started your files as skeletons: the shared names with empty bodies. Read them first, keep every name, signature, id and script tag exactly as they are, and fill them in. Don't rename or remove anything a skeleton has; add your own private helpers freely."] : []),
       ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
@@ -294,7 +296,9 @@ module.exports = function create(d) {
         "- the startup order (what loads first, who calls init on whom) and the main loop or request flow, step by step;",
         "- for each file in the layout: what it does and what it must not do.",
         "Keep the lead's names (below) unless one is wrong or clashes with a browser built-in (Audio, Image, Event…); then rename it and say so.",
-        `Write only ${contractAt}; don't write app code or other files. Read the project's existing files first if there are any.`,
+        `Read the project's existing files first if there are any.`,
+        // 2026-10-22: builders working apart left mismatched names that a slow merger then chased; skeletons prevent them
+        "Then start every file in the layout as a skeleton, so the builders fill in pieces that already fit: the shared names from the contract with empty bodies (each function returns a sensible default and has a one-line comment saying what it must do), the module's export or global exactly as the contract says, and for an HTML page every element id the contract names and the <script> and <link> tags in the right load order. No real logic, and keep each skeleton short: the builders write the code.",
         "", RULES,
         "When you're done, end with a short report: the main decisions and anything the builders must be careful about.",
       ],
@@ -331,7 +335,7 @@ module.exports = function create(d) {
         "Your job: check the finished work against the user's request, item by item. This is a READ-ONLY check: don't edit files.",
         "First list every requirement in the request: each feature, file, behaviour, control and constraint (read it closely; 'and a high score saved' is its own item). Then for each one say DONE, PARTLY or MISSING, with the file and line you checked or what yAI's checks below showed.",
         CHECKS, "", RULES,
-        "When you're done, end with the list, then a one-line summary.", verdictRule("OK", "PROBLEMS") + " Answer OK only if every item is DONE.",
+        "When you're done, end with the list, then a one-line summary, then a line exactly like SCORE: 24/27 (requirements DONE / requirements in your list; PARTLY doesn't count as done).", verdictRule("OK", "PROBLEMS") + " Answer OK only if every item is DONE.",
       ],
       tester: [
         "Your job: test the builders' work. Write or update tests ONLY in test files (tests/, test/, __tests__/, *.test.*, *.spec.*, test_*.py); don't change the app's code.",
@@ -379,10 +383,12 @@ module.exports = function create(d) {
   const concern = (x) => x.role && x.role !== "fixer" && (BAD.test(x.verdict || "") || x.state === "failed" || silent(x));
 
   // The fixer (phase 3) gets the reports that found something, and fixes those problems.
-  function fixerBrief(task, all) {
-    const found = all.filter(concern);
+  function fixerBrief(task, all, me = {}) {
+    // a second round (after yAI's re-check still failed) works only from what the re-check found
+    const found = me.round === 2 ? all.filter((x) => x.role === "recheck" && x.state === "done" && BAD.test(x.verdict || "")) : all.filter(concern);
     return [
       `You are the fixer on a team of agents working in this project. The team's overall task: ${task}`, "",
+      ...(me.round === 2 ? ["A first fixer already worked on this. yAI then re-checked the result itself (the tests, the page, and playing it), and it still fails. Fix exactly what the re-check below found; that is the whole job.", ""] : []),
       ...workersLines(all), "",
       ...contractLines(), ...notesLines(), ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
       "After them, these checkers found problems. Their reports:", "",
@@ -532,6 +538,61 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     d.wake();
   }
 
+  // The finish gate (2026-10-22): after the fixer, yAI itself re-runs the tests, opens the page and plays the game. A
+  // team isn't done while those fail: a second fixer round gets only the failing evidence, then one more re-check.
+  // (The habit tracker was "finished" with 13 tests failing; a Minecraft clone was "finished" freezing on New World.)
+  async function startRecheck(a, task, all) {
+    Object.assign(a, { state: "working", step: "re-running the tests and the page", started: Date.now(), log: [{ k: "brief", text: a.task }] });
+    d.wake();
+    const fixers = all.filter((x) => x.role === "fixer");
+    const fx = fixers.filter((x) => (x.phase || 1) < a.phase).pop();
+    const results = [];
+    try {
+      const cmds = testCommands(all);
+      if (cmds.length) for (const r of await runChecks(cmds, state.abort?.signal)) results.push({ name: r.cmd, ok: r.code === 0, lines: r.tail.slice(-6), counts: r.counts, r });
+      if (all.some((x) => x.role === "browser") && entryPage(all)) {
+        a.step = "opening the page again";
+        const r = await browserCheck(fx || a, task, all, { signal: state.abort?.signal });
+        if (fx) fx.pageAgain = r;
+        if (r.verdict) results.push({ name: "the page in a browser", ok: r.verdict === "PASS", lines: r.lines });
+      }
+      // yAI's own checks that failed before the fix (phone sizes, accessibility, speed) are run again too
+      const TCx = require("./teamchecks");
+      for (const x of all.filter((y) => ["mobile", "accessibility", "performance"].includes(y.role) && BAD.test(y.verdict || ""))) {
+        if (!entryPage(all) || !TCx[x.role]) continue;
+        a.step = `running the ${x.role} check again`;
+        const r = await TCx[x.role]({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: "", lines: [`Couldn't run it: ${err.message}`] }));
+        if (r.verdict) results.push({ name: `the ${x.role} check`, ok: !BAD.test(r.verdict), lines: r.lines });
+      }
+      if (all.some((x) => x.role === "playtester") && entryPage(all)) {
+        a.step = "playing it again";
+        const TC = require("./teamchecks");
+        const r = await TC.playtest({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: "", lines: [`Couldn't play it: ${err.message}`] }));
+        if (r.verdict) results.push({ name: "playing it", ok: r.verdict === "PASS", lines: r.lines });
+      }
+    } catch (err) { results.push({ name: "the re-check", ok: false, lines: [err.message] }); }
+    const failed = results.filter((r) => !r.ok);
+    if (fx) fx.recheck = results.map((r) => r.r || { cmd: r.name, code: r.ok ? 0 : 1, counts: null, tail: r.lines });
+    a.text = [
+      results.length ? `Re-checked after ${fx ? fx.name : "the fixer"}: ${results.length - failed.length} of ${results.length} pass.` : "There was nothing yAI could re-run.",
+      ...results.map((r) => `- ${r.ok ? "PASS" : "FAIL"} ${r.name}${r.counts ? ` (${r.counts.passed} passed, ${r.counts.failed} failed)` : ""}${r.ok ? "" : `: ${row1(r.lines.slice(-3).join(" "))}`}`),
+    ];
+    for (const l of a.text) a.log.push({ k: "text", line: l });
+    a.verdict = !results.length ? "" : failed.length ? "FAIL" : "PASS";
+    a.state = state.interrupted ? "stopped" : results.length ? "done" : "skipped";
+    if (!results.length) a.step = "nothing to re-run";
+    a.ended = Date.now();
+    // still failing after the first fixer: a second round, then one more re-check
+    if (failed.length && !state.interrupted && fixers.length < 2) {
+      const base = fixers[0];
+      all.push({ name: "fixer 2", task: "fixes what yAI's re-check still found failing", files: [], role: "fixer", round: 2, phase: 3.4, readOnly: false, hasVerdict: true, model: base && base.model, state: "waiting", step: "after the re-check", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
+      all.push({ name: "re-check 2", task: "yAI re-runs the tests and the page, and plays it, after the second fix", files: [], role: "recheck", phase: 3.6, readOnly: true, internal: true, hasVerdict: true, state: "waiting", step: "after fixer 2", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
+      all.sort((x, y) => (x.phase || 1) - (y.phase || 1));
+      say(a.name, `${failed.length} check${failed.length === 1 ? "" : "s"} still fail → fixer 2`, "bad", failed[0].lines.slice(-1)[0] || failed[0].name);
+    } else finished(a, all);
+    d.wake();
+  }
+
   // yAI's own checks (cli/teamchecks.js) on the board, like the browser row
   async function startInternal(a, task, all) {
     const TC = require("./teamchecks");
@@ -578,7 +639,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         const want = a.model || state.model; // the model picked for this agent
         if (e.model !== want) a.send({ type: "model", id: want });
-        a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
+        a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
       else if (e.type === "status" && e.text) a.step = String(e.text);
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
@@ -759,7 +820,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const runner = made.find((f) => /(^|\/)tests?\/run\.m?js$/.test(f));
     const tests = made.filter((f) => /(^|\/)tests?\/[^/]+\.test\.m?js$/.test(f));
     const own = runner ? `node ${q(runner)}` : tests.length ? `node --test ${tests.map(q).join(" ")}` : "";
-    if (own && !cmds.includes(own)) cmds.unshift(own);
+    // with the team's own suite, that (and npm test) is the whole check: replaying commands the agents typed re-ran
+    // "node --test tests/", which this Node can't run on a folder, and a false failure sent a second fixer round after
+    // nothing (2026-10-22)
+    if (own) return [own, ...cmds.filter((x) => x === "npm test")];
     return cmds.slice(0, 3);
   }
   // Runs each command in the project and keeps its exit code, pass/fail counts and last lines.
@@ -795,7 +859,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   const stageOf = (a) => STAGES.find((s) => s.has(a.phase || 1))?.name || "BUILD";
   // the live feed (newest first): hand-offs, problems found, agents finishing or stuck, your notes
   let feed = [], teamStarted = 0, teamNotes = [];
-  const say = (who, what, tone = "", quote = "") => { feed.unshift({ at: Date.now(), who, what, tone, quote: tidy(quote) }); if (feed.length > 80) feed.pop(); };
+  const say = (who, what, tone = "", quote = "") => {
+    if (feed[0] && feed[0].who === who && feed[0].what === what && Date.now() - feed[0].at < 5000) return; // said just now
+    feed.unshift({ at: Date.now(), who, what, tone, quote: tidy(quote) });
+    if (feed.length > 80) feed.pop();
+  };
   const clock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
   const STUCK_MS = 120000; // no step for two minutes
   const stuck = (a) => a.state === "working" && !a.paused && Date.now() - (a.lastMove || a.started) > STUCK_MS;
@@ -824,11 +892,15 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   }
   const linesIn = (files) => files.reduce((s, f) => { try { return s + require("fs").readFileSync(path.join(root, f), "utf8").split("\n").length; } catch { return s; } }, 0);
   const shortFiles = (files) => { const n = files.map((f) => path.basename(f)); return `${n.slice(0, 3).join(", ")}${n.length > 3 ? ` +${n.length - 3}` : ""}`; };
+  // the spec checker's "SCORE: 24/27" (requirements done / asked for)
+  const scoreOf = (a) => { const m = [...(a.text || []).join("\n").matchAll(/SCORE:?\**\s*(\d+)\s*\/\s*(\d+)/gi)].pop(); return m ? [Number(m[1]), Number(m[2])] : null; };
   // what a finished agent did, in one line
   function summaryOf(a) {
     const said = (a.text || []).filter((l) => l.trim() && !/^\W*VERDICT/i.test(l)).map(tidy);
-    if (a.internal) return `${a.verdict ? (BAD.test(a.verdict) ? "Fail" : "Pass") + " · " : ""}${said[0] || a.step || ""}`;
+    // (without the screenshot's file path, which says nothing on the board or in the report)
+    if (a.internal) return `${a.verdict ? (BAD.test(a.verdict) ? "Fail" : "Pass") + " · " : ""}${(said[0] || a.step || "").replace(/[;,]?\s*\(?screenshot:?\s+\S+\.(?:jpe?g|png)\)?/gi, "").trim()}`;
     if (a.role === "fixer") return `${a.verdict === "FIXED" ? "Fixed" : a.verdict === "PARTLY" ? "Partly fixed" : "Finished"}${a.changed.size ? ` · ${shortFiles([...a.changed])}` : ""}`;
+    if (a.role === "spec" && scoreOf(a)) { const [done, of] = scoreOf(a); return `${done} of ${of} requirements done`; }
     if (a.hasVerdict && a.role && a.verdict) {
       if (!BAD.test(a.verdict)) return "No problems found";
       const p = problemsOf(a);
@@ -931,6 +1003,63 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   const canRetry = (a) => !!a && !a.internal && (stuck(a) || a.state === "failed" || a.state === "stopped");
   const canSkip = (a) => !!a && (a.state === "waiting" || stuck(a) || !!a.paused);
 
+  // The board as it ran, for the report's replay (2026-10-22): a frame a second at most, only when it changed, at a
+  // fixed 140 columns; each line is stored once in a dictionary and frames list indexes into it, so a long run stays
+  // small (the static rows repeat in almost every frame).
+  let recording = null;
+  function recordFrame(agents, task, estimate, tick) {
+    if (!recording || Date.now() - recording.last < 1000) return;
+    recording.last = Date.now();
+    // always in the dark theme, which the report's page is (a light terminal's near-black text vanished there)
+    const keep = ui.themeKey;
+    if (keep !== "dark") ui.setTheme("dark", { paint: false });
+    let lines;
+    try { lines = V.runLines({ ...runView(agents, task, tick, -1, estimate), width: 140, height: 40 }); } finally { if (keep !== "dark") ui.setTheme(keep, { paint: false }); }
+    const ids = lines.map((l) => { let k = recording.index.get(l); if (k === undefined) { k = recording.dict.push(l) - 1; recording.index.set(l, k); } return k; });
+    const key = ids.join(",");
+    if (key !== recording.lastKey) { recording.lastKey = key; recording.frames.push({ t: Date.now() - recording.start, f: ids }); }
+  }
+  // TEAM_REPORT.html (cli/teamreport.js), next to the team's contract: the run as a page to open or publish
+  function writeReport(agents, task, estimate) {
+    const fs = require("fs");
+    const dir = contractFile ? path.dirname(contractFile) : root;
+    const changed = [...new Set(agents.flatMap((a) => [...(a.changed || [])]))].filter((p) => !/TEAM_CONTRACT|TEAM_REPORT/i.test(p) && fs.existsSync(path.join(root, p))).sort();
+    const files = changed.map((p) => ({ path: path.relative(dir, path.join(root, p)).split(path.sep).join("/"), lines: linesIn([p]) }));
+    const spec = agents.find((a) => a.role === "spec" && a.state === "done");
+    // the spec checker's list: a line per requirement, with DONE, PARTLY or MISSING in it
+    const requirements = [];
+    for (const l of spec ? spec.text : []) {
+      // only the list's items (a bullet, a number or a table row), not its summary lines ("All 27 requirements are DONE")
+      const m = /\b(DONE|PARTLY|MISSING)\b/.exec(l);
+      if (!m || !/^\s*([-*•]|\d+[.)]|\|)/.test(l) || /^\W*(VERDICT|SCORE)/i.test(l) || /^\s*\|?\s*:?-{2,}/.test(l)) continue;
+      const item = tidy(l.replace(/\*\*|`/g, "").replace(/\|/g, " — ").replace(/\b(DONE|PARTLY|MISSING)\b/, "").replace(/^\s*(\d+[.)]|[-*•])\s*/, ""))
+        .replace(/(\s*[—–:-]\s*){2,}/g, " — ").replace(/^[\s:—–-]+|[\s:—–-]+$/g, "").replace(/\s{2,}/g, " ");
+      if (item) requirements.push({ item, state: m[1] });
+    }
+    const fixer = agents.filter((a) => a.role === "fixer" && a.recheck).pop();
+    const recheck = (fixer?.recheck || []).map((r) => ({ name: r.cmd, ok: r.code === 0, detail: r.counts ? `${r.counts.passed} passed, ${r.counts.failed} failed` : r.code === 0 ? "" : row1((r.tail || []).slice(-1)[0] || "") }));
+    // the screenshots yAI's own checks took (the playtester's, the phone sizes)
+    const shots = [];
+    for (const a of agents.filter((x) => x.internal)) for (const l of a.text || []) for (const m of String(l).matchAll(/\(screenshot ([^)]+\.(?:jpe?g|png))\)/g)) {
+      const abs = path.join(root, m[1]);
+      // embedded, so the page is one file that still works once published (and after yai-media is cleared)
+      if (fs.existsSync(abs) && shots.length < 12) shots.push({ src: `data:image/${/png$/i.test(abs) ? "png" : "jpeg"};base64,${fs.readFileSync(abs).toString("base64")}`, label: `${a.name}: ${a.role === "playtester" ? "playing it" : a.role === "mobile" ? "at phone, tablet and laptop sizes" : "what it looked like"}` });
+    }
+    const cost = agents.reduce((x, a) => x + (a.cost || 0), 0), tokens = agents.reduce((x, a) => x + (a.tokens || 0), 0);
+    const score = spec ? scoreOf(spec) : null;
+    const html = require("./teamreport").build({
+      task, date: new Date().toLocaleString("en-CA", { dateStyle: "long", timeStyle: "short" }), folder: path.relative(root, dir).split(path.sep).join("/"),
+      stats: [[String(agents.filter((a) => a.state !== "skipped").length), "agents worked"], [secs(Date.now() - teamStarted), "start to finish"], [money(cost) || "$0.000", "cost in all"], [tokensOf(tokens), "tokens"], [String(files.length), "files built"], [String(files.reduce((x, f) => x + f.lines, 0)), "lines of code"], ...(score ? [[`${score[0]}/${score[1]}`, "requirements done"]] : [])],
+      score, requirements, recheck,
+      agents: agents.map((a) => ({ n: agents.indexOf(a) + 1, name: a.name, stage: cap(stageOf(a).toLowerCase()), model: a.internal ? "built-in" : modelShort(a.model) || "", time: a.state === "waiting" || !ran(a) ? "" : secs((a.ended || Date.now()) - a.started), cost: !ran(a) ? "" : a.internal ? "free" : a.cost ? money(a.cost) : "free", st: stOf(a), summary: actOf(a, agents) })),
+      feed: feed.map((x) => ({ t: clock(x.at - teamStarted), who: x.who, tone: x.tone, what: x.what, quote: x.quote })),
+      shots: shots.slice(0, 12), files, recording: recording && { cols: 140, dict: recording.dict, frames: recording.frames },
+    });
+    const file = path.join(dir, "TEAM_REPORT.html");
+    fs.writeFileSync(file, html);
+    return path.relative(root, file).split(path.sep).join("/");
+  }
+
   // what the user said while the team worked, for the agents that start later
   const notesLines = () => (teamNotes.length ? ["", "Notes from the user while the team worked (follow them):", ...teamNotes.map((n) => `- ${n}`)] : []);
 
@@ -1017,7 +1146,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const items = rows.filter((r) => r.kind !== "head");
     // a role's typical run: [requests, prompt in thousands of tokens, output in thousands, minutes], from real runs
     // (2026-10-22: the desktop OS team made ~15 requests an agent, 93% of each prompt cached, ~4k tokens out)
-    const PROFILE = { architect: [6, 12, 5, 1.5], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
+    const PROFILE = { architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
     const estOf = (r) => {
       if (r.role?.internal) return { usd: 0, min: 0.5 };
       const [req, ctx, out, min] = PROFILE[r.role?.key || "builder"] || PROFILE.builder;
@@ -1036,7 +1165,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       { key: "q", label: "Quick", on: (r) => ["tester", "fixer"].includes(r.role.key) || (r.role.key === "merger" && agents.length >= 3) || (!!r.role.internal && defOn(r)) },
       { key: "r", label: "Recommended", on: defOn },
       { key: "e", label: "Everything", on: () => true },
+      // quality first, for a run you'll show (2026-10-22): every check that proves it works, Ultra where judgement
+      // decides the result, Ultra Flash everywhere else (Lite drifted on whole-project roles)
+      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["merger", "tester", "reviewer", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
     ];
+    const pickModel = (list) => list.find((id) => models.some((m) => m.id === id));
     const count = (p) => items.filter((r) => (r.role ? p.on(r) : r.on)).length;
     const NOTES = { PLAN: "first", BUILD: `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
     // VS Code (yai --stdio): the panel shows the same picker and sends back each row's tick and model
@@ -1048,7 +1181,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         groups: STAGES.map((S) => ({ name: S.name, note: NOTES[S.name], rows: items.filter((r) => S.has(r.role ? r.role.phase : 1)).map((r) => ({
           i: items.indexOf(r), label: r.label, desc: r.desc, on: !!r.on, model: r.model || null, builtIn: !!r.role?.internal, builder: !r.role,
           profile: r.role?.internal ? null : PROFILE[r.role?.key || "builder"] || PROFILE.builder,
-          presets: r.role ? Object.fromEntries(PRESETS.map((p) => [p.key, !!p.on(r)])) : null })) })).filter((g) => g.rows.length),
+          presets: r.role ? Object.fromEntries(PRESETS.map((p) => [p.key, !!p.on(r)])) : null,
+          presetModels: r.model ? Object.fromEntries(PRESETS.filter((p) => p.models).map((p) => [p.key, pickModel(p.models(r)) || r.model])) : null })) })).filter((g) => g.rows.length),
       });
       if (!ans) return null;
       if (ans.chat) return { chat: true };
@@ -1070,11 +1204,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       },
       onKey: (s, key, { draw, finish }) => {
         const p = !key.ctrl && PRESETS.find((x) => x.key === s);
-        if (p) { for (const r of items) if (r.role) r.on = p.on(r); draw(); return true; }
+        if (p) { for (const r of items) { if (r.role) r.on = p.on(r); if (p.models && r.model) r.model = pickModel(p.models(r)) || r.model; } draw(); return true; }
         if (s === "c" && !key.ctrl) { finish({ chat: true }); return true; }
         return false;
       },
-      keys: [["↑↓", "move"], ["space", "toggle"], ["← →", "model"], ["q r e", "presets"], ["enter", "start"], ["c", "chat"], ["esc", "cancel"]],
+      keys: [["↑↓", "move"], ["space", "toggle"], ["← →", "model"], ["q r e s", "presets"], ["enter", "start"], ["c", "chat"], ["esc", "cancel"]],
     });
     if (!picked) return print(c.dim("   Cancelled."));
     if (picked.chat) {
@@ -1130,6 +1264,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
     // web work: yAI opens the page in a browser between the builders and the checkers
     if (entryPage(agents)) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
+    // the finish gate: yAI's re-check after the fixer (see startRecheck)
+    if (agents.some((a) => a.role === "fixer")) agents.push({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", files: [], role: "recheck", phase: 3.2, readOnly: true, internal: true, hasVerdict: true });
     // the board lists them in the order they run (2026-10-22: the architect, which runs first, was listed 9th)
     agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
     const layout = layoutLines(agents);
@@ -1153,6 +1289,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     d.wake = () => wake();
     let sel = 0; // the agent picked on the board with ↑↓
     feed = []; teamNotes = []; teamStarted = Date.now();
+    recording = { start: Date.now(), last: 0, lastKey: "", dict: [], index: new Map(), frames: [] };
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
       // mustn't draw it again under the reports
@@ -1218,11 +1355,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // An agent that is stuck (or failed, or stopped) can be restarted from scratch, and a stuck or waiting one skipped.
     // The old process is let go first, so nothing it still sends reaches the board.
     const letGo = (a) => { const old = a.child; a.child = null; if (old) { try { old.stdin.end(); } catch {} old.kill(); } };
-    const retry = (a) => {
+    const retry = (a, auto) => {
       if (!a || a.state === "waiting" || a.state === "skipped") return;
       letGo(a);
-      Object.assign(a, { ended: 0, error: "", verdict: "", summary: "", plan: null, paused: false, flag: "" });
-      say(a.name, "restarted by you", "you");
+      Object.assign(a, { ended: 0, error: "", verdict: "", summary: "", plan: null, paused: false, flag: "", lastMove: Date.now(), stuckSaid: false });
+      if (!auto) say(a.name, "restarted by you", "you");
       if (a.role === "browser") startBrowser(a, task, agents);
       else if (a.internal) startInternal(a, task, agents);
       else startAgent(a, task, agents);
@@ -1296,7 +1433,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const hasArchitect = agents.some((a) => a.role === "architect");
     agents.forEach((a) => Object.assign(a, { state: "waiting", step: WAIT_STEP[a.phase || 1] || "later", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }));
     if (!hasArchitect) for (const a of agents) if (!a.role) a.step = "starting";
-    const PHASES = [...new Set(agents.map((a) => a.phase || 1))].sort((x, y) => x - y);
+    const PHASES = () => [...new Set(agents.map((a) => a.phase || 1))].sort((x, y) => x - y); // fixer 2 can join mid-run
     // Integration costs a whole agent (2026-10-22: ~$0.20 a run). The reviewer takes it on when both run; and when the
     // page opened cleanly and every built-in check passed, the pieces visibly fit, so it isn't needed.
     const integrationNotNeeded = (a) => {
@@ -1306,7 +1443,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       return false;
     };
     const next = () => {
-      for (const n of PHASES) {
+      for (const n of PHASES()) {
         // the builders start from the architect's contract
         if (n === 1 && hasArchitect && contractFile && phase(1).some((a) => a.state === "waiting") && agents.filter((a) => (a.phase || 1) < 1).every(ended)) {
           try {
@@ -1319,24 +1456,15 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
-        // after a fixer, yAI opens the page again before the spec checker starts, so it judges the fixed version
-        const fx = agents.find((a) => a.role === "fixer" && a.state === "done");
-        if (n > 3 && fx && agents.some((a) => a.role === "browser") && !state.interrupted && !fx.pageAgain) {
-          if (!fx.pageAgainStarted) {
-            fx.pageAgainStarted = true;
-            for (const a of waiting) a.step = "after yAI opens the page again";
-            browserCheck(fx, task, agents, { signal: state.abort?.signal })
-              .then((r) => (fx.pageAgain = r), () => (fx.pageAgain = { verdict: "", lines: ["Couldn't open it again."] }))
-              .finally(() => wake());
-          }
-          continue;
-        }
         for (const a of waiting) {
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
           else if (a.role === "integration" && integrationNotNeeded(a)) Object.assign(a, { state: "skipped", ended: Date.now() });
           else if (n === 3 && !agents.filter((x) => x.role && (x.phase || 1) < 3).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
+          // the re-check only runs after a fixer that ran
+          else if (a.role === "recheck" && !agents.some((x) => x.role === "fixer" && (x.phase || 1) < a.phase && x.state === "done")) Object.assign(a, { state: "skipped", step: "nothing was fixed", ended: Date.now() });
+          else if (a.role === "recheck") startRecheck(a, task, agents);
           else if (a.role === "browser") startBrowser(a, task, agents);
           else if (a.internal) startInternal(a, task, agents);
           else {
@@ -1350,13 +1478,19 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       await new Promise((resolve) => {
         const timer = setInterval(() => {
           // an agent with no step for two minutes is stuck: once in the feed (the board offers r retry · s skip)
-          for (const a of agents) if (stuck(a) && !a.stuckSaid) { a.stuckSaid = true; say(a.name, "has not done anything for 2m", "warn"); }
+          // the first time, yAI restarts it itself (2026-10-22); a second time it's flagged for you
+          for (const a of agents) {
+            if (!stuck(a) || a.stuckSaid) continue;
+            if (!a.autoRetried && !a.internal) { a.autoRetried = true; say(a.name, "no progress for 2m · restarted automatically", "warn"); retry(a, true); }
+            else { a.stuckSaid = true; say(a.name, "has not done anything for 2m", "warn"); }
+          }
           draw(); report();
+          recordFrame(agents, task, estimate, tick);
         }, 120);
         wake = async () => {
           if (over) return;
           next();
-          if (agents.every(ended)) { clearInterval(timer); draw(); over = true; return resolve(); }
+          if (agents.every(ended)) { clearInterval(timer); if (recording) { recording.last = 0; recordFrame(agents, task, estimate, 0); } draw(); over = true; return resolve(); }
           if (asking) return;
           const a = agents.find((x) => x.asks.length);
           if (!a) return;
@@ -1393,8 +1527,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
 
     // 3b. yAI re-runs the team's test commands after the fixer, so its verdict sits next to the real result.
-    const fixer = agents.find((a) => a.role === "fixer" && a.state === "done");
-    if (fixer && !state.interrupted) {
+    const fixer = agents.filter((a) => a.role === "fixer" && a.state === "done").pop();
+    if (fixer && !state.interrupted && !fixer.recheck) {
       const cmds = testCommands(agents);
       if (cmds.length) {
         try { fixer.recheck = await X.busy("re-running the tests", (signal) => runChecks(cmds, signal)); } catch {}
@@ -1442,17 +1576,21 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       lines.forEach((l, i) => print(`   ${i ? " ".repeat(indent - 3) : c.faint(label.padEnd(indent - 3))}${l.join(sep)}`));
     };
     const outcome = (a) => a.state === "skipped" ? c.faint("not needed") : a.state !== "done" ? c.yellow(a.state) : verdictPill(a.verdict) || (a.hasVerdict ? c.yellow("no verdict") : c.faint("done"));
-    const fixerA = crew.find((a) => a.role === "fixer");
+    const fixerA = crew.filter((a) => a.role === "fixer" && a.state !== "waiting").pop() || crew.find((a) => a.role === "fixer"); // the last round that ran
     const free = agents.filter((a) => !a.internal && a.state !== "skipped" && !a.cost).length;
     print("");
     ui.note(`${files.size ? c.green("✓") : c.yellow("!")} ${c.ink(`Team finished in ${secs(Date.now() - started)}`)} ${c.dim(`· ${files.size} file${files.size === 1 ? "" : "s"} changed · $${cost.toFixed(3)}${free ? ` · ${free} agent${free === 1 ? "" : "s"} cost nothing` : ""}`)}`);
     print("");
     row("Built", builders.map((a) => `${ICON[a.state] ? ICON[a.state]() : "·"} ${c.ink(a.name)}${a.flag ? " " + c.yellow(a.flag) : ""}`));
-    row("Checked", crew.filter((a) => a.role !== "fixer").map((a) => `${c.dim(a.role)} ${outcome(a)}`));
-    if (fixerA) row("Fixed", [
-      fixerA.state === "skipped" ? c.faint("nothing to fix") : `${c.dim("fixer")} ${outcome(fixerA)}${fixerA.changed.size ? c.faint(` · ${[...fixerA.changed].join(", ")}`) : ""}`,
+    row("Checked", crew.filter((a) => a.role !== "fixer" && a.role !== "recheck" && a.role !== "spec").map((a) => `${c.dim(a.role)} ${outcome(a)}`));
+    // every fixer round, then what yAI's last re-check found
+    const fixers = crew.filter((a) => a.role === "fixer");
+    if (fixers.length) row("Fixed", [
+      ...fixers.map((f) => (f.state === "skipped" ? c.faint("nothing to fix") : `${c.dim(f.name)} ${outcome(f)}${f.changed.size ? c.faint(` · ${shortFiles([...f.changed])}`) : ""}`)),
       ...(fixerA.recheck || []).map((r) => `${r.code === 0 ? c.green("✓") : c.red("✗")} ${c.dim(clip(r.cmd, 40))}${r.counts ? c.dim(` ${r.counts.passed} passed, ${r.counts.failed} failed`) : ""}`),
     ]);
+    const spec = crew.find((a) => a.role === "spec" && a.state === "done");
+    if (spec) row("Request", [scoreOf(spec) ? `${c.bold(c.ink(`${scoreOf(spec)[0]} of ${scoreOf(spec)[1]}`))} ${c.dim("requirements done")}` : outcome(spec)]);
     // what needs a look, one line each
     const attention = [
       ...agents.filter((a) => a.state === "failed").map((a) => `${a.name} failed${a.error ? `: ${row1(a.error)}` : ""}`),
@@ -1462,6 +1600,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...(fixerA?.recheck || []).filter((r) => r.code !== 0).map((r) => `${clip(r.cmd, 40)} still fails: ${row1(r.tail.slice(-1)[0] || "")}`),
     ];
     for (const t of attention) print(`   ${c.yellow("!")} ${c.ink(clip(t, ui.width() - 6))}`);
+    let reportAt = "";
+    if (files.size) { try { reportAt = writeReport(agents, task, estimate); } catch (err) { print(c.yellow(`   Couldn't write the team report: ${err.message}`)); } }
+    if (reportAt) print(`   ${c.accent("◆")} ${c.ink("The run as a page")} ${c.dim(`· ${reportAt}: open it in a browser (a replay of the board, the score, every agent, screenshots)`)}`);
     print("");
     print(c.dim(`   /team log 1–${agents.length} shows an agent's whole report · ask a follow-up and yAI has all of them · /review checks the change`));
     const skipped = crew.filter((a) => a.state === "skipped");
