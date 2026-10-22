@@ -173,6 +173,7 @@ module.exports = function create(d) {
         (roles.includes("tester") ? "the tester does that after you. " : "the checkers do that after you. ") +
         "To look at a file use read_file, never node -e, Get-Content or cat. If you can't make something work after two tries, say so in your report instead of trying more.",
       "When you're done, end with a short report: what you changed, file by file, and anything the others or the user still need to do.",
+      REPORT_STYLE,
     ].join("\n");
   }
 
@@ -210,7 +211,8 @@ module.exports = function create(d) {
     return all.filter((a) => !a.role && a.text?.length).map((a) => {
       const t = a.text.join("\n");
       const m = /^[#*\s-]*(?:for the others|notes for the others|for other agents|notes for others|for the rest of the team)\b[^\n]*\n?([\s\S]{0,1800})/im.exec(t);
-      return m ? { from: a.name, text: m[1].trim().split(/\n#{1,3} /)[0].trim() } : null;
+      // up to the next heading or **Label** (the report shape every agent now uses)
+      return m ? { from: a.name, text: m[1].trim().split(/\n#{1,3} |\n\*\*[^*\n]+\*\*/)[0].trim() } : null;
     }).filter((h) => h && h.text && !/^(none|nothing|no changes needed)\.?$/i.test(h.text));
   }
   const handoffLines = (all, role) => {
@@ -239,6 +241,14 @@ module.exports = function create(d) {
   let contract = "", contractFile = "";
   const contractLines = () => (contract ? ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\":", contract] : []);
   const verdictRule = (a, b) => `End your report with one last line, exactly "VERDICT: ${a}" or "VERDICT: ${b}".`;
+  // Every report in one shape (2026-10-22, Yousef: the reports looked messy), so the agent view can draw it neatly.
+  const REPORT_STYLE = [
+    "Write the report in this shape, short and plain:",
+    "## Report",
+    "**Changed** (or **Problems**, **Checks**, **For the others**, **Left to do**: whichever apply, each label on its own line)",
+    "- one sentence per bullet, with the file in backticks and the line when you have it, like `app.js:42`",
+    "No tables, no code blocks, no long paragraphs, and don't repeat the task. Leave out a section with nothing in it.",
+  ].join("\n");
 
   // The briefs of the members who check the builders' work (phase 2).
   function roleBrief(a, task, all) {
@@ -331,7 +341,7 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), "", ...body].join("\n");
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -354,6 +364,7 @@ module.exports = function create(d) {
       "Be exact about checks: in your report, give each command you ran and its last result line (for example \"node --test test/ → 58 passed, 2 failed\"). Never say tests pass unless you ran them and they did. yAI re-runs the tests after you and shows the real result next to your verdict.",
       CHECKS, "", RULES,
       "When you're done, end with a short report: each problem and what you did about it, file by file, the checks you ran with their results, and anything left for the user.",
+      REPORT_STYLE,
       verdictRule("FIXED", "PARTLY"),
     ].join("\n");
   }
@@ -587,9 +598,26 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // One row of the view: a multi-line command (node -e "…" over several lines) or note must not break the row, or the
   // rows below are drawn over each other (2026-10-22).
   const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
-  // What an agent says, formatted like the main view (2026-10-22: the raw ** and backticks showed): bold, code and
-  // lists drawn, and any marker left unpaired by line wrapping dropped.
-  const md = (l) => ui.inline(String(l).replace(/^#{1,6}\s+/, "").replace(/^(\s*)[-*+]\s+/, "$1– ")).replace(/\*\*|`/g, "");
+  // One line of what an agent says, drawn (2026-10-22, Yousef: "make it look nicer"): headings and **Labels** in bold with room
+  // above them, • bullets whose wrapped lines stay under their text, files in code colour, the VERDICT as a pill.
+  // Returns { lines, head } (head: set it off with a blank line).
+  const inl = (s) => ui.inline(s).replace(/\*\*|`/g, "");
+  function reportLines(line, width) {
+    let m;
+    const s = String(line).replace(/\s+$/, "");
+    if ((m = /^\s*#{1,6}\s+(.*)/.exec(s))) return { head: true, lines: [c.bold(c.accent(m[1].replace(/\*\*|`/g, "")))] };
+    if ((m = /^\s*\*\*([^*]+?)\*\*:?\s*(.*)$/.exec(s)) && m[1].length < 40) {
+      const rest = m[2] ? wrapText(m[2], width - m[1].length - 2) : [];
+      return { head: true, lines: [c.bold(c.ink(m[1].replace(/:$/, ""))) + (rest.length ? c.ink(": " + inl(rest[0])) : ""), ...rest.slice(1).map((r) => c.ink(inl(r)))] };
+    }
+    if ((m = /^\s*\**\s*VERDICT:?\**\s*\**\s*([A-Z]+)/i.exec(s))) return { head: true, lines: [`${c.faint("verdict")} ${verdictPill(m[1].toUpperCase())}`] };
+    if ((m = /^(\s*)(?:[-*+]|(\d+)[.)])\s+(.*)/.exec(s))) {
+      const ind = " ".repeat(Math.min(m[1].length, 6)), mark = m[2] ? c.faint(`${m[2]}.`) : c.accent("•"), pad = " ".repeat(m[2] ? m[2].length + 2 : 2);
+      const body = wrapText(m[3], width - ind.length - pad.length);
+      return { lines: body.map((b, i) => `${ind}${i ? pad : mark + " "}${c.ink(inl(b))}`) };
+    }
+    return { lines: wrapText(s, width).map((b) => c.ink(inl(b))) };
+  }
   function logLines(a, all, tick = 0) {
     const w = ui.width();
     const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
@@ -609,7 +637,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const flushTable = () => {
       if (!table.length) return;
       if (gap) { blank(); gap = false; }
-      for (const l of ui.withTables(table, w - 4, (x) => wrapText(x, w - 4).map((y) => c.ink(md(y))))) out.push(`   ${l}`);
+      for (const l of ui.withTables(table, w - 4, (x) => reportLines(x, w - 4).lines)) out.push(`   ${l}`);
       table = [];
     };
     for (const e of a.log) {
@@ -621,7 +649,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (!e.line.trim()) continue;
         if (/^\s*```/.test(e.line)) { fence = !fence; continue; }
         if (gap) { blank(); gap = false; }
-        for (const l of wrapText(e.line, w - 4)) out.push(`   ${fence ? c.code(l) : c.ink(md(l))}`);
+        if (fence) { for (const l of wrapText(e.line, w - 4)) out.push(`   ${c.code(l)}`); continue; }
+        const r = reportLines(e.line, w - 4);
+        if (r.head && out.length > 4) blank();
+        for (const l of r.lines) out.push(`   ${l}`);
       }
       else if (e.k === "step") {
         if (gap && out[out.length - 1]?.startsWith("   ") && !/└/.test(out[out.length - 1])) blank();

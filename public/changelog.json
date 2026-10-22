@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.144",
+      "date": "2026-10-22",
+      "title": "Neater agent reports",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Every /team report in one shape",
+          "text": "Agents end with the same short report: a Report heading, then labelled sections (Changed, Problems, Checks, For the others, Left to do) of one-sentence bullets with the file and line. The agent view and /team log draw it with bold labels, bullets that wrap neatly, files highlighted and the verdict as a coloured label."
+        }
+      ]
+    },
+    {
       "version": "1.0.143",
       "date": "2026-10-22",
       "title": "A shorter /team ending",
