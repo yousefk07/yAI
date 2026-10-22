@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.120",
+      "date": "2026-10-21",
+      "title": "Check, compare, present, watch",
+      "items": [
+        {
+          "area": "Chat",
+          "title": "Hover a citation",
+          "text": "Hover (or tap) a [1] in an answer to see the source and the exact sentence from it that backs the claim."
+        },
+        {
+          "area": "Chat",
+          "title": "Check this",
+          "text": "Check under an answer pulls out its facts, searches each one and shows which the sources support, doubt or contradict, with links."
+        },
+        {
+          "area": "Chat",
+          "title": "Another answer, side by side",
+          "text": "Another asks the same model again and shows both answers next to each other. Keep the one you like."
+        },
+        {
+          "area": "Chat",
+          "title": "Slides from a chat",
+          "text": "Slides turns the conversation into a deck you can preview and save as PowerPoint or PDF."
+        },
+        {
+          "area": "Chat",
+          "title": "Price and page watchers",
+          "text": "On the Scheduled page (or by asking in a chat), watch a product page for a price drop or under a price you set, or any page for changes. yAI checks it every 1, 6 or 24 hours and sends a notification (and a webhook if you like) with what changed."
+        }
+      ]
+    },
+    {
       "version": "1.0.117",
       "date": "2026-10-21",
       "title": "Remote, redesigned",

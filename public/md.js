@@ -34,7 +34,7 @@ function googleCard(tag, attrs, body, done) {
 
 // Connections (2026-10-21): <yai-action tool="github.create_issue">{json args}</yai-action> becomes a card with a
 // "Do it" button (connections.js runs it). The JSON is shown as plain lines, never as HTML.
-const ACTION_NAMES = { "github.create_issue": "Open a GitHub issue", "github.comment": "Comment on GitHub", "github.create_pr": "Open a pull request", "webhook.send": "Send to a webhook" };
+const ACTION_NAMES = { "github.create_issue": "Open a GitHub issue", "github.comment": "Comment on GitHub", "github.create_pr": "Open a pull request", "webhook.send": "Send to a webhook", "watch.add": "Watch this page" };
 function actionCard(attrs, body, done) {
   const tool = attrsOf(attrs).tool || "";
   let args = {};

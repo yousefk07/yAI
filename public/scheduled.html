@@ -19,6 +19,20 @@
     .btn-primary { width: auto; padding: 0 16px; }
     .stage { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 48px 48px; }
     .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    /* Watchers (2026-10-21, lib/watchers.js) */
+    .w-form { display: flex; flex-direction: column; gap: 8px; }
+    .w-form input[type=url], .w-form input[type=number] { height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: 14px var(--sans); }
+    .w-form input[type=number] { width: 150px; }
+    .w-item { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--border); }
+    .w-item .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .w-item b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-item small { color: var(--muted); font-size: 12.5px; }
+    .w-item .ev { font-size: 13px; }
+    .w-item .err { color: var(--bad); }
+    .w-price { font: 600 15px var(--mono); white-space: nowrap; }
+    .w-spark { width: 90px; height: 26px; flex: none; }
+    .w-item b a { color: inherit; text-decoration: none; }
+    .w-item b a:hover { text-decoration: underline; }
     .head h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; }
     .head p { margin: 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
     .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
@@ -136,6 +150,23 @@
             <h2>Your tasks</h2>
             <div class="tasks" id="tasks"><p class="empty">Loading…</p></div>
           </section>
+
+          <section class="panel" id="watchers">
+            <h2>Watchers</h2>
+            <p class="note">yAI checks a page every few hours and tells you when a price drops (or goes under your number), or when the page changes, with a line on what changed.</p>
+            <div class="w-form">
+              <input type="url" id="wUrl" placeholder="https://www.example.com/product-page" aria-label="Page to watch" />
+              <div class="row">
+                <select id="wKind" aria-label="What to watch"><option value="price">Its price</option><option value="change">Any change</option></select>
+                <input type="number" id="wBelow" min="0" step="0.01" placeholder="Tell me under $…" aria-label="Price to watch for" />
+                <select id="wEvery" aria-label="How often"><option value="1">Every hour</option><option value="6" selected>Every 6 hours</option><option value="24">Once a day</option></select>
+                <span class="grow"></span>
+                <button type="button" class="btn-primary" id="wAdd">Watch it</button>
+              </div>
+              <p class="note err" id="wErr"></p>
+            </div>
+            <div class="tasks" id="wList"><p class="empty">Loading…</p></div>
+          </section>
         </div>
       </main>
     </div>
@@ -174,7 +205,53 @@
     const ago = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
 
     // ---------- the list ----------
+    // ---------- Watchers ----------
+    const money = (n, cur) => (n == null ? "" : `${!cur || cur === "CAD" || cur === "USD" ? "$" : ""}${Number(n).toFixed(2)}${cur && cur !== "CAD" && cur !== "USD" ? " " + cur : ""}`);
+    function spark(h) {
+      const pts = (h || []).slice(-30).map((x) => x.price);
+      if (pts.length < 2) return "";
+      const lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1;
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${(i / (pts.length - 1)) * 88 + 1},${24 - ((p - lo) / span) * 22}`).join(" ");
+      return `<svg class="w-spark" viewBox="0 0 90 26" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--acc)" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+    }
+    async function loadWatches() {
+      let list = [];
+      try { list = (await hub("watches")).watches; } catch (err) { $("wList").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+      $("wList").innerHTML = list.length ? list.map((w) => `<div class="w-item" data-id="${esc(w.id)}">
+          <div class="body"><b><a href="${esc(w.url)}" target="_blank" rel="noopener">${esc(w.name || new URL(w.url).hostname)}</a></b>
+            <small>${w.kind === "price" ? `Price${w.below ? ` · tell me under ${money(w.below, w.currency)}` : " · tell me when it drops"}` : "Any change"} · every ${w.every} h${w.lastCheck ? ` · checked ${ago(new Date(w.lastCheck).toISOString())}` : ""}</small>
+            ${w.status && w.status !== "ok" ? `<span class="ev err">${esc(w.status)}</span>` : w.events?.[0] ? `<span class="ev">${esc(w.events[0].text)} <small>${ago(new Date(w.events[0].t).toISOString())}</small></span>` : ""}</div>
+          ${w.kind === "price" ? spark(w.history) + `<span class="w-price">${money(w.price, w.currency)}</span>` : ""}
+          <div class="acts"><button type="button" class="btn-ghost" data-w="check">Check now</button><button type="button" class="btn-ghost" data-w="delete">Delete</button></div></div>`).join("")
+        : '<p class="empty">Nothing watched yet. Paste a product page above, or ask yAI in a chat to watch one.</p>';
+    }
+    $("wKind").addEventListener("change", () => ($("wBelow").hidden = $("wKind").value !== "price"));
+    $("wAdd").addEventListener("click", async () => {
+      $("wErr").textContent = "";
+      const url = $("wUrl").value.trim();
+      if (!url) return;
+      $("wAdd").disabled = true;
+      $("wAdd").textContent = "Checking…";
+      try {
+        await hub("watch", { method: "PUT", body: JSON.stringify({ url, kind: $("wKind").value, below: $("wBelow").value, every: $("wEvery").value }) });
+        $("wUrl").value = ""; $("wBelow").value = "";
+        loadWatches();
+      } catch (err) { $("wErr").textContent = err.message; }
+      $("wAdd").disabled = false;
+      $("wAdd").textContent = "Watch it";
+    });
+    $("wList").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-w]");
+      if (!b) return;
+      const id = b.closest(".w-item").dataset.id;
+      b.disabled = true;
+      if (b.dataset.w === "delete") await hub(`watch&id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+      else await hub(`watch-check&id=${encodeURIComponent(id)}`, { method: "POST" }).catch(() => {});
+      loadWatches();
+    });
+
     async function load() {
+      loadWatches();
       try { tasks = (await hub("schedules")).tasks; } catch (err) { $("tasks").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
       // the saved webhooks (Connections), to send results to as well as the notification
       hub("connections-settings").then((s) => {
