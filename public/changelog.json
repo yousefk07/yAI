@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.152",
+      "date": "2026-10-22",
+      "title": "Team agents can look things up",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Services and MCP for /team",
+          "text": "Every /team agent can now use your connected services that only read (Wolfram Alpha, weather, maps, stocks, sports, arXiv, Semantic Scholar, YouTube) and your MCP servers' read-only tools, besides web search and fetch, and is told when to reach for them. Services and MCP tools that change something (a Discord or Slack post, a webhook, a GitHub issue, an n8n workflow) stay with you."
+        }
+      ]
+    },
+    {
       "version": "1.0.151",
       "date": "2026-10-22",
       "title": "/team fills the window",

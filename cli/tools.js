@@ -317,6 +317,9 @@ const tools = {
       if (typeof args === "string") {
         try { args = args.trim() ? JSON.parse(args) : {}; } catch { throw new ToolError('<args> must be a JSON object, e.g. {"place":"Waterloo, ON"}.'); }
       }
+      // a /team agent works without anyone watching: services that change something (a Discord or Slack post, an n8n
+      // webhook, a GitHub issue) are for the user to ask for, not for an agent to do
+      if (info.write && process.env.YAI_TEAM_AGENT) throw new ToolError(`${name} changes something outside the project, so team agents can't use it. If it's needed, say so in your report.`);
       if (info.write && !(await ctx.approve(name, args))) return "The user said no; it wasn't done.";
       // the same plain words as the website's live steps: "Checking the weather in Waterloo, ON"
       const { describe } = require("../lib/connectors/describe");

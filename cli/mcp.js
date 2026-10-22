@@ -241,6 +241,9 @@ module.exports = function create({ root, api, T, version }) {
 
   // Each MCP tool becomes a yAI tool: its parameters are the schema's properties, written as tags like any other.
   function register(entry, tool) {
+    // a /team agent gets only the tools its server marks read-only (2026-10-22): it works without anyone watching,
+    // and servers like GitHub or n8n can change things outside the project
+    if (process.env.YAI_MCP_READONLY && !(tool.annotations && tool.annotations.readOnlyHint)) return;
     const name = `mcp__${safeName(entry.name)}__${safeName(tool.name)}`;
     const props = (tool.inputSchema && tool.inputSchema.properties) || {};
     const required = new Set((tool.inputSchema && tool.inputSchema.required) || []);

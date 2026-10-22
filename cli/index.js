@@ -702,7 +702,8 @@ function add(a, b) {
 // an agent has no use for connected services, the plan panel or advice about chatting with the user. Its brief
 // carries the task-specific rules.
 const TEAM_AGENT = !!process.env.YAI_TEAM_AGENT;
-const TEAM_SKIP = new Set(["service", "ask_user"]);
+// (connected services are allowed since 2026-10-22, read-only ones only: see the service tool)
+const TEAM_SKIP = new Set(["ask_user"]);
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
@@ -722,9 +723,10 @@ function teamPrompt(shell, toolDocs) {
 ${toolFormat()}
 
 Available tools:
-${toolDocs}${FOCUS.block()}
+${toolDocs}${CONN.promptBlock({ readOnly: true })}${FOCUS.block()}
 
 # How to work
+- When you need documentation, a library's current API, an error explained or anything recent, use web_search, then web_fetch the best result; for exact maths or facts, or data from the user's accounts, use a connected service (above). Don't guess at an API you're unsure of.
 - Never guess what a file contains: read it. Read several files in one step (several paths in one read_file).
 - Everything you were given in your brief (the task, the contract) is already in front of you: don't read it again from disk.
 - Each step re-sends the whole conversation, so don't re-read files you already read unless they changed.

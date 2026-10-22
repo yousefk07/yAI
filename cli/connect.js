@@ -27,8 +27,9 @@ module.exports = function create(d) {
   }
   const tools = () => services.filter((s) => s.connected).flatMap((s) => s.tools.map((t) => ({ ...t, label: s.label })));
   // The system prompt's section: what the service tool can reach right now.
-  function promptBlock() {
-    const list = tools();
+  // readOnly: a /team agent's prompt, without the services that change something (it can't use those)
+  function promptBlock({ readOnly = false } = {}) {
+    const list = tools().filter((t) => !readOnly || !t.write);
     if (!list.length) return "";
     return "\n\n# Connected services\nThe user connected these on the yAI website. Call them with the service tool: <name> is the name below, <args> a JSON object. " +
       "Use them when they fit (live weather, directions, exact maths with wolfram.ask, papers, a YouTube transcript, the user's GitHub repos and issues, LEARN due dates). " +
