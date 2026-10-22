@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.168",
+      "date": "2026-10-22",
+      "title": "No more command loops",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Near-identical commands",
+          "text": "The 5th command that starts the same way as 4 before it, with no file changed in between, is not run; the agent is told to change the code or finish."
+        },
+        {
+          "area": "Team",
+          "title": "Stopped means stopped",
+          "text": "An agent stopped for looking without changing anything shows as failed, not done; and no role writes node -e harnesses for browser code."
+        }
+      ]
+    },
+    {
       "version": "1.0.167",
       "date": "2026-10-22",
       "title": "Free eyes, in a row",

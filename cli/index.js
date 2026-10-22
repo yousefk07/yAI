@@ -1914,6 +1914,7 @@ async function runAgent(content) {
     }
   };
   let reads = 0; // /team agents: reads and searches before their first change
+  const sameRuns = new Map(); // a command's first 60 characters -> { n: times run, undo: changes made by then }
   let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
@@ -2021,10 +2022,17 @@ async function runAgent(content) {
         const again = !before || lost ? wholeAgain(call) : null;
         const everything = call.name === "search" && /^\s*(\^?\.[*+]?\$?|\^|\$|\\[sSwW][*+]?|\[\\s\\S\][*+]?)?\s*$/.test(String(call.args?.pattern ?? ""));
         const inside = !(before && !lost) && !again && !everything ? haveLines(call) : null;
-        if ((before && !lost) || again || everything || inside) {
+        // the same command with small changes, over and over (2026-10-22: a /team fixer ran 20+ node -e scripts that all
+        // began the same way, each a little different, and never edited anything): the 5th like it isn't run
+        const runKey = call.name === "run" ? String(call.args?.command || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+        const like = runKey.length >= 30 ? sameRuns.get(runKey) : null;
+        const samey = !!like && like.undo === state.undo.length && like.n >= 4;
+        if ((before && !lost) || again || everything || inside || samey) {
           repeats++;
           result = {
-            output: (everything
+            output: (samey
+              ? `You have run commands starting "${runKey}" ${like.n} times without changing any file, so this one wasn't run. More variations won't tell you more: change the code now (edit_file), use check_page for a web page, or finish with your report.`
+              : everything
               ? `A search for everything just reads the whole file again. Search for one name (a function, a variable, an id), or read a line range (path:120-180).`
               : inside
                 ? `You already have ${inside.map((x) => `${x.p} (read in step ${x.step + 1})`).join(", ")}: those lines are further up and the file hasn't changed since, so ${inside.length === 1 ? "it wasn't" : "they weren't"} read again. Use what you have.`
@@ -2033,9 +2041,10 @@ async function runAgent(content) {
                 : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
               (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
           };
-          ui.note(c.dim(everything ? "· a search for everything · not run" : inside ? "· lines it already has · not read again" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
+          ui.note(c.dim(samey ? "· the same command again, a little changed · not run" : everything ? "· a search for everything · not run" : inside ? "· lines it already has · not read again" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
         } else {
           result = await execTool(call);
+          if (runKey.length >= 30) sameRuns.set(runKey, like && like.undo === state.undo.length ? { n: like.n + 1, undo: like.undo } : { n: 1, undo: state.undo.length });
           if (sig) doneSteps.set(sig, (resultOf = { step, msg: null }));
           if (call.name === "read_file") { noteWhole(call); if (resultOf && !String(result.output).startsWith("Error")) noteRanges(call, resultOf); }
         }
@@ -2074,7 +2083,7 @@ async function runAgent(content) {
         if (!process.env.YAI_REPORT_ONLY && state.undo.length === undoStart && LOOK_STEPS.has(call.name)) {
           reads++;
           if (reads === 20) result.output += "\nYou have looked at the project 20 times without changing anything. Stop reading: make the fixes you've found now, or, if the pieces already fit, finish with your report saying so.";
-          if (reads >= 32) { ui.note(`${c.yellow("!")} ${c.ink("yAI kept reading without changing anything, so it was stopped.")}`); pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`); break; }
+          if (reads >= 32) { ui.note(`${c.yellow("!")} ${c.ink("yAI kept reading without changing anything, so it was stopped.")}`); ui.event({ type: "error", message: "it kept looking without changing anything, so yAI stopped it" }); pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`); break; }
         }
       }
       // The plan's progress depends on the model saying <done>N</done>, which it often forgets (2026-10-22: boards sat on
