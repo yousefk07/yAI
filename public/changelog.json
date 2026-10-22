@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.128",
+      "date": "2026-10-22",
+      "title": "Cheaper /team runs",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Costs shown with the prompt cache",
+          "text": "Most steps end at a tool call, before the site sends the real cost, so yAI Code estimated it, counting the whole conversation at full price. The part already sent last time is now counted at the cached price (a tenth), so the board shows what a run really costs, about a third of what it showed before."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Read several files in one step",
+          "text": "read_file takes up to 8 paths, one per line. Each step re-sends the whole conversation, so reading 7 files in one step instead of 7 saves 6 re-sends."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Leaner team agents",
+          "text": "/team agents get a short system prompt of their own (about half the size), are told not to re-read their brief or the contract, and once an agent passes about 28k tokens its old tool output is cut in one go. A long contract is cut at a line and says where the rest starts."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Fewer AI checkers",
+          "text": "yAI’s own browser checks (mobile, performance, accessibility, playtester) now run first and cost almost nothing. The integration check is done by the reviewer when both are on, and skipped when the page opened cleanly and every built-in check passed. The AI checkers see the built-in results."
+        }
+      ]
+    },
+    {
       "version": "1.0.127",
       "date": "2026-10-22",
       "title": "No more agents going round in circles",

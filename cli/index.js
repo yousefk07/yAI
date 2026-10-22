@@ -687,13 +687,46 @@ function add(a, b) {
 </new>
 </tool>`;
 }
+// A /team agent (YAI_TEAM_AGENT, 2026-10-22) gets a shorter prompt: it is re-sent with every step of every agent, and
+// an agent has no use for connected services, the plan panel or advice about chatting with the user. Its brief
+// carries the task-specific rules.
+const TEAM_AGENT = !!process.env.YAI_TEAM_AGENT;
+const TEAM_SKIP = new Set(["service", "ask_user"]);
+function teamPrompt(shell, toolDocs) {
+  return `You are one agent in a yAI Code team, working in a project folder on your own part of a bigger task.
+
+# Environment
+- Project folder: ${root} (all paths are relative to it; nothing outside it is reachable)
+- Shell: ${shell}
+- Date: ${new Date().toDateString()}
+- The newest <environment> block at the end of the latest message has the current permission mode and top-level files.
+
+# Tools
+${toolFormat()}
+
+Available tools:
+${toolDocs}${FOCUS.block()}
+
+# How to work
+- Never guess what a file contains: read it. Read several files in one step (several paths in one read_file).
+- Everything you were given in your brief (the task, the contract) is already in front of you: don't read it again from disk.
+- Each step re-sends the whole conversation, so don't re-read files you already read unless they changed.
+- Read a file before editing it; copy <old> exactly, without the line numbers. Small edit_file changes; write_file for new files.
+- Write long files in parts of at most 60 lines (write_file, then write_file with <append>true</append>).
+- Check your work when you can (a syntax check such as node --check file.js, or the tests). Delete scratch files.
+- If a tool returns an error, fix the cause instead of repeating the call.
+- Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.${projectNotes()}`;
+}
+
 function systemPrompt() {
   const shell = process.platform === "win32"
     ? "Windows PowerShell 5.1 (chain commands with ; — a && b and a || b also work, yAI converts them)"
     : `bash on ${os.type()}`;
   const toolDocs = Object.entries(T.tools)
+    .filter(([name]) => !(TEAM_AGENT && TEAM_SKIP.has(name)))
     .map(([name, t]) => `- ${name}(${t.params.join(", ")}): ${t.describe}`)
     .join("\n");
+  if (TEAM_AGENT) return teamPrompt(shell, toolDocs);
   return `You are yAI Code, a coding agent working in the user's terminal. You help with software tasks in their project: you read, search and edit files and run commands.
 
 # Environment
@@ -1187,15 +1220,29 @@ async function loadModels() {
 // ---------- the agent loop ----------
 // When the conversation passes TRIM_AT of the window, old tool output (oldest first, the last few messages
 // kept) becomes a one-line note until it is back near 60%.
+// /team agents set YAI_TRIM_TOKENS (2026-10-22): every step re-sends the whole conversation, so a long agent paid for
+// the same old file contents dozens of times. Past that size, old tool output and the text of files it wrote are cut
+// in one go, down to about half of it. Cutting rewrites the start of the conversation, which the model's prompt cache
+// then has to pay for once more, so it is done rarely and in one big step rather than a little every turn.
+const TRIM_TOKENS = Number(process.env.YAI_TRIM_TOKENS) || 0;
 function trimContext() {
-  const limit = contextChars();
-  if (usedChars() < limit * TRIM_AT) return;
-  for (let i = 0; i < state.messages.length - 4 && usedChars() > limit * 0.6; i++) {
+  const limit = TRIM_TOKENS ? Math.min(contextChars() * TRIM_AT, TRIM_TOKENS * 3.6) : contextChars() * TRIM_AT;
+  if (usedChars() < limit) return;
+  const goal = TRIM_TOKENS ? limit * 0.5 : contextChars() * 0.6;
+  let cut = false;
+  for (let i = 1; i < state.messages.length - 4 && usedChars() > goal; i++) {
     const m = state.messages[i];
-    if (m.role === "user" && typeof m.content === "string" && m.content.startsWith("<tool_result") && m.content.length > 400) {
+    if (typeof m.content !== "string" || m.content.length <= 400) continue;
+    if (m.role === "user" && m.content.startsWith("<tool_result")) {
       m.content = m.content.split("\n")[0] + "\n[old tool output removed to save space; read the file again if you need it]\n</tool_result>";
+      cut = true;
+    } else if (TRIM_TOKENS && m.role === "assistant" && /<tool name="write_file">/.test(m.content)) {
+      // what it wrote is on disk; the call itself only needs to say which file
+      m.content = m.content.replace(/<content>\n?[\s\S]*?(\n<\/content>|$)/, (all) => `<content>\n[${all.split("\n").length - 2} lines, now in the file]\n</content>`);
+      cut = true;
     }
   }
+  if (cut) state.trims = (state.trims || 0) + 1;
 }
 
 const TAG_ALIASES = {
@@ -1275,7 +1322,8 @@ function parseToolCall(text) {
   for (const k of Object.keys(args)) {
     if (/^(content|new|old|command|questions)$/.test(k)) continue;
     const kept = String(args[k]).split("\n").map((l) => l.trim()).filter((l) => l && !/^<\/?(?:｜DSML｜[^>]*|[\w-]+)>$/.test(l));
-    args[k] = kept[0] || "";
+    // except a read_file path, which may list several files, one per line
+    args[k] = (name === "read_file" && k === "path" ? kept.join("\n") : kept[0]) || "";
   }
   if (unclosed) return { name, args, raw: text.trimEnd() + "\n</tool>" };
   const endTag = text.indexOf("</tool>", head.index + head[0].length + end);
@@ -1426,7 +1474,13 @@ async function callModel() {
       state.cost.session += cost.usd;
       if (cost.todayUsd != null) state.cost.todayUsd = cost.todayUsd;
       if (cost.limitUsd != null) state.cost.limitUsd = cost.limitUsd;
-    } else if (price) state.cost.session += (promptTokens * price.in + (usage?.out ?? seen) * price.out) / 1e6; // cut short: estimate
+    } else if (price) {
+      // Cut short at a tool call, so no real figure: estimate it. The part of the prompt the last request already
+      // sent is billed at the cached price (2026-10-22: counting it all at full price showed /team costs ~3x too high).
+      const cached = Math.min(state.lastPromptTokens || 0, promptTokens);
+      state.cost.session += ((promptTokens - cached) * price.in + cached * (price.cached ?? price.in) + (usage?.out ?? seen) * price.out) / 1e6;
+    }
+    state.lastPromptTokens = promptTokens;
     seen = 0;
   } catch (err) {
     if (!state.interrupted) {
@@ -1843,8 +1897,9 @@ async function runAgent(content) {
         let sig = "";
         if (LOOK_STEPS.has(call.name)) {
           let mtime = "";
-          if (call.name === "read_file") try { mtime = fs.statSync(path.resolve(root, String(call.args?.path || ""))).mtimeMs; } catch {}
-          sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
+          if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p)).mtimeMs; } catch { return 0; } }).join(",");
+          // a trim (below) removes old results, so a step from before it may need to run again
+          sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length}.${state.trims || 0} ${mtime}`;
         }
         if (sig && doneSteps.has(sig)) {
           repeats++;

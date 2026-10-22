@@ -37,8 +37,13 @@
 //   1.2 merger       joins the pieces and fixes mismatches between them
 //   1.3 designer     visual polish, CSS only
 //   1.5 browser      yAI's own check (always, for web work)
-//   2   checkers     integration, tester, reviewer, security, docs, api, setup, and yAI's browser checks: mobile,
-//                    performance, accessibility, playtester (cli/teamchecks.js)
+//   1.6 yAI's own    browser checks, nearly free: mobile, performance, accessibility, playtester (cli/teamchecks.js)
+//   2   checkers     integration, tester, reviewer, security, docs, api, setup (they see 1.5 and 1.6's results)
+//
+// Cost (2026-10-22, a $2.50 FPS run): each agent step re-sends its whole conversation, so team agents get a short
+// system prompt (YAI_TEAM_AGENT), old tool output is cut once past ~28k tokens (YAI_TRIM_TOKENS), repeated look-only
+// steps aren't re-run, and the integration check is folded into the reviewer when both run, or skipped when the page
+// opened cleanly and every built-in check passed.
 //   3   fixer        only if something was found
 //   4   spec         the result against the request, item by item
 //
@@ -92,15 +97,25 @@ const ROLES = [
   { key: "docs", phase: 2, on: false, verdict: false, desc: "updates the README and docs for what changed" },
   { key: "api", phase: 2, on: (t) => /\bapi\b|server|backend|endpoint|route|database|express|\brest\b/i.test(t), desc: "calls every route with good and bad input and checks the answers" },
   { key: "setup", phase: 2, readOnly: true, on: (t) => /npm|package|deploy|vercel|install|setup|readme|dependenc/i.test(t), desc: "checks it runs from a clean checkout: imports, dependencies, paths, README" },
-  { key: "mobile", phase: 2, internal: true, on: (t) => WEB.test(t), desc: "yAI opens it at phone, tablet and laptop sizes" },
-  { key: "performance", phase: 2, internal: true, on: (t) => GAME.test(t), desc: "yAI measures load time, page weight and frame rate" },
-  { key: "accessibility", phase: 2, internal: true, on: (t) => WEB.test(t) && !GAME.test(t), desc: "yAI runs axe-core: contrast, labels, alt text, keyboard use" },
-  { key: "playtester", phase: 2, internal: true, on: (t) => GAME.test(t), desc: "yAI plays the game for 30 s: controls, losing, Play again, saves" },
+  { key: "mobile", phase: 1.6, internal: true, on: (t) => WEB.test(t), desc: "yAI opens it at phone, tablet and laptop sizes" },
+  { key: "performance", phase: 1.6, internal: true, on: (t) => GAME.test(t), desc: "yAI measures load time, page weight and frame rate" },
+  { key: "accessibility", phase: 1.6, internal: true, on: (t) => WEB.test(t) && !GAME.test(t), desc: "yAI runs axe-core: contrast, labels, alt text, keyboard use" },
+  { key: "playtester", phase: 1.6, internal: true, on: (t) => GAME.test(t), desc: "yAI plays the game for 30 s: controls, losing, Play again, saves" },
   { key: "fixer", phase: 3, on: true, desc: "fixes what the checkers found, then re-runs their checks" },
   { key: "spec", phase: 4, readOnly: true, on: true, desc: "checks the result against your request, item by item" },
 ];
-const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 2: "after the builders", 3: "if anything is found", 4: "at the end" };
+const WAIT_STEP = { 0.5: "first", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 4: "at the end" };
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
+// what the integration check looks at (the reviewer takes these on when both run)
+const INTEGRATION_ITEMS = [
+  "(1) every file that is imported or required exists, and every imported name is actually exported;",
+  "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
+  "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
+  "(4) the agents' changes don't contradict each other (two files defining the same thing differently);",
+  "(5) every name in the CONTRACT is defined where it says and used with exactly that spelling everywhere (search for each one);",
+  "(6) every note the builders left for each other (below) is resolved; an unresolved one is a problem;",
+  "(7) no file overwrites a browser or Node built-in global (window.Audio, window.Image, window.Event, window.name…); that's a problem even if the page seems to work.",
+];
 const TESTISH = /\b(test|tests|pytest|jest|vitest|mocha|unittest|spec)\b|--test\b/i;
 
 module.exports = function create(d) {
@@ -282,6 +297,7 @@ module.exports = function create(d) {
       ],
       reviewer: [
         "Your job: review the builders' code as a careful senior engineer would: bugs, wrong logic, missed edge cases (empty input, errors, nulls), missing error handling, duplicated or confusing code.",
+        ...(all.some((x) => x.role === "integration" && x.merged) ? ["You also do the integration check (one agent instead of two, to save cost): " + INTEGRATION_ITEMS.join(" ")] : []),
         "This is a READ-ONLY review: do not edit any files. Read the files they changed and the code that uses them.", CHECKS, "", RULES,
         "When you're done, end with a short report: each problem with its file, line, what's wrong and how to fix it, worst first. Mark small style points as nits.",
         verdictRule("OK", "PROBLEMS") + " Answer PROBLEMS only for things that should be fixed before this ships, not nits.",
@@ -298,20 +314,14 @@ module.exports = function create(d) {
       ],
       integration: [
         "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
-        "(1) every file that is imported or required exists, and every imported name is actually exported;",
-        "(2) routes, command names, event names and data shapes match between the files that produce and consume them;",
-        "(3) no file is left half-wired (dangling references, TODO stubs, duplicated definitions, syntax errors);",
-        "(4) the agents' changes don't contradict each other (two files defining the same thing differently);",
-        "(5) every name in the CONTRACT is defined where it says and used with exactly that spelling everywhere (search for each one);",
-        "(6) every note the builders left for each other (below) is resolved; an unresolved one is a problem;",
-        "(7) no file overwrites a browser or Node built-in global (window.Audio, window.Image, window.Event, window.name…); that's a problem even if the page seems to work.",
+        ...INTEGRATION_ITEMS,
         "This is a READ-ONLY check: do not edit any files. Read the files the agents changed and the files that use them, and name the file and line for every problem you find.",
         CHECKS, "", RULES,
         "When you're done, end with a short report: problems found (file, what's wrong, how bad), and anything the other agents or the user still need to do. If everything is consistent, say so plainly.",
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" ? internalLines(all) : []), "", ...body].join("\n");
+    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || a.phase === 2 ? internalLines(all) : []), "", ...body].join("\n");
   }
 
   // A checker that finished without the VERDICT line it owes.
@@ -494,7 +504,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_TRIM_TOKENS: "28000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -702,8 +712,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...group("Before the builders", (p) => p < 1),
       { kind: "head", label: "Builders · the lead's split, at the same time" },
       ...agents.map((a) => ({ label: a.name, desc: a.task, on: true })),
-      ...group("Right after the builders", (p) => p > 1 && p < 2),
-      ...group("Checks · together", (p) => p === 2),
+      ...group("Right after the builders", (p) => p > 1 && p < 1.6),
+      ...group("yAI's own checks · in a browser, almost free", (p) => p === 1.6),
+      ...group("AI checks · together, after yAI's own", (p) => p === 2),
       ...group("If anything is found", (p) => p === 3),
       ...group("At the end", (p) => p > 3),
     ];
@@ -837,17 +848,32 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     agents.forEach((a) => Object.assign(a, { state: "waiting", step: WAIT_STEP[a.phase || 1] || "later", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] }));
     if (!hasArchitect) for (const a of agents) if (!a.role) a.step = "starting";
     const PHASES = [...new Set(agents.map((a) => a.phase || 1))].sort((x, y) => x - y);
+    // Integration costs a whole agent (2026-10-22: ~$0.20 a run). The reviewer takes it on when both run; and when the
+    // page opened cleanly and every built-in check passed, the pieces visibly fit, so it isn't needed.
+    const integrationNotNeeded = (a) => {
+      if (agents.some((x) => x.role === "reviewer" && x.state === "waiting")) return (a.merged = true, a.step = "done by the reviewer");
+      const page = agents.filter((x) => x.internal);
+      if (page.some((x) => x.role === "browser") && page.every((x) => x.state === "done" && x.verdict && !BAD.test(x.verdict))) return (a.step = "the page checks all passed");
+      return false;
+    };
     const next = () => {
       for (const n of PHASES) {
         // the builders start from the architect's contract
         if (n === 1 && hasArchitect && contractFile && phase(1).some((a) => a.state === "waiting") && agents.filter((a) => (a.phase || 1) < 1).every(ended)) {
-          try { contract = require("fs").readFileSync(contractFile, "utf8").replace(/^# Team contract[^\n]*\n+/, "").trim().slice(0, 12000) || contract; } catch {}
+          try {
+            const all = require("fs").readFileSync(contractFile, "utf8");
+            // a long contract is cut at a line, and says where the rest starts, so an agent reads only the missing part
+            let cut = all.length > 16000 ? all.slice(0, all.lastIndexOf("\n", 16000)) : all;
+            if (cut.length < all.length) cut += `\n\n(The contract continues in ${path.relative(root, contractFile).split(path.sep).join("/")} from line ${cut.split("\n").length + 1}; read only that part.)`;
+            contract = cut.replace(/^# Team contract[^\n]*\n+/, "").trim() || contract;
+          } catch {}
         }
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
         for (const a of waiting) {
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
+          else if (a.role === "integration" && integrationNotNeeded(a)) Object.assign(a, { state: "skipped", ended: Date.now() });
           else if (n === 3 && !agents.filter((x) => x.role && (x.phase || 1) < 3).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           else if (a.role === "browser") startBrowser(a, task, agents);

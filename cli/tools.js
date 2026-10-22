@@ -42,6 +42,15 @@ function resolve(ctx, p) {
   return abs;
 }
 
+// "a.js\nb.js" or "a.js, b.js" as separate paths; a single path (even one with a comma in its name) stays whole
+function splitPaths(p, root) {
+  const s = String(p || "").trim();
+  if (!s) return [];
+  try { if (fs.existsSync(path.resolve(root, s))) return [s]; } catch {}
+  const parts = s.split(/\r?\n|,\s*/).map((x) => x.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : [s];
+}
+
 const isBinary = (buf) => buf.subarray(0, 8000).includes(0);
 function clipOutput(s, max = MAX_OUTPUT) {
   if (s.length <= max) return s;
@@ -173,9 +182,23 @@ const tools = {
 
   read_file: {
     params: ["path", "offset", "limit"],
-    describe: "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 600).",
+    describe:
+      "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 600). " +
+      "To read several files at once, put up to 8 paths in <path>, one per line: one step instead of several.",
     readOnly: true,
     run(ctx, a) {
+      // Several files in one step (2026-10-22): each step re-sends the whole conversation, so reading 7 files one by
+      // one cost 7 resends. Each file gets a header; a path that doesn't exist is reported and the rest still read.
+      const many = splitPaths(a.path, ctx.root);
+      if (many.length > 1) {
+        const per = Math.max(4000, Math.floor((ctx.budget || 40000) / many.length));
+        const parts = many.slice(0, 8).map((p) => {
+          try { return `=== ${p} ===\n${tools.read_file.run({ ...ctx, budget: per }, { path: p, limit: 400 })}`; }
+          catch (err) { return `=== ${p} ===\nError: ${err.message}`; }
+        });
+        if (many.length > 8) parts.push(`(only the first 8 paths were read; ask again for the rest)`);
+        return parts.join("\n\n");
+      }
       const abs = resolve(ctx, a.path);
       let buf;
       try {
@@ -575,4 +598,4 @@ async function execRun(ctx, a, signal) {
   return result;
 }
 
-module.exports = { tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine, psChain, startBackground, stopTask, stopAllTasks, taskStatus };
+module.exports = { splitPaths, tools, ToolError, makeContext, resolve, rel, applyEdit, showEdit, execRun, runCommand, walk, clipOutput, testResults, errorLine, psChain, startBackground, stopTask, stopAllTasks, taskStatus };
