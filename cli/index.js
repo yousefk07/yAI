@@ -2131,6 +2131,7 @@ async function runAgent(content) {
   } catch (err) {
     spinner.stop();
     print(c.red(`   ✕ ${err.message}`));
+    if (TEAM_AGENT) ui.event({ type: "error", message: err.message }); // the board marks it failed (2026-10-22: it showed ✓)
     if (err.auth) state.user = null;
   } finally {
     spinner.stop();

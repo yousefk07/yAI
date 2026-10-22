@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.165",
+      "date": "2026-10-22",
+      "title": "Rides out a dropped connection",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Network drops are retried",
+          "text": "A dropped connection or busy gateway before the reply starts is tried again up to 3 times."
+        },
+        {
+          "area": "Team",
+          "title": "No false ticks",
+          "text": "An agent that ends on an error shows as failed, not done, and one that lost its connection is restarted automatically (twice at most)."
+        }
+      ]
+    },
+    {
       "version": "1.0.164",
       "date": "2026-10-22",
       "title": "check_page never hangs",

@@ -128,7 +128,24 @@ async function warmup(model, { signal, onProgress }) {
 
 // One model reply in agent mode. onText gets each piece of text; return false from it to stop early.
 // onStatus gets what the cloud GPU is doing (queued, starting...) until the reply starts.
-async function chat({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus, tools, toolFormat }) {
+// A dropped connection or a busy gateway before any reply text arrived is tried again, up to 3 times (2026-10-22: one
+// "fetch failed" ended a /team builder 15 s in). Once text has arrived it isn't: the reply would start over twice.
+const NET_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR|socket|other side closed|terminated|network|Bad Gateway|Service Unavailable|Gateway Time-?out|50[234]/i;
+async function chat(opts) {
+  let got = false;
+  const onText = (piece) => { got = true; return opts.onText(piece); };
+  for (let attempt = 0; ; attempt++) {
+    try { return await chatOnce({ ...opts, onText }); }
+    catch (err) {
+      const msg = `${err.message} ${err.cause?.code || ""} ${err.cause?.message || ""}`;
+      if (got || attempt >= 3 || opts.signal?.aborted || err.auth || !NET_ERROR.test(msg)) throw err;
+      opts.onStatus?.(`connection dropped · trying again (${attempt + 1} of 3)`);
+      await new Promise((r) => setTimeout(r, [1500, 4000, 9000][attempt]));
+      if (opts.signal?.aborted) throw err;
+    }
+  }
+}
+async function chatOnce({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus, tools, toolFormat }) {
   // YAI_DEBUG_DIR=<folder>: keep each request (model, system prompt, messages) as JSON, to replay a model's odd reply.
   if (process.env.YAI_DEBUG_DIR) {
     try {

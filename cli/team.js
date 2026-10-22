@@ -775,6 +775,15 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           state.teamStopReason = a.error;
           setTimeout(() => state.abort?.abort(), 0);
         }
+        // the connection to yAI dropped (after the client's own retries): start it again, twice at most
+        if (/fetch failed|ECONNRESET|socket|other side closed|terminated|network|Bad Gateway|Service Unavailable|Gateway Time/i.test(a.error || "") && !state.interrupted && (a.netRetries || 0) < 2) {
+          a.netRetries = (a.netRetries || 0) + 1;
+          say(a.name, `lost the connection · restarting it (${a.netRetries} of 2)`, "warn", a.error);
+          a.child = null; a.error = ""; a.plan = null;
+          try { child.stdin.end(); } catch {}
+          setTimeout(() => { if (!state.interrupted && !a.child) startAgent(a, task, all); }, 5000 * a.netRetries);
+          return;
+        }
         a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
