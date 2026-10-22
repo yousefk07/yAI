@@ -47,6 +47,9 @@ const AUTO_COMPACT_AT = 0.9;
 const COMPACT_HINT_AT = 350_000;
 const SAFE_COMMANDS = /^(git (status|diff|log|show|branch)|ls|dir|pwd|cat|type|Get-ChildItem|Get-Content|Get-Location|node (-v|--version|--check)|npm (-v|--version|ls)|where|which)\b/i;
 
+// `yai <pack>` (any focus pack's name): start in the pack's folder with it on (cli/focus.js). Before `root` is fixed.
+const STARTUP_FOCUS = require("./focus").startup(process.argv);
+
 // ---------- state ----------
 const root = path.resolve(process.cwd());
 const ctx = T.makeContext(root);
@@ -117,6 +120,8 @@ const CONN = require("./connect")({
   question: (q) => question(q),
   runAgent: (text) => runAgent(text),
 });
+// Focus packs (cli/focus.js): a private knowledge file (~/.yai/packs) kept in front of the model, e.g. /acme.
+const FOCUS = require("./focus")({ state, root, api, ui, project: () => project() });
 const serviceOk = new Set(); // write services the user said "always" to, this session
 ctx.service = (tool, args, confirm) => CONN.call(tool, args, confirm);
 ctx.serviceTool = (name) => CONN.tools().find((t) => t.name === name);
@@ -700,7 +705,7 @@ All paths are relative to the project folder. You cannot access anything outside
 ${toolFormat()}
 
 Available tools:
-${toolDocs}${CONN.promptBlock()}
+${toolDocs}${CONN.promptBlock()}${FOCUS.block()}
 
 # How to work
 - Look before you change anything: use list_files, find_files, search and read_file. Never guess what a file contains.
@@ -834,7 +839,7 @@ SCREEN.parts.header = (cols) => {
   let [st, label] = pillState();
   if (state.selecting && state.busy) [st, label] = ["waiting", "Waiting for you"];
   else if (state.busy) [st, label] = ["working", state.plan && state.plan.steps.length ? `Working · step ${Math.min(state.plan.done + 1, state.plan.steps.length)} of ${state.plan.steps.length}` : "Working"];
-  return LOOK.headerRow(cols, { project: path.basename(root), branch: liveBranch(), st, label });
+  return LOOK.headerRow(cols, { project: state.focus ? `${state.focus.title} · ${path.basename(root)}` : path.basename(root), branch: liveBranch(), st, label });
 };
 SCREEN.parts.panel = () => (panelOpen() ? (w) => LOOK.panelLines(state.plan, state.task, w) : null);
 SCREEN.parts.input = () => {
@@ -2139,6 +2144,7 @@ const HELP = [
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
   ["/team <task>", "A lead splits the task; 2 to 4 agents do the parts at the same time, each on its own files"],
   ["/connections", "Services connected on the website (GitHub, LEARN, weather, maps, papers…)"],
+  ["/focus [name|off]", "Keep a knowledge pack (~/.yai/packs/<name>.md) in every message; /<name> is a shortcut, yai <name> starts there"],
   ["/pr [note]", "Push this branch and open a GitHub pull request written from the diff"],
   ["/issues", "Pick an open GitHub issue of this repo and let yAI work on it"],
   ["/deploy [prod]", "Deploy this folder with the Vercel CLI (a preview, or production) and print the link"],
@@ -2181,6 +2187,8 @@ function COMMAND_INFO() {
     "/tutor": ["Learning mode", "hints instead of finished answers"],
     "/web": ["Search the web", "and answer with sources"],
     "/init": ["Write notes about this project", "YAI.md, read at the start of every conversation"],
+    "/focus": ["Focus on a company or project", state.focus ? `Now: ${state.focus.title}` : "load a knowledge pack into every message"],
+    ...Object.fromEntries(FOCUS.list().map((p) => [`/${p.name}`, [`${p.title} focus`, state.focus?.name === p.name ? "on now · /focus off to stop" : `everything about ${p.title}`]])),
     "/look": ["Review how a page looks", "screenshots on desktop and phone"],
     "/clone": ["Rebuild a page", "from a screenshot or a live site"],
     "/showcase": ["Record a demo video", "of your page"],
@@ -2576,6 +2584,8 @@ async function command(line) {
       return TEAM.team(arg);
     case "/connections":
       return CONN.connections();
+    case "/focus":
+      return FOCUS.command(arg);
     case "/pr":
       return CONN.pr(arg);
     case "/issues":
@@ -2644,6 +2654,8 @@ async function command(line) {
     case "/quit":
       return rl.close();
     default:
+      // a focus pack's own name, e.g. /acme (on, or off with "/acme off")
+      if (FOCUS.read(cmd.slice(1))) return /^off$/i.test(String(arg || "").trim()) ? FOCUS.off() : FOCUS.on(cmd.slice(1));
       print(c.yellow(`Unknown command ${cmd}. Type /help.`));
   }
 }
@@ -2920,6 +2932,7 @@ async function stdioMode() {
     await loadModels();
     if (!process.env.YAI_NO_MCP && MCP.configured().length) await MCP.startAll({ approve: async () => true }).catch(() => {});
     await CONN.load();
+    FOCUS.boot(STARTUP_FOCUS, { quiet: true });
   } catch (err) {
     send({ type: "error", message: err.message });
     return process.exit(1);
@@ -3085,6 +3098,7 @@ async function main() {
   }
 
   CONN.load(); // the connected services, for the service tool (in the background)
+  FOCUS.boot(STARTUP_FOCUS);
   // MCP servers start after the folder is trusted; their tools are ready by the time the first answer needs them.
   if (!process.env.YAI_NO_MCP && MCP.configured().length) {
     const announce = () => {

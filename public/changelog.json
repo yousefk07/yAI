@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.124",
+      "date": "2026-10-22",
+      "title": "Focus packs",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Focus on a company or project",
+          "text": "Put a knowledge file in ~/.yai/packs/<name>.md (its people, systems, folders and rules) and yAI Code keeps it in front of the model for the whole session: /focus <name> or just /<name> turns it on, yai <name> starts in its folder with it on, and it can switch itself on whenever yAI Code starts in that folder. The header shows which focus is on. Packs stay on your PC."
+        }
+      ]
+    },
+    {
       "version": "1.0.123",
       "date": "2026-10-21",
       "title": "yAI on your home screen",
