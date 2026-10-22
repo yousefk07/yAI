@@ -275,6 +275,13 @@ const tools = {
       const before = exists ? fs.readFileSync(abs, "utf8") : "";
       const append = String(a.append).trim() === "true";
       if (exists && !append && !ctx.readFiles.has(abs)) throw new ToolError(`${a.path} already exists. Read it first, or use edit_file.`);
+      // a /team builder (YAI_OWN_FILES, 2026-10-22) owns the files it creates; another agent's file it only hooks into
+      // with edit_file, so two builders working at once never wipe each other's work
+      if (exists && process.env.YAI_OWN_FILES) {
+        let own = [];
+        try { own = JSON.parse(process.env.YAI_OWN_FILES).map((p) => path.resolve(ctx.root, p)); } catch {}
+        if (!own.includes(abs)) throw new ToolError(`${a.path} belongs to another agent on the team. Hook into it with edit_file (a few exact lines), and don't rewrite it.`);
+      }
       let content = a.content;
       if (before.includes("\r\n")) content = content.replace(/\r?\n/g, "\r\n");
       const after = append ? before + (before && !/\n$/.test(before) ? (before.includes("\r\n") ? "\r\n" : "\n") : "") + content : content;
@@ -353,6 +360,40 @@ const tools = {
       }
       toolResult(`Found ${plural(results.length, "result")}`);
       return results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet || ""}`.trim()).join("\n\n") || "No results.";
+    },
+  },
+  // 2026-10-22: see the app as it is right now (cli/teamchecks.js pageCheck), so an agent checks its work in the real
+  // page instead of guessing or writing a Node harness for browser code
+  check_page: {
+    params: ["path", "keys", "look_for"],
+    describe: "Open the web page (or game) in a real browser as it is right now, press its start button, and report: errors, a frozen page, the frame rate, the buttons and text on it, and a description of what's on screen. " +
+      "<path> is the HTML page (default: the project's index.html). Optional <keys> to hold after it starts, e.g. KeyW:1500,Space,ArrowLeft:500 (a key code, then how long in ms). " +
+      "Optional <look_for>: what to check on screen, e.g. \"is the hand visible and does the block show cracks\". Use it after building or fixing something to see it work.",
+    readOnly: true,
+    async run(ctx, a) {
+      let page = String(a.path || "").trim();
+      if (!page) {
+        const found = [];
+        const look = (dir, depth) => { let list = []; try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; } for (const e of list) { if (e.isFile() && /^index\.html?$/i.test(e.name)) found.push(path.join(dir, e.name)); else if (e.isDirectory() && depth < 2 && !/^(node_modules|\.git|yai-media|\.yai-old|\.yai-team)$/.test(e.name)) look(path.join(dir, e.name), depth + 1); } };
+        look(ctx.root, 0);
+        found.sort((x, y) => fs.statSync(y).mtimeMs - fs.statSync(x).mtimeMs);
+        if (!found.length) throw new ToolError("No index.html found. Give <path>.");
+        page = found[0];
+      }
+      const abs = resolve(ctx, page);
+      if (!fs.existsSync(abs)) throw new ToolError(`${page} doesn't exist.`);
+      toolHeader("Check page", rel(ctx, abs) + (a.keys ? ` · ${String(a.keys).slice(0, 40)}` : ""));
+      spinner.start("opening it in a browser");
+      let r;
+      try {
+        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe: ctx.describeImage, saveTo: path.join(ctx.root, "yai-media", `check-page-${Date.now()}.jpg`) });
+      } catch (err) {
+        throw new ToolError(`Couldn't open it: ${err.message}`);
+      } finally {
+        spinner.stop();
+      }
+      toolResult(r.frozen ? "frozen" : /Errors in the browser/.test(r.lines.join("\n")) ? "errors" : "checked", { color: r.frozen ? c.red : undefined });
+      return r.lines.join("\n");
     },
   },
   web_fetch: {

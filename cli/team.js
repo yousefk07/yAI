@@ -78,10 +78,16 @@ const LEAD_SYSTEM =
   "Never name a shared global after something the browser or Node already has (Audio, Image, Event, Map, Set, Node, Element, Option, Text, " +
   "Range, Request, Response, Notification, History, Location, Screen, Storage, Worker, File, Blob, URL, Proxy, Symbol, name, status, top, parent): " +
   "prefix it instead (GameAudio, AppEvents). " +
-  "Rules: split by independent pieces (for example the API, the page, the tests); every file belongs to at most one agent, " +
-  "since two agents editing one file would overwrite each other; each task must make sense without waiting for another " +
-  "(agree on names, routes and data shapes inside the task text so the pieces fit). If the task is small or can't be split " +
-  "without agents stepping on each other, return a single agent. No tool calls.";
+  // 2026-10-22: split by feature, not by file. A team split by file (renderer.js, mobs.js…) left features that span
+  // files (a mob that flashes red when hit and dies: mobs, renderer, audio, player) with no owner, and a single
+  // yAI Code session, owning whole features, beat it.
+  "Rules: split by FEATURE, the way a player or user would describe the work (for example: the world and terrain; mining, placing and block cracks; " +
+  "mobs and combat; inventory and crafting; sound; the menus and HUD), so each agent owns a whole feature end to end. " +
+  "\"files\" lists the files an agent CREATES; every file is created by exactly one agent. An agent may also make small exact edits in files " +
+  "another agent created when its feature needs them (it never rewrites them), so put the core files (the page, the main loop, the shared " +
+  "state) with the agent whose feature is the base the others plug into, and name in the contract where each feature hooks in. " +
+  "Each task must make sense without waiting for another (agree on names, routes and data shapes inside the task text so the pieces fit). " +
+  "If the task is small, return a single agent. No tool calls.";
 
 // The members who aren't builders. phase 2 runs when the builders finish; phase 3 (the fixer) only if a check found
 // something. readOnly roles run in plan mode and can't edit; the others edit, and all may run checks that change nothing.
@@ -171,19 +177,22 @@ module.exports = function create(d) {
     const roles = all.filter((a) => a.role).map((a) => a.role);
     return [
       `You are one of ${all.filter((a) => !a.role).length} builder agents working at the same time in this project, as a team${roles.length ? " (checkers look at the work after you)" : ""}. The team's overall task: ${task}`,
-      "", `Your part: ${me.task}`,
-      "", me.files.length ? `Files that are yours to create or change: ${me.files.join(", ")}.` : "Keep your changes to the files your part needs.",
+      "", `Your feature: ${me.task}`,
+      // feature ownership (2026-10-22): the files it creates are its own; it hooks into others' files with small exact edits
+      "", me.files.length ? `Files you create (they're yours): ${me.files.join(", ")}. Your feature may also need small hooks in files other agents create (a call in the main loop, a tag in the page): make those with edit_file, a few lines each, and leave the rest of their code alone. Never write_file over a file you didn't create.` : "Keep your changes to the files your feature needs; in files other agents create, only small edit_file hooks.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
       ...contractLines(), ...notesLines(),
       // the architect's skeletons (2026-10-22): every file starts with the shared names, so the pieces fit from the start
       ...(roles.includes("architect") ? ["", "The architect already started your files as skeletons: the shared names with empty bodies. Read them first, keep every name, signature, id and script tag exactly as they are, and fill them in. Don't rename or remove anything a skeleton has; add your own private helpers freely."] : []),
-      ...others.map((o) => `"${o.name}" is doing: ${clip(o.task, 300)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}. Don't edit its files; if you need a change there, say so in your report.`),
+      ...others.map((o) => `"${o.name}" owns: ${clip(o.task, 300)}${o.files.length ? ` (it creates ${o.files.join(", ")})` : ""}. Don't build its feature; if you need something from it that the contract doesn't give, say so in your report under "For the others".`),
       "", "Don't commit, push or change git history, and don't start servers that keep running.",
       ...(roles.length ? [`After the builders finish, ${roles.join(", ").replace(/, ([^,]*)$/, " and $1")} ${roles.length === 1 ? "checks" : "check"} the work, so focus on your part.`] : []),
       // 2026-10-22 (a chess run): builders wrote their files in a few steps, then spent 40-100 more printing pieces of
       // them with node -e and writing _test.js harnesses until they were stopped. Building is their job; testing isn't.
-      "Write your files, check each once with a syntax check (node --check <file>), fix what that finds, and finish. Don't write test harnesses, scratch tests or fake DOMs: " +
-        (roles.includes("tester") ? "the tester does that after you. " : "the checkers do that after you. ") +
+      // builders see the assembled app (2026-10-22): told not to test, they never saw their work run, while a single agent
+      // that checked as it went did better. check_page is yAI's own browser check, so it costs nothing and can't loop
+      "Build your feature, syntax-check your files (node --check <file>), then see it work in the real app with check_page: it opens the page as everyone has built it so far, starts it, and reports errors, a frozen page and what's on screen. Other features may still be unfinished; fix what check_page shows in YOUR feature, then check again. " +
+        "Don't write test harnesses, node -e scripts or fake DOMs (" + (roles.includes("tester") ? "the tester writes tests" : "the checkers test it") + " after you). " +
         "To look at a file use read_file, never node -e, Get-Content or cat. If you can't make something work after two tries, say so in your report instead of trying more.",
       "When you're done, end with a short report: what you changed, file by file, and anything the others or the user still need to do.",
       REPORT_STYLE,
@@ -264,7 +273,7 @@ module.exports = function create(d) {
     ];
   };
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
-  const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining.";
+  const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining. For a web page or game, check_page opens it in a real browser, starts it, holds keys you name, and tells you about errors, freezes and what's on screen: use it instead of guessing (and instead of loading browser code in Node).";
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Don't leave scratch or debug files (like _test.js or _smoke.js) behind; delete them before you finish.";
   // The lead's contract: the names every file shares, given word for word to every agent.
   let contract = "", contractFile = "";
@@ -625,7 +634,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(!a.role && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };

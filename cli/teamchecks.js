@@ -209,4 +209,42 @@ async function playtest({ root, entry, task, X, signal }) {
   } finally { p.close(); }
 }
 
-module.exports = { mobile, performance, accessibility, playtest };
+// check_page (2026-10-22): one look at the app as it is right now, for an agent while it builds. Opens the page,
+// presses its start button, holds any keys asked for, and reports errors, a frozen page, the frame rate, what the page
+// says and (with `describe`, a model that can see) what's on screen. No model of its own, so it's cheap and can't loop.
+// keys: "KeyW:1500,Space,ArrowLeft:500" (a key code, held for the ms after the colon, default 150)
+async function pageCheck({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo }) {
+  const p = await openPage(entry);
+  const lines = [];
+  try {
+    await sleep(1200);
+    const pressed = start ? await Promise.race([B.evaluate(p.b, START), sleep(6000).then(() => "")]).catch(() => "") : "";
+    if (start) lines.push(pressed ? `Pressed "${pressed}".` : "No start button to press.");
+    await sleep(Math.min(Math.max(Number(wait) || 2500, 500), 15000));
+    if (!(await alive(p.b)) && !(await alive(p.b))) {
+      lines.push(`FROZEN: the page stopped answering${pressed ? ` after "${pressed}"` : ""} for over 10 s: a loop that never ends (a Set or array growing while it is walked, a while loop that never exits).`);
+      return { frozen: true, lines };
+    }
+    for (const k of String(keys || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 12)) {
+      const [code, ms] = k.split(":");
+      const key = code.replace(/^Key/, "").replace(/^Digit/, "").toLowerCase();
+      await p.b.send("Input.dispatchKeyEvent", { type: "keyDown", code, key: code === "Space" ? " " : key });
+      await sleep(Math.min(Number(ms) || 150, 5000));
+      await p.b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key: code === "Space" ? " " : key });
+    }
+    if (keys) { lines.push(`Held: ${keys}.`); if (!(await alive(p.b))) { lines.push("FROZEN after the keys."); return { frozen: true, lines }; } }
+    const fps = await Promise.race([B.evaluate(p.b, `new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else r(n); }; requestAnimationFrame(f); })`), sleep(4000).then(() => 0)]);
+    const info = await B.evaluate(p.b, `(() => ({ title: document.title, text: document.body.innerText.replace(/\\s+/g, " ").trim().slice(0, 300), buttons: [...document.querySelectorAll("button, [role=button]")].filter((b) => b.offsetParent).map((b) => b.textContent.trim()).filter(Boolean).slice(0, 10), canvas: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).slice(0, 3) }))()`);
+    lines.push(`Frame rate: about ${fps} fps (a headless browser without a graphics card, so a real one is faster).`);
+    if (info?.canvas?.length) lines.push(`Canvas: ${info.canvas.join(", ")}.`);
+    if (info?.buttons?.length) lines.push(`Buttons on screen: ${info.buttons.join(" · ")}.`);
+    if (info?.text) lines.push(`Text on the page: ${info.text}`);
+    lines.push(p.errors.length ? `Errors in the browser (${p.errors.length}):\n${[...new Set(p.errors)].slice(0, 8).map((e) => `- ${e}`).join("\n")}` : "No errors in the browser.");
+    const img = await B.screenshot(p.b, { quality: 60 });
+    if (saveTo) { try { require("fs").mkdirSync(path.dirname(saveTo), { recursive: true }); require("fs").writeFileSync(saveTo, img); lines.push(`Screenshot saved: ${saveTo}`); } catch {} }
+    if (describe) { const seen = await describe(img, lookFor).catch(() => ""); if (seen) lines.push(`On screen (described by a model that can see it):\n${seen}`); }
+    return { frozen: false, lines };
+  } finally { p.close(); }
+}
+
+module.exports = { mobile, performance, accessibility, playtest, pageCheck };

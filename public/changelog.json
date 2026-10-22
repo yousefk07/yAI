@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.158",
+      "date": "2026-10-22",
+      "title": "Agents that see the app",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "check_page",
+          "text": "A new tool: open the web page or game in a real browser as it is right now, press its start button, hold keys (KeyW:1500), and get back errors, a frozen page, the frame rate, what the page says, and a plain, critical description of what is on screen from a model that can see it. Every /team agent is told to use it to see its work run."
+        },
+        {
+          "area": "yAI Code",
+          "title": "/team splits by feature",
+          "text": "The lead gives each builder a whole feature (mining and block cracks, mobs and combat, sound) instead of a file. A builder owns the files it creates and hooks into others' files with small exact edits; it can't overwrite another agent's file, so builders working at once never wipe each other's work."
+        }
+      ]
+    },
+    {
       "version": "1.0.157",
       "date": "2026-10-22",
       "title": "/team: done means it works",

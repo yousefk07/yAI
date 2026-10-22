@@ -165,6 +165,13 @@ ctx.webSearch = async (q) => {
     return require("../lib/search").search(q);
   }
 };
+// check_page's eyes (2026-10-22): a model that can see describes the screenshot, plainly and critically, so a text-only
+// model building a game knows what's actually on screen
+ctx.describeImage = (img, lookFor) => X.withVision((m) => X.oneShot({ // → { vm, text }
+  model: m.id, signal: state.abort?.signal,
+  system: "You look at a screenshot of a web app or game for the developer building it. In 3 to 6 short lines say what is on screen and what looks wrong or unfinished: blank or black areas, missing or placeholder graphics (plain boxes where there should be shapes), overlapping or cut-off UI, error text, anything that doesn't look like a finished product. Be specific and honest; don't praise.",
+  messages: [{ role: "user", content: [{ type: "text", text: lookFor ? `Check especially: ${lookFor}` : "Describe it." }, X.imagePart(img, "image/jpeg")] }],
+}), state.abort?.signal).then((r) => String(r?.text || "").trim());
 // A background command that ends on its own: yAI hears about it with the next message, and so does the user.
 ctx.onTaskDone = (t) => {
   if (t.stopped) return;
