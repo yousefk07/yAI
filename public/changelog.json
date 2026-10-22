@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.167",
+      "date": "2026-10-22",
+      "title": "Free eyes, in a row",
+      "items": [
+        {
+          "area": "Models",
+          "title": "Three free image models",
+          "text": "Images go to Gemini 3.8 Flash, then Groq (Qwen 3.8 27B), then Gemini 3.5 Flash-Lite, then Modal. One whose free quota is used up passes straight to the next."
+        }
+      ]
+    },
+    {
       "version": "1.0.166",
       "date": "2026-10-22",
       "title": "Quicker page checks",
