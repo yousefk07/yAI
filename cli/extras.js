@@ -66,7 +66,7 @@ module.exports = function create(d) {
   // used up, say), the next is asked.
   const visionModels = () => {
     const v = state.models.filter((m) => m.vision);
-    const rank = (m) => (m.id === "kimi-k3-ultra" ? 0 : m.id === "deepseek-v4.1-flash" ? 1 : /cloud/.test(m.id) ? 2 : 3);
+    const rank = (m) => (m.id === "deepseek-v4-pro" ? 0 : m.id === "deepseek-v4.1-flash" ? 1 : /cloud/.test(m.id) ? 2 : 3);
     return v.sort((a, b) => rank(a) - rank(b));
   };
   const visionModel = () => visionModels()[0];

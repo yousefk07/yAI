@@ -538,7 +538,7 @@ function showHelp() {
 const padVis = (s, n) => s + " ".repeat(Math.max(0, n - ui.stripAnsi(s).length));
 
 // ---------- /model: a table to pick from ----------
-const SPEED = { "kimi-k3-ultra": "~48 tok/s", "deepseek-v4.1-flash": "fast", "qwen3-coder-30b-cloud": "~60 tok/s" };
+const SPEED = { "deepseek-v4-pro": "fast", "deepseek-v4.1-flash": "fast", "qwen3-coder-30b-cloud": "~60 tok/s" };
 async function modelPicker() {
   let ultraLeft = "";
   try {
@@ -547,7 +547,7 @@ async function modelPicker() {
   } catch {}
   const W = { name: 24, where: 10, ctx: 9, speed: 11 };
   const rowOf = (m) => {
-    const where = m.price || m.id === "kimi-k3-ultra" ? "hosted" : m.cloud || /cloud/.test(m.id) ? "cloud GPU" : "your PC";
+    const where = m.price ? "hosted" : m.cloud || /cloud/.test(m.id) ? "cloud GPU" : "your PC";
     const ctx = m.context ? `${Math.round(m.context / 1000)}k` : "8k";
     const cost = m.price ? ultraLeft || "daily limit" : "free";
     const name = ui.middle(m.label, W.name - (m.id === state.model ? 10 : 1)) + (m.id === state.model ? " (current)" : "");
@@ -1211,7 +1211,8 @@ async function loadModels() {
   state.models = data.models || [];
   state.localOffline = !!data.localOffline;
   // A /model pick is remembered; picks saved before yAI Ultra Flash became the default (2026-10-21) are dropped once.
-  const saved = api.cfg.modelPicked === 3 ? api.cfg.model : undefined;
+  // yAI Ultra moved from Kimi K3 to DeepSeek V4 Pro (2026-10-22): a saved pick of the old id means the new one
+  const saved = api.cfg.modelPicked === 3 ? (api.cfg.model === "kimi-k3-ultra" ? "deepseek-v4-pro" : api.cfg.model) : undefined;
   if (!state.models.some((m) => m.id === state.model)) {
     state.model = state.models.find((m) => m.id === saved)?.id || data.default || state.models.find((m) => /cloud/.test(m.id))?.id || state.models[0]?.id || "";
   }

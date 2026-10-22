@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.135",
+      "date": "2026-10-22",
+      "title": "yAI Ultra is now DeepSeek V4 Pro",
+      "items": [
+        {
+          "area": "Models",
+          "title": "A new yAI Ultra",
+          "text": "yAI Ultra runs on DeepSeek V4 Pro instead of Kimi K3, at a fifth of the price or less (half again outside DeepSeek’s peak hours), so your daily allowance goes much further. Messages with images still go to Kimi K3, since DeepSeek’s API reads text only, and Kimi K3 steps in if DeepSeek is unavailable. Saved picks, scheduled tasks and API keys that name the old model keep working."
+        }
+      ]
+    },
+    {
       "version": "1.0.134",
       "date": "2026-10-22",
       "title": "DeepSeek’s tool calls understood",

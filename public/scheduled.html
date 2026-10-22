@@ -134,7 +134,7 @@
               <select id="model" aria-label="Model">
                 <option value="deepseek-v4.1-flash">yAI Ultra Flash</option>
                 <option value="qwen3.8-max">yAI Q3.8 Max</option>
-                <option value="kimi-k3-ultra">yAI Ultra</option>
+                <option value="deepseek-v4-pro">yAI Ultra</option>
               </select>
             </div>
             <div class="row">
@@ -178,7 +178,7 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const MODEL = { "deepseek-v4.1-flash": "Ultra Flash", "qwen3.8-max": "Q3.8 Max", "kimi-k3-ultra": "Ultra" };
+    const MODEL = { "deepseek-v4.1-flash": "Ultra Flash", "qwen3.8-max": "Q3.8 Max", "deepseek-v4-pro": "Ultra", "kimi-k3-ultra": "Ultra" };
     let tasks = [], editing = null;
 
     async function hub(op, opts = {}) {
