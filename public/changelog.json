@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.162",
+      "date": "2026-10-22",
+      "title": "A sharper eye",
+      "items": [
+        {
+          "area": "Models",
+          "title": "Gemini 3.8 Flash for images",
+          "text": "Images go to Gemini 3.8 Flash instead of Flash-Lite, which missed a big first-person hand in a game screenshot."
+        }
+      ]
+    },
+    {
       "version": "1.0.161",
       "date": "2026-10-22",
       "title": "Images through Gemini",
