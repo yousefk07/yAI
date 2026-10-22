@@ -525,7 +525,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") {
         a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
-        if (e.model !== state.model) a.send({ type: "model", id: state.model });
+        const want = a.model || state.model; // the model picked for this agent
+        if (e.model !== want) a.send({ type: "model", id: want });
         a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; }
       else if (e.type === "status" && e.text) a.step = String(e.text);
@@ -573,7 +574,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     return agents.map((a, i) => {
       const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
       const time = secs((a.ended || Date.now()) - a.started);
-      const right = `${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
+      const model = a.model && !a.internal ? (state.models.find((m) => m.id === a.model)?.label || a.model).replace(/^yAI\s+/, "") + " · " : "";
+      const right = `${model}${a.changed.size ? `${a.changed.size} file${a.changed.size > 1 ? "s" : ""} · ` : ""}${time}${a.cost ? ` · $${a.cost.toFixed(3)}` : ""}`;
       const what = a.state === "done" ? ["finished", a.verdict, a.flag].filter(Boolean).join(" · ") : a.state === "waiting" || a.state === "skipped" ? a.step : a.state === "failed" ? a.error || "failed" : a.state === "stopped" ? "stopped" : a.asks.length ? "waiting for you" : a.step;
       const room = Math.max(8, w - nameW - right.length - 12);
       // the number opens the agent (press it, or click the row)
@@ -745,11 +747,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
     for (const a of agents) if (a.files.length) print(`     ${c.accent("•")} ${c.ink(a.name)} ${c.faint(clip(a.files.join(", "), Math.max(20, ui.width() - a.name.length - 10)))}`);
     print("");
-    const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r }))] : []; };
+    // Each agent's model (2026-10-22): the hosted models, picked per row with ← →; the picks are remembered per role
+    // (and one for the builders). yAI's own checks use no model.
+    const models = state.models.filter((m) => m.cloud).map((m) => ({ id: m.id, short: m.label.replace(/^yAI\s+/, "") }));
+    const savedModels = api.cfg.team?.models || {};
+    const modelFor = (key) => [savedModels[key], state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
+    const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r, model: r.internal ? undefined : modelFor(r.key) }))] : []; };
     const rows = [
       ...group("Before the builders", (p) => p < 1),
       { kind: "head", label: "Builders · the lead's split, at the same time" },
-      ...agents.map((a) => ({ label: a.name, desc: a.task, on: true })),
+      ...agents.map((a) => ({ label: a.name, desc: a.task, on: true, model: modelFor("builders") })),
       ...group("Right after the builders", (p) => p > 1 && p < 1.6),
       ...group("yAI's own checks · in a browser, almost free", (p) => p === 1.6),
       ...group("AI checks · together, after yAI's own", (p) => p === 2),
@@ -757,7 +764,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...group("At the end", (p) => p > 3),
     ];
     const picked = await d.checklist({
-      title: "Who's on the team?", note: "edits are made without asking; other commands still ask", rows,
+      title: "Who's on the team?", note: "edits are made without asking; other commands still ask", rows, models,
       start: (items) => {
         const b = items.filter((x) => !x.role && x.on).length, n = items.filter((x) => x.on).length;
         return b ? `Start ${n} agent${n === 1 ? "" : "s"}` : "Pick at least one builder";
@@ -766,16 +773,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     if (!picked) return print(c.dim("   Cancelled."));
     const items = rows.filter((r) => r.kind !== "head");
     items.forEach((r, i) => (r.on = picked[i]));
-    api.cfg.team = { ...(api.cfg.team || {}), roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])) };
+    const builderRows = items.filter((r) => !r.role);
+    agents.forEach((a, i) => (a.model = builderRows[i].model));
+    api.cfg.team = { ...(api.cfg.team || {}), roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])),
+      models: { ...savedModels, ...Object.fromEntries(items.filter((r) => r.role && r.model).map((r) => [r.role.key, r.model])), ...(builderRows[0]?.model && { builders: builderRows[0].model }) } };
     api.save();
-    agents = agents.filter((a, i) => items[i].on);
+    agents = agents.filter((a, i) => builderRows[i].on);
     if (!agents.length) return print(c.dim("   No builders picked, so nothing ran."));
-    const members = items.filter((r) => r.role && r.on).map((r) => r.role);
+    const memberRows = items.filter((r) => r.role && r.on);
+    const members = memberRows.map((r) => r.role);
     if (agents.length === 1 && !members.length) {
       ui.note(`${c.accent("◆")} ${c.ink("Just one builder, so yAI does it here on its own.")}`);
       return d.runAgent(agents[0].task === task ? task : `${task}\n\n(Your part: ${agents[0].task})`);
     }
-    for (const r of members) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly || !!r.internal, internal: !!r.internal, hasVerdict: r.verdict !== false });
+    for (const [i, r] of members.entries()) agents.push({ name: r.key, task: r.desc, files: [], role: r.key, phase: r.phase, readOnly: !!r.readOnly || !!r.internal, internal: !!r.internal, hasVerdict: r.verdict !== false, model: memberRows[i].model });
     // The layout: the folders exist before anyone writes, and everyone gets the same map (in their brief).
     // Files already in the project's folder that the plan doesn't mention (a stopped team's leftovers…): move them aside?
     const fs = require("fs");

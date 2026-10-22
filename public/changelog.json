@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.142",
+      "date": "2026-10-22",
+      "title": "A model for each /team agent",
+      "items": [
+        {
+          "area": "yAI Code",
+          "title": "Pick each agent's model",
+          "text": "In the /team picker, ← → changes the model of the highlighted agent: for example yAI Ultra for the architect and fixer, and yAI Lite for the builders. The picks are remembered per role, and the board shows each agent's model next to its cost."
+        },
+        {
+          "area": "yAI Code",
+          "title": "Unticking a builder",
+          "text": "Unticking a builder in the /team picker now always leaves out that builder; with an architect on the team it could leave out a different one."
+        }
+      ]
+    },
+    {
       "version": "1.0.141",
       "date": "2026-10-22",
       "title": "yAI Lite is the default",

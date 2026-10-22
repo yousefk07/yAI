@@ -370,14 +370,15 @@ function select(opts) {
 }
 
 // A checklist (2026-10-21, the /team picker): rows to tick, grouped under headings, and a Start row. Resolves to the
-// rows' on/off values (heading rows left out), or null when cancelled.
-async function checklist({ title, note = "", rows, start }) {
+// rows' on/off values (heading rows left out), or null when cancelled. Rows with a `model` show it, and ← → changes it
+// to the next or previous of `models` ({ id, short }); the new id is left on the row (2026-10-22: a model per agent).
+async function checklist({ title, note = "", rows, start, models = [] }) {
   spinner.stop();
   const items = rows.filter((r) => r.kind !== "head");
   if (!process.stdout.isTTY || state.askHook) return items.map((r) => !!r.on);
   let sel = 0, drawn = [];
   const draw = () => {
-    const lines = LOOK.checklistLines({ title, note, rows, sel, start: start(items) });
+    const lines = LOOK.checklistLines({ title, note, rows, sel, start: start(items), models });
     if (SCREEN.on) SCREEN.setExtra(["", ...lines]);
     else {
       if (drawn.length) process.stdout.write(`\x1b[${drawn.length}A`);
@@ -410,6 +411,11 @@ async function checklist({ title, note = "", rows, start }) {
       if (key.name === "up") { sel = (sel + n - 1) % n; return draw(); }
       if (key.name === "down" || key.name === "tab") { sel = (sel + 1) % n; return draw(); }
       if (key.name === "space" && sel < items.length) { items[sel].on = !items[sel].on; return draw(); }
+      if ((key.name === "left" || key.name === "right") && sel < items.length && items[sel].model && models.length > 1) {
+        const i = models.findIndex((m) => m.id === items[sel].model);
+        items[sel].model = models[(i + (key.name === "right" ? 1 : models.length - 1)) % models.length].id;
+        return draw();
+      }
       if (/^[1-9]$/.test(s || "") && Number(s) <= items.length) { sel = Number(s) - 1; items[sel].on = !items[sel].on; return draw(); }
       if (key.name === "return" || key.name === "enter") {
         if (sel < items.length) { items[sel].on = !items[sel].on; return draw(); }
@@ -898,7 +904,7 @@ SCREEN.parts.input = () => {
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };

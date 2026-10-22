@@ -391,24 +391,29 @@ module.exports = function create({ ui }) {
   //  After they finish
   //    [ ] 4  Reviewer         reviews the change like a senior engineer · read-only
   //    ▸ Start 5 agents
-  function checklistLines({ title, note, rows, sel, start }) {
+  // A row with a model shows it in its own column (‹ Lite › on the selected row: ← → changes it).
+  function checklistLines({ title, note, rows, sel, start, models = [] }) {
     const w = Math.min(W() - 2, 110);
     const rule = c.line("─".repeat(w));
     const out = [rule, ui.pad(` ${c.bold(c.ink(title))}`, w - ui.vis(note || "") - 1) + c.faint(note || ""), ""];
     const labelW = Math.min(18, Math.max(...rows.filter((r) => r.label && r.kind !== "head").map((r) => r.label.length), 6));
+    const short = (id) => models.find((m) => m.id === id)?.short || id || "";
+    const anyModel = rows.some((r) => r.model);
+    const modelW = anyModel ? Math.max(...models.map((m) => m.short.length), 4) + 4 : 0;
     let k = 0;
     rows.forEach((r) => {
       if (r.kind === "head") return out.push(` ${c.faint(r.label)}`);
       const on = sel === k;
       const box = r.on ? c.accent("[x]") : c.faint("[ ]");
       const name = ui.pad(r.on ? c.ink(r.label) : c.dim(r.label), labelW);
-      const desc = c.faint(ui.clip(r.desc || "", Math.max(10, w - labelW - 14)));
-      out.push(` ${on ? c.accent("❯") : " "} ${box} ${c.faint(String(k + 1).padStart(2))}  ${on ? c.bold(name) : name}  ${desc}`);
+      const tag = !anyModel ? "" : ui.pad(!r.model ? "" : on && models.length > 1 ? `${c.accent("‹")} ${c.ink(short(r.model))} ${c.accent("›")}` : `  ${(r.on ? c.soft : c.faint)(short(r.model))}`, modelW) + "  ";
+      const desc = c.faint(ui.clip(r.desc || "", Math.max(10, w - labelW - modelW - 16)));
+      out.push(` ${on ? c.accent("❯") : " "} ${box} ${c.faint(String(k + 1).padStart(2))}  ${on ? c.bold(name) : name}  ${tag}${desc}`);
       k++;
     });
     out.push("");
     out.push(` ${sel === k ? c.accent("❯") : " "} ${(sel === k ? (s) => c.soft(c.bold(c.accent(s))) : c.ink)(` ▸ ${start} `)}`);
-    out.push("", ` ${c.faint("↑↓ move · space or a number toggles · enter starts · esc cancels")}`);
+    out.push("", ` ${c.faint(`↑↓ move · space or a number toggles${anyModel ? " · ← → picks the model" : ""} · enter starts · esc cancels`)}`);
     return out;
   }
 
