@@ -707,7 +707,7 @@ const TEAM_SKIP = new Set(["ask_user"]);
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
-  if (!TEAM_AGENT) return;
+  if (!TEAM_AGENT && !state.stdio) return; // a team agent, or the VS Code panel (its plan card)
   ui.event({ type: "progress", plan: state.plan ? { steps: state.plan.steps, done: state.plan.done } : null, cost: state.cost.session, tokens: state.teamTokens || 0, fallbacks: state.fallbacks || 0 });
 }
 function teamPrompt(shell, toolDocs) {
@@ -3108,6 +3108,13 @@ async function stdioMode() {
   ui.setSink(send); // the panel draws yAI's words, steps and diffs itself
   ui.setTheme(process.env.YAI_THEME || api.cfg.theme || "dark", { paint: false }); // VS Code says light or dark
   const answers = new Map();
+  // /team's picker in the panel (2026-10-22): the rows go out, each one's tick and model come back
+  const picks = new Map();
+  state.pickTeamHook = (data) => {
+    const id = crypto.randomBytes(4).toString("hex");
+    send({ type: "team-pick", id, ...data });
+    return new Promise((resolve) => picks.set(id, resolve));
+  };
   state.askHook = ({ title, detail, options, edit }) => {
     const id = crypto.randomBytes(4).toString("hex");
     send({ type: "ask", id, title, detail: detail || "", options, ...(edit && { edit: { path: relPath(edit.abs), abs: edit.abs, before: edit.before, after: edit.after, created: !!edit.created } }) });
@@ -3157,10 +3164,14 @@ async function stdioMode() {
     if (msg.type === "prompt" && String(msg.text || "").trim()) { work.push({ type: "prompt", text: String(msg.text) }); next(); }
     else if (msg.type === "command" && /^\/\w+/.test(msg.text || "")) { work.push({ type: "command", text: String(msg.text) }); next(); }
     else if (msg.type === "answer") { const r = answers.get(msg.id); if (r) { answers.delete(msg.id); r(Number(msg.choice)); } }
+    else if (msg.type === "team-pick-answer") { const r = picks.get(msg.id); if (r) { picks.delete(msg.id); r(msg.result || null); } }
+    else if (msg.type === "team-action" && state.teamAction) state.teamAction(msg);
     else if (msg.type === "stop") {
       state.interrupted = true;
       state.abort?.abort();
       for (const r of answers.values()) r(-1);
+      for (const r of picks.values()) r(null);
+      picks.clear();
       answers.clear();
     } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; send({ type: "done", stats: state.lastStats || "", ...info() }); }
     else if (msg.type === "model" && state.models.some((m) => m.id === msg.id)) { state.model = msg.id; prewarm(); send({ type: "done", stats: state.lastStats || "", ...info() }); }

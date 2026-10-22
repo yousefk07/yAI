@@ -112,6 +112,7 @@ class ChatView {
         <p class="tip">Edits open as diffs to approve · @file mentions a file · / for commands</p>
       </div></main>
       <div id="ask" hidden></div>
+      <div id="plan" hidden></div>
       <div id="status" hidden><span class="dots"><i></i><i></i><i></i></span><span id="statusText"></span></div>
       <footer id="composer">
         <textarea id="input" rows="1" placeholder="Ask yAI Code…"></textarea>
@@ -122,6 +123,10 @@ class ChatView {
       if (m.type === "prompt") { if (!proc) start(); send({ type: m.text.startsWith("/") ? "command" : "prompt", text: m.text }); }
       else if (m.type === "answer") { send({ type: "answer", id: m.id, choice: m.choice }); if (pendingAsk && pendingAsk.id === m.id) { pendingAsk = null; closeDiffs(); } }
       else if (m.type === "stop") send({ type: "stop" });
+      // a note while yAI works, and /team: the picker's answer and the board's actions (open, retry, skip, pause, note)
+      else if (m.type === "note") send({ type: "note", text: m.text });
+      else if (m.type === "teamPick") send({ type: "team-pick-answer", id: m.id, result: m.result });
+      else if (m.type === "teamAction") send({ type: "team-action", action: m.action, n: m.n, text: m.text });
       else if (m.type === "mode") send({ type: "mode", mode: m.mode });
       else if (m.type === "model") send({ type: "model", id: m.id });
       else if (m.type === "restart") start();

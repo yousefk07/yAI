@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.154",
+      "date": "2026-10-22",
+      "title": "VS Code catches up",
+      "items": [
+        {
+          "area": "VS Code",
+          "title": "/team in the panel",
+          "text": "The panel shows the same /team as the terminal: the picker (stages, a model per agent, estimates, Quick / Recommended / Everything, chat about the plan), then a live board with the stage bar, every agent's activity and progress, the live feed, and Retry / Skip on stuck agents. Click an agent to open it: its stats, steps, what it may change, its transcript, Pause and Restart."
+        },
+        {
+          "area": "VS Code",
+          "title": "Notes while yAI works",
+          "text": "You can send while yAI is busy: it reads your note after its current step (during /team it goes to the whole team, or the agent you opened, and shows when it was read). With the box empty the button still stops yAI."
+        },
+        {
+          "area": "VS Code",
+          "title": "Plan card and tables",
+          "text": "yAI's plan shows above the composer while it works, ticked off step by step, and Markdown tables in answers are drawn as tables."
+        }
+      ]
+    },
+    {
       "version": "1.0.153",
       "date": "2026-10-22",
       "title": "Notes you can see arrive",

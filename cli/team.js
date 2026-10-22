@@ -902,6 +902,25 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       body: logLines(a, agents, tick).slice(3), width: screenW(), height: screenH(), tick,
     };
   }
+  // The board and an agent's view as plain data, for the VS Code panel (yai --stdio), which draws them itself
+  // (2026-10-22: in VS Code /team had no picker and showed its progress as lines of text).
+  function plainBoard(agents, task, estimate, open, over) {
+    const v = runView(agents, task, 0, -1, estimate);
+    const cost = agents.reduce((s, a) => s + (a.cost || 0), 0);
+    const a = open ? agentView(open, agents, 0) : null;
+    return {
+      task, total: agents.length, done: agents.filter((x) => ENDED.includes(x.state)).length, working: agents.filter((x) => x.state === "working" || x.state === "starting").length,
+      elapsed: secs(Date.now() - teamStarted), cost: money(cost) || "$0.000", estimate: estimate ? money(estimate) : "", over: !!over,
+      strip: v.strip, feed: v.feed,
+      stages: v.stages.map((g) => ({ name: g.name, note: g.note, current: g.current, rows: g.rows.map((r) => ({ ...r, model: agents[r.n - 1].internal ? "built-in" : modelShort(agents[r.n - 1].model), canRetry: canRetry(agents[r.n - 1]), canSkip: canSkip(agents[r.n - 1]), paused: !!agents[r.n - 1].paused })) })),
+      agent: a && { n: a.side.n, name: a.side.name, where: a.side.where, desc: a.side.desc, stats: a.side.stats, steps: a.side.steps, touch: a.side.touch, waiting: a.side.waiting,
+        state: open.state, paused: !!open.paused, canRetry: canRetry(open), canSkip: canSkip(open),
+        log: (open.log || []).slice(-160).map((e) => (e.k === "diff" ? { ...e, lines: (e.lines || []).slice(0, 40) } : e)) },
+    };
+  }
+  const canRetry = (a) => !!a && !a.internal && (stuck(a) || a.state === "failed" || a.state === "stopped");
+  const canSkip = (a) => !!a && (a.state === "waiting" || stuck(a) || !!a.paused);
+
   // what the user said while the team worked, for the agents that start later
   const notesLines = () => (teamNotes.length ? ["", "Notes from the user while the team worked (follow them):", ...teamNotes.map((n) => `- ${n}`)] : []);
 
@@ -1002,7 +1021,23 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     ];
     const count = (p) => items.filter((r) => (r.role ? p.on(r) : r.on)).length;
     const NOTES = { PLAN: "first", BUILD: `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
-    const picked = await d.checklist({
+    // VS Code (yai --stdio): the panel shows the same picker and sends back each row's tick and model
+    const pickInPanel = async () => {
+      const ans = await state.pickTeamHook({
+        task, builders: agents.length,
+        models: models.map((m) => ({ ...m, price: state.models.find((x) => x.id === m.id)?.price || null })),
+        presets: PRESETS.map((p) => ({ key: p.key, label: p.label })),
+        groups: STAGES.map((S) => ({ name: S.name, note: NOTES[S.name], rows: items.filter((r) => S.has(r.role ? r.role.phase : 1)).map((r) => ({
+          i: items.indexOf(r), label: r.label, desc: r.desc, on: !!r.on, model: r.model || null, builtIn: !!r.role?.internal, builder: !r.role,
+          profile: r.role?.internal ? null : PROFILE[r.role?.key || "builder"] || PROFILE.builder,
+          presets: r.role ? Object.fromEntries(PRESETS.map((p) => [p.key, !!p.on(r)])) : null })) })).filter((g) => g.rows.length),
+      });
+      if (!ans) return null;
+      if (ans.chat) return { chat: true };
+      for (const x of ans.rows || []) { const r = items[x.i]; if (!r) continue; r.on = !!x.on; if (x.model && r.model && models.some((m) => m.id === x.model)) r.model = x.model; }
+      return items.map((r) => !!r.on);
+    };
+    const picked = state.pickTeamHook ? await pickInPanel() : await d.checklist({
       rows, models, start: () => "",
       render: (sel) => {
         const t = totals(), n = items.filter((r) => r.on).length, b = items.filter((r) => !r.role && r.on).length;
@@ -1117,8 +1152,34 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       drawn = lines.length;
     };
     const lastSeen = new Map();
-    const report = () => { // without a terminal (the VS Code panel): a line when an agent's step changes
+    // the VS Code panel (yai --stdio): the board as data, at most every 400 ms and only when it changed
+    let lastBoard = "", lastBoardAt = 0;
+    const emitBoard = (force) => {
+      if (!state.stdio || (!force && Date.now() - lastBoardAt < 400)) return;
+      const json = JSON.stringify(plainBoard(agents, task, estimate, viewing, over));
+      if (json === lastBoard) return;
+      lastBoard = json; lastBoardAt = Date.now();
+      ui.event({ type: "team", view: JSON.parse(json) });
+    };
+    // what the panel asks for: open or close an agent, retry, skip, pause, or a note (to one agent or everyone)
+    state.teamAction = (m) => {
+      const a = agents[(Number(m.n) || 0) - 1];
+      if (m.action === "open") viewing = a || null;
+      else if (m.action === "close") viewing = null;
+      else if (m.action === "retry") retry(a);
+      else if (m.action === "skip") skip(a);
+      else if (m.action === "pause") togglePause(a);
+      else if (m.action === "note" && String(m.text || "").trim()) {
+        const keep = viewing;
+        viewing = a || null;
+        state.teamInput(String(m.text).trim());
+        viewing = keep;
+      }
+      emitBoard(true);
+    };
+    const report = () => { // without a terminal: the panel gets the board; anything else a line when an agent's step changes
       if (tty) return;
+      if (state.stdio) return emitBoard();
       for (const a of agents) {
         const s = `${a.state}|${a.step}`;
         if (lastSeen.get(a) !== s) { lastSeen.set(a, s); print(c.dim(`   ${a.name}: ${a.state === "working" ? a.step : a.state}`)); }
@@ -1297,9 +1358,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       });
     } finally {
       // the full-window app: the board's last state goes into the conversation, where it stays
+      // the panel's last board, marked as over (it stays in the conversation there)
+      if (state.stdio) { over = true; viewing = null; emitBoard(true); }
       state.keyHook = null;
       state.teamKeys = null;
       state.teamInput = null;
+      state.teamAction = null;
       state.teamView = false;
       ui.screen?.onClick(null);
       viewing = null;

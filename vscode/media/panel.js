@@ -40,17 +40,28 @@
       .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<i>$2</i>")
       .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2">$1</a>');
   }
+  // a Markdown table (| a | b | then |---|---|), as the terminal draws it since 2026-10-22
+  const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((x) => x.trim());
+  const SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+  function table(rows) {
+    const align = cells(rows[1]).map((x) => (/^:-+:$/.test(x) ? "center" : /-:$/.test(x) ? "right" : "left"));
+    const cell = (tag, x, i) => `<${tag} style="text-align:${align[i] || "left"}">${inline(x)}</${tag}>`;
+    return `<div class="tbl"><table><thead><tr>${cells(rows[0]).map((x, i) => cell("th", x, i)).join("")}</tr></thead><tbody>${rows.slice(2).filter((r) => !SEP.test(r)).map((r) => `<tr>${cells(r).map((x, i) => cell("td", x, i)).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
   function markdown(src) {
     const out = [];
-    let code = null, list = null, para = [];
+    let code = null, list = null, para = [], tbl = [];
     const flushPara = () => { if (para.length) out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; };
     const flushList = () => { if (list) out.push(`<${list.tag}>${list.items.map((x) => `<li>${inline(x)}</li>`).join("")}</${list.tag}>`); list = null; };
+    const flushTable = () => { if (tbl.length) { if (tbl.length > 1 && SEP.test(tbl[1])) out.push(table(tbl)); else para.push(...tbl); } tbl = []; };
     for (const line of src.split("\n")) {
       if (code) {
         if (/^\s*```/.test(line)) { out.push(`<div class="code"><div class="code-head"><span>${esc(code.lang || "code")}</span><button class="copy" type="button">Copy</button></div><pre><code>${esc(code.lines.join("\n"))}</code></pre></div>`); code = null; }
         else code.lines.push(line);
         continue;
       }
+      if (/^\s*\|.*\|\s*$/.test(line)) { flushPara(); flushList(); tbl.push(line); continue; }
+      flushTable();
       let m;
       if ((m = line.match(/^\s*```\s*([\w+#.-]*)/))) { flushPara(); flushList(); code = { lang: m[1], lines: [] }; }
       else if ((m = line.match(/^(#{1,6})\s+(.*)/))) { flushPara(); flushList(); out.push(`<h4>${inline(m[2])}</h4>`); }
@@ -62,7 +73,7 @@
       } else if (!line.trim()) { flushPara(); flushList(); }
       else { flushList(); para.push(line); }
     }
-    flushPara(); flushList();
+    flushTable(); flushPara(); flushList();
     if (code) out.push(`<div class="code"><div class="code-head"><span>${esc(code.lang || "code")}</span></div><pre><code>${esc(code.lines.join("\n"))}</code></pre></div>`);
     return out.join("");
   }
@@ -145,6 +156,142 @@
     user(ev) { userMsg(ev.text); },
   };
 
+  // ---------- /team (2026-10-22): the picker, the board and one agent, as in the terminal ----------
+  const GLYPH = { done: ["✓", "g-done"], pass: ["✓", "g-pass"], fail: ["✕", "g-fail"], work: ["◐", "g-work"], stuck: ["‖", "g-stuck"], wait: ["○", "g-wait"], skip: ["–", "g-wait"], stopped: ["■", "g-stuck"] };
+  const glyph = (st) => { const [g, c] = GLYPH[st] || ["·", "g-wait"]; return `<span class="glyph ${c}">${g}</span>`; };
+  const money = (x) => (!x ? "free" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
+
+  // the picker: rows by stage, each with a tick, its model and an estimate; presets; Start, chat or cancel
+  function teamPick(ev) {
+    text = step = null;
+    const rows = ev.groups.flatMap((g) => g.rows);
+    const price = (id) => ev.models.find((m) => m.id === id)?.price || { in: 0, cached: 0, out: 0 };
+    const est = (r) => {
+      if (r.builtIn || !r.profile) return { usd: 0, min: 0.5 };
+      const [req, ctx, out, min] = r.profile, p = price(r.model);
+      return { usd: (req * ctx * 1000 * (0.07 * (p.in || 0) + 0.93 * (p.cached ?? p.in ?? 0)) + out * 1000 * (p.out || 0)) / 1e6, min };
+    };
+    const card = add("", "team-card pick");
+    const draw = () => {
+      const on = rows.filter((r) => r.on), builders = on.filter((r) => r.builder).length;
+      const usd = on.reduce((s, r) => s + est(r).usd, 0);
+      const min = ev.groups.reduce((s, g) => s + Math.max(0, ...g.rows.filter((r) => r.on).map((r) => est(r).min)), 0);
+      const preset = (k) => rows.every((r) => !r.presets || !!r.on === !!r.presets[k]);
+      card.innerHTML = `<div class="tc-head"><b>Pick your team</b><span class="presets">${ev.presets.map((p) => `<button type="button" data-preset="${p.key}" class="${preset(p.key) ? "on" : ""}">${esc(p.label)} · ${rows.filter((r) => (r.presets ? r.presets[p.key] : r.on)).length}</button>`).join("")}</span></div>` +
+        `<div class="tc-sub">The lead split this into ${ev.builders} builder job${ev.builders === 1 ? "" : "s"}. Choose who else joins and which model each one uses.</div>` +
+        ev.groups.map((g) => `<div class="stage"><div class="stage-name"><b>${esc(g.name)}</b> ${esc(g.note)}</div>` + g.rows.map((r) => `<label class="pick-row ${r.on ? "" : "off"}">` +
+          `<input type="checkbox" data-i="${r.i}" ${r.on ? "checked" : ""}><span class="pr-name" title="${esc(r.desc)}">${esc(r.label)}</span>` +
+          (r.builtIn ? `<span class="pr-model muted">built-in</span>` : `<select data-m="${r.i}">${ev.models.map((m) => `<option value="${esc(m.id)}" ${m.id === r.model ? "selected" : ""}>${esc(m.short)}</option>`).join("")}</select>`) +
+          `<span class="pr-est">${r.builtIn ? "free" : `${est(r).min < 1 ? "<1" : Math.round(est(r).min)}m · ${money(est(r).usd)}`}</span><span class="pr-desc">${esc(r.desc)}</span></label>`).join("") + `</div>`).join("") +
+        `<div class="tc-foot"><button type="button" class="start" ${builders ? "" : "disabled"}>▶ Start ${builders ? on.length : 0} agent${on.length === 1 ? "" : "s"}</button>` +
+        `<span class="muted">~${Math.max(1, Math.round(min))} min · ${usd ? "~" + money(usd) : "free"} · ${builders} at once</span>` +
+        `<span class="tc-links"><button type="button" class="link" data-chat>Chat about the plan</button> <button type="button" class="link" data-cancel>Cancel</button></span></div>`;
+    };
+    // once answered, the picker folds to one line (the board takes over below it)
+    const fold = (what) => { card.classList.add("done"); card.innerHTML = `<div class="muted">${what}</div>`; };
+    const finish = (result) => {
+      vscode.postMessage({ type: "teamPick", id: ev.id, result });
+      const on = rows.filter((r) => r.on).length;
+      fold(result?.rows ? `Team picked · ${on} agent${on === 1 ? "" : "s"}` : result?.chat ? "Not started · talking the plan over" : "Cancelled");
+    };
+    card.fold = () => fold(`Team picked · ${rows.filter((r) => r.on).length} agents`); // answered another way
+    card.addEventListener("change", (e) => {
+      const i = e.target.dataset.i ?? e.target.dataset.m;
+      const r = rows.find((x) => String(x.i) === String(i));
+      if (!r) return;
+      if (e.target.dataset.i != null) r.on = e.target.checked; else r.model = e.target.value;
+      draw();
+    });
+    card.addEventListener("click", (e) => {
+      const p = e.target.closest("[data-preset]");
+      if (p) { for (const r of rows) if (r.presets) r.on = !!r.presets[p.dataset.preset]; return draw(); }
+      if (e.target.closest(".start")) return finish({ rows: rows.map((r) => ({ i: r.i, on: r.on, model: r.model })) });
+      if (e.target.closest("[data-chat]")) return finish({ chat: true });
+      if (e.target.closest("[data-cancel]")) return finish(null);
+    });
+    draw();
+  }
+
+  // the board: stats, the stage bar, the agents under their stages, the live feed; or one agent opened
+  let team = null; // { card, view, open }
+  function teamBoard(view) {
+    if (!team || team.over) {
+      text = step = null;
+      log.querySelectorAll(".team-card.pick:not(.done)").forEach((c) => c.fold && c.fold());
+      team = { card: add("", "team-card board"), open: 0 };
+      setTimeout(() => team.card.scrollIntoView({ block: "start" }), 0);
+    }
+    team.view = view;
+    team.over = view.over;
+    if (view.agent) team.open = view.agent.n; else if (!view.over) team.open = 0;
+    drawBoard();
+    setPlaceholder();
+  }
+  function drawBoard() {
+    const v = team.view, keep = stick();
+    const strip = v.strip.map((s) => { const total = Math.max(1, s.total), d = s.total ? (s.done / s.total) * 100 : s.past ? 100 : 0, w = s.total ? (s.working / s.total) * 100 : 0;
+      return `<div class="sg ${s.current ? "cur" : s.past ? "past" : ""}" style="flex:${total}"><div class="bar"><i style="width:${d}%"></i><i class="w" style="width:${w}%"></i></div><span>${esc(s.label)}</span></div>`; }).join("");
+    const head = `<div class="tc-head"><b title="${esc(v.task)}">${esc(v.task)}</b></div><div class="tc-stats"><span><b>${v.done} / ${v.total}</b> done</span>${v.working ? `<span><b>${v.working}</b> working</span>` : ""}<span><b>${esc(v.elapsed)}</b></span><span><b>${esc(v.cost)}</b>${v.estimate ? ` of ~${esc(v.estimate)}` : ""}</span>${v.over ? `<span class="muted">finished</span>` : ""}</div><div class="strip">${strip}</div>`;
+    if (v.agent) { team.card.innerHTML = head + agentHtml(v.agent); }
+    else {
+      const stages = v.stages.map((g) => `<div class="stage"><div class="stage-name ${g.current ? "cur" : ""}"><b>${esc(g.name)}</b> ${esc(g.note)}</div>` + g.rows.map((r) =>
+        `<div class="agent-row st-${r.st}" data-open="${r.n}" title="Open ${esc(r.name)}">${glyph(r.st)}<span class="ar-name">${esc(r.name)}</span><span class="ar-model">${esc(r.model || "")}</span><span class="ar-time">${esc(r.time || "")}</span><span class="ar-cost">${esc(r.cost || "")}</span>` +
+        `<span class="ar-act">${esc(r.act)}</span>${r.st === "wait" || r.st === "skip" ? "" : `<span class="ar-bar"><i style="width:${r.pct}%"></i></span>`}` +
+        (!v.over && (r.canRetry || (r.canSkip && r.st !== "wait")) ? `<span class="ar-acts">${r.canRetry ? `<button type="button" class="link" data-act="retry" data-n="${r.n}">Retry</button>` : ""}${r.canSkip && r.st !== "wait" ? `<button type="button" class="link" data-act="skip" data-n="${r.n}">Skip</button>` : ""}</span>` : "") + `</div>`).join("") + `</div>`).join("");
+      const feed = v.feed.length ? `<details class="feed" ${team.feedOpen === false ? "" : "open"}><summary>Live <span class="muted">newest first</span></summary>${v.feed.slice(0, 30).map((f) => `<div class="fe"><span class="fe-t">${esc(f.t)}</span><div><b class="tone-${esc(f.whoTone || "")}">${esc(f.who)}</b> ${esc(f.what)}${f.quote ? `<div class="fe-q">${esc(f.quote)}</div>` : ""}</div></div>`).join("")}</details>` : "";
+      team.card.innerHTML = head + stages + feed;
+    }
+    if (keep) log.scrollTop = log.scrollHeight;
+  }
+  function agentHtml(a) {
+    const steps = a.steps.map((s) => `<div class="as-step ${s.st}">${s.st === "done" ? "✓" : s.st === "work" ? "◐" : "○"} ${esc(s.l)}</div>`).join("");
+    const body = [];
+    let para = [];
+    const flush = () => { if (para.length) body.push(`<div class="msg-ai">${markdown(para.join("\n"))}</div>`); para = []; };
+    for (const e of a.log) {
+      if (e.k === "text") { para.push(e.line); continue; }
+      if (e.k === "gap") { flush(); continue; }
+      flush();
+      if (e.k === "brief") continue;
+      if (e.k === "step") body.push(`<div class="step"><span class="ic">${iconFor(e.verb || "")}</span><b>${esc(e.verb)}</b><span class="arg">${pathLink(e.arg || "")}</span></div>`);
+      else if (e.k === "result") { if (e.text) body.push(`<div class="as-res ${esc(e.tone || "")}">└ ${esc(String(e.text).split("\n")[0])}</div>`); }
+      else if (e.k === "diff") body.push(`<div class="as-diff"><span class="ic">${I.edit}</span><b>${e.created ? "Create" : "Edit"}</b> ${pathLink(e.path)} <span class="plus">+${e.added}</span> <span class="minus">−${e.removed}</span></div>`);
+      else if (e.k === "you") body.push(`<div class="as-you">› <b>you</b> ${esc(e.text)} <span class="${e.read ? "ok" : "muted"}">${e.read ? "✓ read" : "· read after its current step"}</span></div>`);
+      else if (e.k === "note" || e.k === "error") body.push(`<div class="note ${e.k === "error" ? "error" : ""}">${esc(e.text)}</div>`);
+    }
+    flush();
+    return `<div class="agent-view"><div class="av-top"><button type="button" class="link" data-close>← Team</button>` +
+      `${a.state === "working" ? `<button type="button" class="link" data-act="pause" data-n="${a.n}">${a.paused ? "Resume" : "Pause"}</button>` : ""}${a.canRetry ? `<button type="button" class="link" data-act="retry" data-n="${a.n}">Restart</button>` : ""}${a.canSkip ? `<button type="button" class="link" data-act="skip" data-n="${a.n}">Skip</button>` : ""}</div>` +
+      `<div class="av-name"><span class="badge">${a.n}</span><b>${esc(a.name)}</b> <span class="muted">${esc(a.where)}</span></div><div class="muted av-desc">${esc(a.desc)}</div>` +
+      `<div class="av-stats">${a.stats.map(([v, l]) => `<div><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join("")}</div>` +
+      (steps ? `<div class="av-sec">ITS STEPS</div>${steps}` : "") +
+      `<div class="av-sec">CAN TOUCH</div>${a.touch.map(([w, h]) => `<div class="av-touch"><span>${esc(w)}</span><span class="muted">${esc(h)}</span></div>`).join("")}` +
+      (a.waiting.length ? `<div class="av-sec">WAITING ON IT</div><div class="muted">${a.waiting.map((n) => `○ ${esc(n)}`).join("  ")}</div>` : "") +
+      `<div class="av-log">${body.join("")}</div></div>`;
+  }
+  log.addEventListener("click", (e) => {
+    if (!team || !team.card.contains(e.target)) return;
+    const act = e.target.closest("[data-act]");
+    if (act) { e.stopPropagation(); return vscode.postMessage({ type: "teamAction", action: act.dataset.act, n: Number(act.dataset.n) }); }
+    if (e.target.closest("[data-close]")) { team.open = 0; vscode.postMessage({ type: "teamAction", action: "close" }); return; }
+    const row = e.target.closest("[data-open]");
+    if (row && !team.over) { team.open = Number(row.dataset.open); vscode.postMessage({ type: "teamAction", action: "open", n: team.open }); }
+    const f = e.target.closest("details.feed > summary");
+    if (f) team.feedOpen = !f.parentElement.open;
+  });
+  const teamLive = () => !!team && !team.over && busy;
+
+  // the plan card while yAI works: its steps, ticked off as it goes
+  function planCard(plan) {
+    const box = $("plan");
+    if (!plan || !plan.steps || !plan.steps.length) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = plan.steps.map((s, i) => `<div class="pl ${i < plan.done ? "done" : i === plan.done ? "now" : ""}">${i < plan.done ? "✓" : i === plan.done ? "◐" : "○"} ${esc(s)}</div>`).join("");
+  }
+  function setPlaceholder() {
+    input.placeholder = !busy ? "Ask yAI Code…" : teamLive() ? (team.open && team.view.agent ? `Message ${team.view.agent.name} directly…` : "Add a note for the whole team…") : "Add a note while yAI works… (read after this step)";
+  }
+
   // ---------- the question card ----------
   function ask(ev) {
     const box = $("ask");
@@ -176,6 +323,7 @@
     $("send").classList.toggle("stop", b);
     $("status").hidden = !b;
     if (!b) { $("statusText").textContent = ""; step?.querySelector(".ic")?.classList.remove("spin"); }
+    setPlaceholder();
   }
   function setInfo(ev) {
     if (ev.models) $("model").innerHTML = ev.models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
@@ -208,9 +356,13 @@
       case "busy": setBusy(true); statusBits = {}; status({ text: "thinking" }); break;
       case "status": status(ev); break;
       case "ask": ask(ev); break;
+      case "team-pick": teamPick(ev); break;
+      case "team": teamBoard(ev.view); break;
+      case "progress": planCard(ev.plan); break;
       case "done": {
         const worked = busy; // a mode or model change also sends "done"
         setBusy(false);
+        planCard(null);
         setInfo(ev);
         if (worked && ev.stats && turn && turn.childElementCount) add(esc(ev.stats), "stats");
         text = step = null;
@@ -227,6 +379,8 @@
         break;
       case "clear":
         log.innerHTML = emptyHtml;
+        team = null;
+        planCard(null);
         if ($("who")) $("who").textContent = whoText;
         turn = text = step = null;
         $("ask").hidden = true;
@@ -241,19 +395,31 @@
   function submit(t) {
     const msg = (t ?? input.value).trim();
     if (!msg) return;
-    if (busy) return;
+    // while yAI works, what you send is a note it reads after its current step: for the team (or the agent you
+    // opened) during /team, else for yAI itself
+    if (busy) {
+      if (teamLive()) vscode.postMessage({ type: "teamAction", action: "note", n: team.open || 0, text: msg });
+      else { vscode.postMessage({ type: "note", text: msg }); add(`› <b>you</b> ${esc(msg)} <span class="muted">· read after this step</span>`, "note you"); }
+      input.value = "";
+      grow();
+      return;
+    }
     userMsg(msg);
     vscode.postMessage({ type: "prompt", text: msg });
     input.value = "";
     grow();
   }
   function grow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 200) + "px"; }
-  input.addEventListener("input", grow);
+  input.addEventListener("input", () => {
+    grow();
+    // while busy: the button sends what you typed as a note, or stops yAI when the box is empty
+    if (busy) { const note = !!input.value.trim(); $("send").innerHTML = note ? I.send : I.stop; $("send").classList.toggle("stop", !note); $("send").title = note ? "Send as a note (Enter)" : "Stop (Esc)"; }
+  });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     if (e.key === "Escape" && busy) vscode.postMessage({ type: "stop" });
   });
-  $("send").onclick = () => (busy ? vscode.postMessage({ type: "stop" }) : submit());
+  $("send").onclick = () => (busy && !input.value.trim() ? vscode.postMessage({ type: "stop" }) : submit());
   $("model").onchange = () => vscode.postMessage({ type: "model", id: $("model").value });
   $("modes").onclick = (e) => { const b = e.target.closest("button"); if (b) vscode.postMessage({ type: "mode", mode: b.dataset.mode }); };
   log.addEventListener("click", (e) => {
