@@ -126,7 +126,7 @@ module.exports = function create(d) {
     const out = [];
     let line = "";
     for (const w of String(s).split(/\s+/)) {
-      if (line && (line + " " + w).length > n) { out.push(line); line = w; } else line = line ? line + " " + w : w;
+      if (line && (line + " " + w).replace(/\*\*|`/g, "").length > n) { out.push(line); line = w; } else line = line ? line + " " + w : w;
     }
     if (line) out.push(line);
     return out;
@@ -514,7 +514,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_TRIM_TOKENS: "48000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: root, env: { ...process.env, YAI_NO_MCP: "1", YAI_THEME: "dark", YAI_MAX_STEPS: a.readOnly ? "50" : "100", YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: "48000", ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -585,6 +585,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // One row of the view: a multi-line command (node -e "…" over several lines) or note must not break the row, or the
   // rows below are drawn over each other (2026-10-22).
   const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
+  // What an agent says, formatted like the main view (2026-10-22: the raw ** and backticks showed): bold, code and
+  // lists drawn, and any marker left unpaired by line wrapping dropped.
+  const md = (l) => ui.inline(String(l).replace(/^#{1,6}\s+/, "").replace(/^(\s*)[-*+]\s+/, "$1– ")).replace(/\*\*|`/g, "");
   function logLines(a, all, tick = 0) {
     const w = ui.width();
     const icon = ICON[a.state] ? ICON[a.state]() : c.accent(SPIN[tick % SPIN.length]);
@@ -598,15 +601,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     if (!a.log) return [...out, `   ${c.dim(a.state === "skipped" ? `It didn't run: ${a.step}.` : `It hasn't started yet: it starts ${a.step}.`)}`];
     const TONE = { error: c.red, warn: c.yellow };
     // what the agent says is set off by one blank line; steps in a row stay together, and empty lines are dropped
-    let gap = false;
+    let gap = false, fence = false;
     const blank = () => { if (out[out.length - 1] !== "") out.push(""); };
     for (const e of a.log) {
       if (e.k === "brief") out.push(`   ${c.faint("Its part:")} ${c.dim(clip(row1(e.text), w - 14))}`, "");
       else if (e.k === "gap") gap = true;
       else if (e.k === "text") {
         if (!e.line.trim()) continue;
+        if (/^\s*```/.test(e.line)) { fence = !fence; continue; }
         if (gap) { blank(); gap = false; }
-        for (const l of wrapText(e.line, w - 4)) out.push(`   ${c.ink(l)}`);
+        for (const l of wrapText(e.line, w - 4)) out.push(`   ${fence ? c.code(l) : c.ink(md(l))}`);
       }
       else if (e.k === "step") {
         if (gap && out[out.length - 1]?.startsWith("   ") && !/└/.test(out[out.length - 1])) blank();
@@ -1004,8 +1008,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const said = a.text.join("\n").trim() || a.error || "";
       // a builder's report shows its last lines; the others' reports are shown whole (up to 40 lines), wrapped, without the VERDICT line
       const lines = said.split("\n").filter((x) => x.trim() && !/^\W*VERDICT:/i.test(x.trim()));
-      if (a.role) for (const l of lines.slice(0, 40)) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(w)}`);
-      else for (const l of lines.slice(-8)) print(`     ${c.dim(clip(l, ui.width() - 6))}`);
+      if (a.role) for (const l of lines.slice(0, 40).filter((x) => !/^\s*```/.test(x))) for (const w of wrapText(l, ui.width() - 6)) print(`     ${c.ink(md(w))}`);
+      else for (const l of lines.slice(-8).filter((x) => !/^\s*```/.test(x))) print(`     ${c.dim(md(clip(l, ui.width() - 6)))}`);
       if (a.recheck) {
         print("");
         print(`     ${c.bold(c.ink("Re-run by yAI"))} ${c.faint("· the tests and the page after the fixer, to check its verdict")}`);

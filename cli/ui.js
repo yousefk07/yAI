@@ -566,7 +566,7 @@ function resetSections() {
 }
 
 module.exports = {
-  c, print, spinner, setSink, markdownWriter, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
+  c, print, spinner, setSink, markdownWriter, inline, textWidth, userLine, toolHeader, toolResult, cancelRow, note, diffBox, choices, lineDiff,
   welcome, footer, frame, setLive, clearLive, pad, vis, clip, setScreen, setTap, get screen() { return full() ? screen : null; }, resetSections, rlOutput, stripAnsi, columns, middle, THEMES, setTheme, resetTerminal, selectLines, rawPrint, width,
   get themeKey() { return themeKey; },
 };
