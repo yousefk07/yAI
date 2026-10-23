@@ -56,6 +56,7 @@ const STARTUP_FOCUS = require("./focus").startup(process.argv);
 // ---------- state ----------
 const root = path.resolve(process.cwd());
 const ctx = T.makeContext(root);
+ctx.interrupted = () => state.interrupted; // crew_wait stops waiting when the agent is stopped
 const state = {
   pasted: [], // clipboard images pasted this session: [image N] is pasted[N - 1]
   pastedText: [], // long or multi-line pastes: [Pasted text #N +K lines] is pastedText[N - 1]
@@ -526,7 +527,7 @@ async function askForm(questions) {
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
   ["Session", [["/clear", "start a new conversation"], ["/resume", "pick an earlier conversation"], ["/compact", "summarise (/compact <focus>)"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
-  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/team", "agents split the work"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
+  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/team", "agents split the work"], ["/crew", "one builder + helpers"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
   ["Look & make", [["/clone", "rebuild a page from a screenshot"], ["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
   ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"], ["/remote", "take tasks from your phone"]]],
@@ -712,7 +713,9 @@ const TEAM_AGENT = !!process.env.YAI_TEAM_AGENT;
 // (connected services are allowed since 2026-10-22, read-only ones only: see the service tool)
 const TEAM_SKIP = new Set(["ask_user"]);
 const TEAM_ONLY = new Set(["team_say"]); // tools only a /team agent has (the team chat)
-const toolAllowed = (name) => (TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
+// /crew's main builder (YAI_CREW_LEAD) also commissions helpers and waits for them
+const CREW_LEAD = !!process.env.YAI_CREW_LEAD, CREW_ONLY = new Set(["commission", "crew_wait"]);
+const toolAllowed = (name) => (CREW_ONLY.has(name) ? CREW_LEAD : TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
@@ -2109,6 +2112,7 @@ async function runAgent(content) {
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result
+      if (ctx.crew?.reports.length) pushUser(ctx.crew.reports.splice(0).map((x) => `Your helper "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + (ctx.crew.open.size ? `\nStill working: ${[...ctx.crew.open].join(", ")}.` : "\nNo helper is working now."));
       if (state.chat?.length) pushUser(`Team chat, from the other agents:\n${state.chat.splice(0).map((m) => `- ${m}`).join("\n")}\nReply with team_say only if it needs an answer from you.`);
       if (state.notes?.length) {
         const n = state.notes.length;
@@ -2414,6 +2418,7 @@ const HELP = [
   ["/look [url|file] [focus]", "Screenshot the page (desktop + phone) and get a design review"],
   ["/showcase [url|file]", "Record a demo video of your page into yai-media/"],
   ["/team <task>", "A lead splits the task; 2 to 4 agents do the parts at the same time, each on its own files"],
+  ["/crew <task>", "One main builder builds it and hands separate jobs to helpers as it goes; the checks run after it"],
   ["/connections", "Services connected on the website (GitHub, LEARN, weather, maps, papers…)"],
   ["/focus [name|off]", "Keep a knowledge pack (~/.yai/packs/<name>.md) in every message; /<name> is a shortcut, yai <name> starts there"],
   ["/pr [note]", "Push this branch and open a GitHub pull request written from the diff"],
@@ -2431,7 +2436,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/connections", "/pr", "/issues", "/deploy", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/crew", "/connections", "/pr", "/issues", "/deploy", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 // The suggestions while a /command is typed (v2): a plain title, and a line saying what it does or what's on now.
 function COMMAND_INFO() {
   const pct = contextPercent();
@@ -2450,6 +2455,7 @@ function COMMAND_INFO() {
     "/commit": ["Commit with a message", "I write the message from the changes"],
     "/fix": ["Make the tests pass", "run them and fix what fails"],
     "/team": ["Split the work between agents", "2 to 4 work at the same time"],
+    "/crew": ["One builder with helpers", "it hands out side jobs as it goes"],
     "/deploy": ["Deploy this folder", "a Vercel preview link (or /deploy prod)"],
     "/pr": ["Open a pull request", "push the branch, I write the description"],
     "/issues": ["Work on a GitHub issue", "pick one of this repo's open issues"],
@@ -2854,6 +2860,8 @@ async function command(line) {
       return X.toggleDuo(arg);
     case "/team":
       return TEAM.team(arg);
+    case "/crew":
+      return TEAM.crew(arg);
     case "/connections":
       return CONN.connections();
     case "/focus":
@@ -2967,7 +2975,7 @@ async function handleInput(input) {
   // A long paste stands in the prompt as [Pasted text #N]; a pasted "/team …" (2026-10-22) is still a command, and so
   // is "/team " followed by a paste. /team's task may be pasted over several lines.
   const pasted = text.replace(/\[Pasted text #(\d+) \+\d+ lines?\]/g, (m, n) => state.pastedText[Number(n) - 1] ?? m).trim();
-  if (pasted !== text && /^\/[a-z?]+(\s|$)/i.test(pasted)) text = /^\/team\s/i.test(pasted) ? pasted.replace(/\s*\n\s*/g, " ") : pasted;
+  if (pasted !== text && /^\/[a-z?]+(\s|$)/i.test(pasted)) text = /^\/(team|crew)\s/i.test(pasted) ? pasted.replace(/\s*\n\s*/g, " ") : pasted;
   try {
     if (text.startsWith("/") && !text.includes("\n") && /^\/[a-z?]+(\s|$)/i.test(text)) await command(text);
     else if (text.startsWith("!")) await shellCommand(text.slice(1).trim());
@@ -3233,7 +3241,11 @@ async function stdioMode() {
       send({ type: "busy" });
       try {
         if (job.type === "command") await command(job.text);
-        else await runAgent(await expandMentions(job.text));
+        else {
+          // /crew: helpers' reports that came while the main builder was idle open its next turn
+          const waiting = ctx.crew?.reports.length ? ctx.crew.reports.splice(0).map((x) => `Your helper "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + "\n\n" : "";
+          await runAgent(waiting + (await expandMentions(job.text)));
+        }
       } catch (err) {
         spinner.stop();
         send({ type: "error", message: err.message });
@@ -3265,6 +3277,7 @@ async function stdioMode() {
     // from the /team board: a note read with the agent's next step result, and pause / resume between steps
     else if (msg.type === "note" && String(msg.text || "").trim()) (state.notes ||= []).push(String(msg.text).slice(0, 2000));
     // a message on the team chat from another agent (the board passes it on)
+    else if (msg.type === "crew" && msg.name) { ctx.crew = ctx.crew || { open: new Set(), reports: [] }; ctx.crew.open.delete(String(msg.name)); ctx.crew.reports.push({ name: String(msg.name), report: String(msg.report || "(no report)").slice(0, 4000) }); }
     else if (msg.type === "chat" && String(msg.text || "").trim()) (state.chat ||= []).push(`${String(msg.from || "an agent").slice(0, 40)}${msg.to ? " (to you)" : ""}: ${String(msg.text).slice(0, 600)}`);
     else if (msg.type === "pause") state.paused = true;
     else if (msg.type === "resume") state.paused = false;

@@ -382,6 +382,48 @@ const tools = {
       return to ? `Sent to ${to}. A reply, if any, reaches you after your next step.` : "Sent to the team. Replies, if any, reach you after your next step.";
     },
   },
+  // /crew (2026-10-22): the main builder hands separate jobs to helpers that work at the same time. ctx.crew is
+  // { open: Set of helper names, reports: [{ name, report }] }; the board fills in the reports.
+  commission: {
+    params: ["name", "task", "files"],
+    describe: "Hand a separate, well-defined job to a helper agent that works at the same time as you (for example: level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, research). <name>: 1-3 words. <task>: everything it needs to do the job alone: what to make, the exact names and interface other code will use, the data format, and how to check it. <files>: the files it owns (it may only create and change those), one per line. It returns at once; the helper's report reaches you after one of your later steps, or use crew_wait.",
+    readOnly: true,
+    async run(ctx, a) {
+      const name = String(a.name || "").replace(/\s+/g, " ").trim().slice(0, 30);
+      const task = String(a.task || "").trim();
+      if (!name || task.length < 20) throw new ToolError("Give the helper a <name> and a <task> with everything it needs to do the job alone.");
+      const files = String(a.files || "").split(/[\n,]+/).map((f) => f.trim().replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean).slice(0, 20);
+      ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+      if (ctx.crew.open.has(name)) throw new ToolError(`A helper called "${name}" is still working. Give the new one another name.`);
+      ctx.crew.open.add(name);
+      toolHeader("Commission", `${name}: ${task.replace(/\s+/g, " ").slice(0, 70)}`);
+      require("./ui").event({ type: "commission", name, task: task.slice(0, 6000), files });
+      toolResult("helper started");
+      return `Helper "${name}" is on it${files.length ? ` (it owns ${files.join(", ")})` : ""}. Carry on with your own work: its report reaches you after one of your later steps, or call crew_wait when you need it.`;
+    },
+  },
+  crew_wait: {
+    params: ["name", "minutes"],
+    describe: "Wait for your helpers to finish and get their reports: one helper by <name>, or all of them when no name is given. Optional <minutes> to wait at most (default 10). Use it when you need a helper's work before you can go on, and always before you finish.",
+    readOnly: true,
+    async run(ctx, a) {
+      ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+      const name = String(a.name || "").trim();
+      const until = Date.now() + Math.min(Math.max(Number(a.minutes) || 10, 1), 30) * 60000;
+      const waiting = () => (name ? ctx.crew.open.has(name) : ctx.crew.open.size > 0);
+      toolHeader("Wait for helpers", name || [...ctx.crew.open].join(", ") || "none working");
+      spinner.start(`waiting for ${name || "the helpers"}`);
+      try { while (waiting() && Date.now() < until && !ctx.interrupted?.()) await new Promise((r) => setTimeout(r, 1000)); } finally { spinner.stop(); }
+      const got = ctx.crew.reports.splice(0);
+      toolResult(got.length ? `${got.length} report${got.length === 1 ? "" : "s"}` : waiting() ? "still working" : "nothing new");
+      const still = [...ctx.crew.open];
+      return [
+        ...got.map((x) => `## Helper "${x.name}" reported\n${x.report}`),
+        got.length ? "" : "No new reports.",
+        still.length ? `Still working: ${still.join(", ")}.` : "No helper is working now.",
+      ].join("\n");
+    },
+  },
   check_page: {
     params: ["path", "keys", "look_for"],
     describe: "Open the web page (or game) in a real browser as it is right now, press its start button, and report: errors, a frozen page, the frame rate, the buttons and text on it, and a description of what's on screen. " +
@@ -407,10 +449,16 @@ const tools = {
       scan(path.dirname(abs), 0);
       const stamp = `${abs}|${newest}|${count}|${String(a.keys || "")}`;
       ctx.pageChecks = ctx.pageChecks || { n: 0, last: "" };
-      if (ctx.pageChecks.last === stamp) {
+      // (a) a /team agent: unchanged means no edit of its own since its last check (with the same keys), for 3 min,
+      // whatever the other agents save (2026-10-22: with 6 builders, someone was always saving a file)
+      const mine = `${abs}|${ctx.lastEditAt || 0}|${String(a.keys || "")}`;
+      const team = !!process.env.YAI_TEAM_AGENT;
+      if (team ? ctx.pageChecks.mine === mine && Date.now() - (ctx.pageChecks.at || 0) < 180000 : ctx.pageChecks.last === stamp) {
         toolHeader("Check page", rel(ctx, abs));
         toolResult("nothing changed · not run");
-        return "Nothing in the page's files has changed since your last check_page (with the same keys), so it wasn't opened again: its result is further up. Change something first, or carry on.";
+        return team
+          ? "You haven't changed anything since your last check_page (with the same keys), so it wasn't opened again: its result is further up. Make your next change first, or carry on; the other agents' work will show at your next check."
+          : "Nothing in the page's files has changed since your last check_page (with the same keys), so it wasn't opened again: its result is further up. Change something first, or carry on.";
       }
       // 3. a builder (its own files listed) gets the screen described on its first check, and when it asks with <look_for>;
       // other checks still report errors, freezes and frame rate (fast, and they don't use the image model)
@@ -421,14 +469,22 @@ const tools = {
       spinner.start("opening it in a browser");
       let r;
       try {
-        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe, saveTo: path.join(ctx.root, "yai-media", `check-page-${Date.now()}.jpg`) });
+        const hashOf = (img) => require("crypto").createHash("sha1").update(img).digest("hex").slice(0, 12);
+        const seenBefore = (img) => (ctx.pageChecks.hash && hashOf(img) === ctx.pageChecks.hash ? "SAME SCREEN: the screenshot is exactly the same as at your last check_page, pixel for pixel: your changes since then don't show on screen yet (or the page didn't get past a menu)." : "");
+        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe, seenBefore });
+        // stored once per picture: the file is named after its content (2026-10-22: one screen was saved 13 times)
+        if (r.img) {
+          const h = hashOf(r.img), file = path.join(ctx.root, "yai-media", `check-page-${h}.jpg`);
+          ctx.pageChecks.hash = h;
+          try { fs.mkdirSync(path.dirname(file), { recursive: true }); if (!fs.existsSync(file)) fs.writeFileSync(file, r.img); r.lines.push(`Screenshot: ${rel(ctx, file)}`); } catch {}
+        }
       } catch (err) {
         throw new ToolError(`Couldn't open it: ${err.message}`);
       } finally {
         spinner.stop();
       }
-      toolResult(r.frozen ? "frozen" : /Errors in the browser/.test(r.lines.join("\n")) ? "errors" : "checked", { color: r.frozen ? c.red : undefined });
-      ctx.pageChecks.last = stamp;
+      toolResult(r.frozen ? "frozen" : r.blank ? "blank screen" : /^SAME SCREEN/m.test(r.lines.join("\n")) ? "same screen as last time" : /Errors in the browser/.test(r.lines.join("\n")) ? "errors" : "checked", { color: r.frozen ? c.red : undefined });
+      ctx.pageChecks.last = stamp; ctx.pageChecks.mine = mine; ctx.pageChecks.at = Date.now();
       if (ctx.describeImage && !describe) r.lines.push("(No screen description this time, to save time: give <look_for> on your final check to have the screen described.)");
       return r.lines.join("\n");
     },
@@ -540,6 +596,7 @@ async function startBackground(ctx, command) {
 
 // Shows an edit's diff and writes it to disk.
 function applyEdit(ctx, plan) {
+  ctx.lastEditAt = Date.now(); // check_page: a new check needs a change of the agent's own
   fs.mkdirSync(path.dirname(plan.abs), { recursive: true });
   fs.writeFileSync(plan.abs, plan.after);
   ctx.readFiles.add(plan.abs);

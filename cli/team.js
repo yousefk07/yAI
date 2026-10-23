@@ -100,7 +100,7 @@ const ROLES = [
   { key: "researcher", phase: 0.2, verdict: false, on: (t, n) => n >= 4, desc: "searches the web for what a great version needs and writes TEAM_SPEC.md, the checklist everyone works to" },
   { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
-  { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|look|beautiful|polish|pretty|modern|sleek|styl/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
+  { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|looks? (good|great|nice|professional|clean)|beautiful|polish|pretty|modern|sleek|stylish|styling/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
   // one careful QA agent by default (2026-10-22): integration, tester and reviewer each read the whole project and found
   // the same problems; they stay available on their own (e for everything, or tick them)
   { key: "qa", phase: 2, on: true, desc: "one careful check of everything: the pieces fit, bugs, and tests for the main behaviours" },
@@ -183,6 +183,29 @@ module.exports = function create(d) {
     return agents;
   }
 
+  // /crew's main builder: it owns the whole project and builds it itself, the way a single yAI session does (which beat
+  // a team of builders working apart, 2026-10-22), handing separate jobs to helpers when it likes
+  function crewBrief(task, me, all) {
+    return [
+      `You are the main builder of this project: you own all of it, the design, the code and the result. The task: ${task}`,
+      ...(rnd(me) > 1 ? ["", `This is round ${rnd(me)}: the app already exists. Improve it as described below; read what you need first, keep what works, and check it as you go.`, "", `What to improve:\n${me.task}`] : []),
+      "", "Build it yourself, step by step, as a strong engineer would: get a first version running early, look at it with check_page, then improve it feature by feature, checking as you go. Keep the core yourself: the main loop, the rendering, and how the pieces connect.",
+      `You can hand separate, well-defined jobs to helpers with the commission tool, when you like: level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, or research. Give each one everything it needs in <task> (what to make, the exact names and interface, the data format) and list the files it owns. Helpers work at the same time as you (at most ${crewMax} at once); their reports reach you after your steps. Don't commission what you could do in a few steps yourself, and don't sit idle while they work.`,
+      "Before you finish: call crew_wait, fit in your helpers' work, check the whole thing with check_page, and end with a short report.",
+      ...notesLines(), ...specLines(), ...chatLines(), "", CHECKS, "", RULES, "", REPORT_STYLE,
+    ].join("\n");
+  }
+  // a helper: one job, exactly as the main builder described it, in the files it was given
+  function helperBrief(task, me) {
+    return [
+      `You are a helper. The main builder of this project commissioned you for one job; the overall task is: ${clip(task, 1500)}`,
+      "", `Your job, as the main builder described it:\n${me.task}`,
+      "", me.files.length ? `Files you own (create and change only these; read anything else you need): ${me.files.join(", ")}.` : "Change only what your job needs; read anything else you need.",
+      "", "Do exactly this job, with the names, interface and formats it gives. Check your work (a syntax check; check_page only if your job shows on screen). If something in the job is unclear, make the most sensible choice and say so in your report.",
+      "", CHECKS, "", RULES,
+      "When you're done, end with a short report: what you made, the names other code should call, and anything left undone.",
+    ].join("\n");
+  }
   function brief(task, me, all) {
     const others = all.filter((a) => a !== me && !a.role);
     const roles = all.filter((a) => a.role).map((a) => a.role);
@@ -681,7 +704,64 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       all.push({ name: rnd(a) > 1 ? `re-check 2 · r${rnd(a)}` : "re-check 2", task: "yAI re-runs the tests and the page, and plays it, after the second fix", files: [], role: "recheck", round: rnd(a), phase: base + 3.6, readOnly: true, internal: true, hasVerdict: true, state: "waiting", step: "after fixer 2", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] });
       all.sort((x, y) => (x.phase || 1) - (y.phase || 1));
       say(a.name, `${failed.length} check${failed.length === 1 ? "" : "s"} still fail → fixer 2`, "bad", failed[0].lines.slice(-1)[0] || failed[0].name);
-    } else finished(a, all);
+    } else { letGoKept(all, rnd(a)); finished(a, all); }
+    d.wake();
+  }
+
+  // /crew: the main builder's helpers still at work
+  const crewOpen = (lead, all) => all.filter((x) => x.helperOf === lead.name && rnd(x) === rnd(lead) && ["waiting", "starting", "working"].includes(x.state));
+  function commissionHelper(lead, e, task, all) {
+    const name = row1(e.name).slice(0, 30), open = crewOpen(lead, all), total = all.filter((x) => x.helperOf === lead.name).length;
+    if (state.interrupted || open.length >= crewMax || total >= 16) {
+      const why = state.interrupted ? "the team was stopped" : open.length >= crewMax ? `${crewMax} helpers are already working: do it yourself, or wait for one with crew_wait` : "16 helpers is the most for one build";
+      lead.send({ type: "crew", name, report: `(not started: ${why})` });
+      return;
+    }
+    const files = (Array.isArray(e.files) ? e.files : []).map((p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "")).filter((p) => p && !p.includes(".."));
+    const h = { name: clip(`helper · ${name}`, 28), crewName: name, task: String(e.task || "").trim(), files, helperOf: lead.name, round: lead.round, phase: lead.phase, model: crewHelperModel || lead.model, readOnly: false, hasVerdict: false, state: "waiting", step: "starting", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] };
+    // on the board, under the main builder and its other helpers
+    const after = Math.max(...all.map((x, i) => (x === lead || x.helperOf === lead.name ? i : -1)));
+    all.splice(after + 1, 0, h);
+    say(lead.name, `commissioned ${h.name}`, "acc", clip(row1(h.task), 220));
+    startAgent(h, task, all);
+    d.wake();
+  }
+  function reportToLead(h, all) {
+    const lead = all.find((x) => x.crewLead && x.name === h.helperOf && rnd(x) === rnd(h));
+    if (!lead?.send) return;
+    const report = [`(${h.state}${h.error ? `: ${row1(h.error)}` : ""}; files changed: ${h.changed.size ? [...h.changed].join(", ") : "none"})`, (h.text.join("\n").trim() || "(no report)").slice(-3000)].join("\n");
+    lead.send({ type: "crew", name: h.crewName, report });
+    // the main builder was only waiting for them: it carries on, to fit their work in
+    if (lead.awaitingCrew && !crewOpen(lead, all).length) {
+      Object.assign(lead, { awaitingCrew: false, step: "fitting in its helpers' work", lastMove: Date.now() });
+      lead.send({ type: "prompt", text: "All your helpers have finished; their reports are above. Fit their work in, check the whole thing with check_page, and end with your short report." });
+    }
+  }
+
+  // A first fixer kept open for fixer 2 is closed when it isn't needed (the re-check passed, or the team ends).
+  function letGoKept(all, round) {
+    for (const x of all) if (x.kept && (round == null || rnd(x) === round)) { try { x.kept.child.stdin.end(); } catch {} x.kept = null; }
+  }
+  // Fixer 2 carries on in fixer 1's conversation: everything it read and changed is still there (and cached), so it gets
+  // only what yAI's re-check still found failing. Its row keeps its own time, cost and steps.
+  function continueFixer(prev, a, all) {
+    const { child, send } = prev.kept;
+    prev.kept = null;
+    const sub = (u) => (u ? { new: -u.new, cached: -u.cached, out: -u.out, real: -(u.real || 0), steps: -(u.steps || 0) } : null);
+    Object.assign(a, {
+      state: "working", started: Date.now(), step: "carrying on from fixer 1", lastMove: Date.now(), changed: new Set(), created: new Set(), text: [], asks: [], flag: "", error: "",
+      // the process's cost and tokens so far were fixer 1's
+      cost: 0, costPrev: -((prev.cost || 0) - (prev.costPrev || 0)), usage: null, usagePrev: sub(prev.usage),
+      eff: { read: 0, edit: 0, run: 0, check: 0, search: 0, other: 0, refused: 0 }, watchedAt: 0, watchNotes: 0, watchStopped: false, planSeen: 0,
+      log: [{ k: "brief", text: `${a.task} (carrying on in fixer 1's conversation)` }], child, send,
+    });
+    child.retarget(a);
+    const failing = all.filter((x) => x.role === "recheck" && rnd(x) === rnd(a) && x.state === "done" && BAD.test(x.verdict || "")).flatMap((x) => x.text);
+    send({ type: "prompt", text: [
+      "yAI re-checked your fixes itself (the tests, the page, and playing it), and these still fail:", ...failing, "",
+      "Carry on from where you left off. You already know the project and what you changed: don't re-read files unless you need lines you haven't seen or they changed since. Fix exactly what still fails, re-run those checks to show they pass, and end with your report and the VERDICT line (FIXED or PARTLY) as before.",
+    ].join("\n") });
+    say(a.name, "carries on from fixer 1 · same conversation, nothing re-read", "acc");
     d.wake();
   }
 
@@ -789,10 +869,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
       cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: "100000", // no step limit: the watcher redirects or stops an agent that wanders (2026-10-22, Yousef)
-      YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) ? "80000" : "48000", ...(!a.role && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) || a.crewLead ? "80000" : "48000", ...(a.crewLead && { YAI_CREW_LEAD: "1" }), ...(!a.role && !a.crewLead && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
+    // fixer 2 carries on in fixer 1's process: its events then belong to fixer 2's row (continueFixer)
+    child.retarget = (x) => { a = x; };
     let err = "";
     child.stderr.on("data", (b) => (err += b).length > 4000 && (err = err.slice(-4000)));
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
@@ -803,7 +885,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         const want = a.model || state.model; // the model picked for this agent
         if (e.model !== want) a.send({ type: "model", id: want });
-        a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
+        a.send({ type: "prompt", text: a.crewLead ? crewBrief(task, a, all) : a.helperOf ? helperBrief(task, a) : a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
       else if (e.type === "status" && e.text) { a.step = String(e.text); a.lastMove = Date.now(); }
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
@@ -811,6 +893,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
       else if (e.type === "progress") { if (e.usage) a.usage = e.usage; a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
+      else if (e.type === "commission" && a.crewLead) commissionHelper(a, e, task, all);
       else if (e.type === "step") { const k = effKind(e.verb); if (a.eff) a.eff[k]++; a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
       else if (e.type === "diff" && e.path) { a.lastMove = Date.now(); a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
@@ -852,11 +935,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           }, 5000 * a.netRetries);
           return;
         }
+        if (a.crewLead && !a.error && !state.interrupted && !a.watchStopped && crewOpen(a, all).length) {
+          Object.assign(a, { awaitingCrew: true, step: `waiting for ${crewOpen(a, all).length} helper${crewOpen(a, all).length === 1 ? "" : "s"}` });
+          say(a.name, "finished its part · waiting for its helpers", "acc");
+          return d.wake();
+        }
         a.state = state.interrupted || a.watchStopped ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
-        child.stdin.end();
+        // the first fixer stays open, idle, until yAI's re-check: if it still fails, fixer 2 carries on in this same
+        // conversation instead of starting over (2026-10-22, Yousef: "fixer 2 should pick up right where fixer 1 ended")
+        if (a.role === "fixer" && !a.fixRound && a.state === "done") a.kept = { child, send: a.send };
+        else child.stdin.end();
         finished(a, all);
+        if (a.helperOf) reportToLead(a, all);
       }
       d.wake();
     });
@@ -1073,6 +1165,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   let plannedRounds = 1, roundScores = {}, planningRound = false, planFolder = "", costCap = Infinity;
   // between rounds: { round, until, go } while the board waits for you to play it and say what to change
   let feedbackWait = null;
+  // /crew: one main builder that commissions helpers (crewMax at once), and the model the helpers use
+  let crewMode = false, crewMax = 4, crewHelperModel = "";
   // the team chat (2026-10-22): agents tell each other what affects them; { at, from, to, text }
   let chatLog = [];
   const say = (who, what, tone = "", quote = "") => {
@@ -1083,7 +1177,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   const clock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
   const STUCK_MS = 120000; // no step for two minutes
   // yAI's own rows (re-check, judge, the planner…) have their own time limits and no restart: never "stuck"
-  const stuck = (a) => a.state === "working" && !a.internal && !a.paused && Date.now() - (a.lastMove || a.started) > STUCK_MS;
+  const stuck = (a) => a.state === "working" && !a.internal && !a.paused && !a.awaitingCrew && Date.now() - (a.lastMove || a.started) > STUCK_MS;
   const money = (x) => (!x ? "" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
   const tokensOf = (n) => (!n ? "0" : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const modelShort = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
@@ -1307,13 +1401,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     for (const l of logLines(a, lastTeam).filter((l, i) => i !== 1)) print(l);
   }
 
-  async function team(arg) {
+  async function team(arg, opts = {}) {
     if (/^log\b/i.test(arg.trim())) return showLog(arg.trim().slice(3));
+    crewMode = !!opts.crew;
+    if (crewMode) { const c2 = /^([1-8])\s+([\s\S]+)$/.exec(arg.trim()); crewMax = c2 ? Number(c2[1]) : 4; if (c2) arg = c2[2]; }
     let max = MAX_AGENTS;
     const m = /^([2-8])\s+([\s\S]+)$/.exec(arg.trim());
     if (m) { max = Number(m[1]); arg = m[2]; }
     else if (/\b(as many agents|lots of agents|max(imum)? (number of )?agents|many agents|more agents)\b/i.test(arg)) max = MAX_ASKED;
     const task = arg.trim();
+    if (!task && crewMode) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> to let up to 6 helpers work at once). One main builder builds it and hands separate jobs to helpers; the checks run after it."));
     if (!task) return print(c.yellow("   Usage: /team <task>   (or /team 6 <task> for up to 6 builders, at most 8). A lead splits it, the agents work at the same time."));
     if (state.mode === "plan" || state.tutor) return print(c.yellow("   /team changes files; leave plan or tutor mode first (⇧⇥ or /tutor)."));
     // started in the home folder: the team's files (and yai-media) would land there among everything else
@@ -1330,7 +1427,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const leads = [...new Set(["deepseek-v4-pro", "deepseek-v4.1-flash"].filter(has).concat(state.model))];
     let lead = leads[0];
     let agents;
-    try {
+    if (crewMode) { agents = [{ name: "main builder", task, files: [], crewLead: true }]; contract = ""; planFolder = ""; }
+    else try {
       const ask = async (messages) => {
         for (let i = 0; ; i++) {
           try { return await X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, signal, messages })); }
@@ -1361,9 +1459,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const saved = { ...(api.cfg.team?.roles || {}) };
     // picks saved before QA existed: the three checks it replaces follow the new defaults once (2026-10-22)
     if (!("qa" in saved)) { delete saved.integration; delete saved.tester; delete saved.reviewer; }
-    const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task, agents.length) : r.on }));
+    const roles = ROLES.filter((r) => !(crewMode && ["merger", "architect", "integration"].includes(r.key))).map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task, agents.length) : r.on }));
     print("");
-    ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
+    if (crewMode) ui.note(`${c.accent("◆")} ${c.ink("One main builder builds it and hands separate jobs to helpers as it goes")} ${c.dim("· pick who checks it after")}`);
+    else ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
     for (const a of agents) if (a.files.length) print(`     ${c.accent("•")} ${c.ink(a.name)} ${c.faint(clip(a.files.join(", "), Math.max(20, ui.width() - a.name.length - 10)))}`);
     print("");
     // Each agent's model (2026-10-22): the hosted models, picked per row with ← →; the picks are remembered per role
@@ -1374,14 +1473,15 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // a tester gave no verdict), Ultra for the architect's one big design job. Each list is tried in order. They
     // replaced the picks saved before they existed once (suggestedV); after that your picks are remembered as before.
     const CHEAP = ["glm-4.7-flash", "deepseek-v4.1-flash"], MID = ["deepseek-v4.1-flash", "deepseek-v4-pro"], TOP = ["deepseek-v4-pro", "deepseek-v4.1-flash"];
-    const SUGGESTED = { qa: MID, researcher: MID, architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
+    const SUGGESTED = { main: TOP, helpers: MID, qa: MID, researcher: MID, architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
     const savedModels = api.cfg.team?.suggestedV === 1 ? api.cfg.team?.models || {} : {};
     const modelFor = (key) => [savedModels[key], ...(SUGGESTED[key] || []), state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
+    crewHelperModel = crewMode ? [savedModels.helpers, ...MID].find((id) => models.some((m) => m.id === id)) || "" : "";
     const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r, model: r.internal ? undefined : modelFor(r.key) }))] : []; };
     const rows = [
       ...group("Before the builders", (p) => p < 1),
-      { kind: "head", label: "Builders · the lead's split, at the same time" },
-      ...agents.map((a) => ({ label: a.name, desc: a.task, on: true, model: modelFor("builders") })),
+      { kind: "head", label: crewMode ? "Main builder · builds it, commissions helpers as it goes" : "Builders · the lead's split, at the same time" },
+      ...agents.map((a) => ({ label: a.name, desc: a.task, on: true, model: modelFor(crewMode ? "main" : "builders") })),
       ...group("Right after the builders", (p) => p > 1 && p < 1.6),
       ...group("yAI's own checks · in a browser, almost free", (p) => p === 1.6),
       ...group("AI checks · together, after yAI's own", (p) => p === 2),
@@ -1394,13 +1494,14 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const items = rows.filter((r) => r.kind !== "head");
     // a role's typical run: [requests, prompt in thousands of tokens, output in thousands, minutes], from real runs
     // (2026-10-22: the desktop OS team made ~15 requests an agent, 93% of each prompt cached, ~4k tokens out)
-    const PROFILE = { qa: [22, 40, 4, 3], researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
+    // main: /crew's builder, with a few helpers' worth in it
+    const PROFILE = { main: [90, 45, 20, 15], qa: [22, 40, 4, 3], researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
     const estOf = (r) => {
       if (r.role?.internal) return { usd: 0, min: 0.5 };
       // what this role really took on this model in earlier runs, when there are any (learned at the end of a run)
-      const seen = api.cfg.team?.learned?.[`${r.role?.key || "builder"}|${r.model}`];
+      const seen = api.cfg.team?.learned?.[`${r.role?.key || (crewMode ? "main" : "builder")}|${r.model}`];
       if (seen) return { usd: seen.usd, min: seen.min, seen: seen.n };
-      const [req, ctx, out, min] = PROFILE[r.role?.key || "builder"] || PROFILE.builder;
+      const [req, ctx, out, min] = PROFILE[r.role?.key || (crewMode ? "main" : "builder")] || PROFILE.builder;
       const p = state.models.find((m) => m.id === r.model)?.price || { in: 0, cached: 0, out: 0 };
       return { usd: (req * ctx * 1000 * (0.07 * (p.in || 0) + 0.93 * (p.cached ?? p.in ?? 0)) + out * 1000 * (p.out || 0)) / 1e6, min };
     };
@@ -1418,12 +1519,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       { key: "e", label: "Everything", on: () => true },
       // quality first, for a run you'll show (2026-10-22): every check that proves it works, Ultra where judgement
       // decides the result, Ultra Flash everywhere else (Lite drifted on whole-project roles)
-      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["researcher", "architect", "merger", "qa", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
+      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["researcher", "architect", "merger", "qa", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role ? (["architect", "spec"].includes(r.role.key) ? TOP : MID) : crewMode ? TOP : MID) },
     ];
     const pickModel = (list) => list.find((id) => models.some((m) => m.id === id));
     let rounds = 1; // build → judge → improve, up to this many times (+ and − in the picker; Showcase sets 3)
     const count = (p) => items.filter((r) => (r.role ? p.on(r) : r.on)).length;
-    const NOTES = { PLAN: "first", BUILD: `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
+    const NOTES = { PLAN: "first", BUILD: crewMode ? "one builder, helpers when it asks" : `${agents.length} at the same time`, JOIN: "after the builders", CHECK: "yAI's own, then AI", FIX: "only if needed" };
     // VS Code (yai --stdio): the panel shows the same picker and sends back each row's tick and model
     const pickInPanel = async () => {
       const ans = await state.pickTeamHook({
@@ -1449,7 +1550,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         const groups = STAGES.map((S) => ({ name: S.name, note: NOTES[S.name], rows: items.filter((r) => S.has(r.role ? r.role.phase : 1)) })).filter((g) => g.rows.length);
         return V.pickLines({
           title: "Pick your team", width: screenW(), sel,
-          sub: `The lead split "${clip(task, 60)}" into ${agents.length} builder job${agents.length === 1 ? "" : "s"}. Choose who else joins and which model each one uses.`,
+          sub: crewMode ? `One main builder builds "${clip(task, 60)}" and hands side jobs to helpers. Choose who checks it after, and which model each one uses.` : `The lead split "${clip(task, 60)}" into ${agents.length} builder job${agents.length === 1 ? "" : "s"}. Choose who else joins and which model each one uses.`,
           presets: PRESETS.map((p) => ({ label: p.label, count: count(p), on: items.every((r) => !r.role || !!r.on === p.on(r)) })),
           start: { n: b ? n : 0, time: `~${Math.max(1, Math.round(t.min * rounds))} min`, cost: t.usd ? `~${money(t.usd * rounds)}` : "free", parallel: b, rounds, cap: rounds > 1 ? money(Math.max(0.3, t.usd * rounds * 2)) : "", short: left != null && t.usd * rounds > left ? money(left) || "$0" : "" },
           groups: groups.map((g) => ({ ...g, rows: g.rows.map((r) => ({ n: items.indexOf(r) + 1, label: r.label, on: r.on, model: modelShort(r.model), desc: r.desc, est: estText(r), builtIn: !!r.role?.internal })) })),
@@ -1478,13 +1579,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const builderRows = items.filter((r) => !r.role);
     agents.forEach((a, i) => (a.model = builderRows[i].model));
     api.cfg.team = { ...(api.cfg.team || {}), suggestedV: 1, roles: Object.fromEntries(items.filter((r) => r.role).map((r) => [r.role.key, r.on])),
-      models: { ...savedModels, ...Object.fromEntries(items.filter((r) => r.role && r.model).map((r) => [r.role.key, r.model])), ...(builderRows[0]?.model && { builders: builderRows[0].model }) } };
+      models: { ...savedModels, ...Object.fromEntries(items.filter((r) => r.role && r.model).map((r) => [r.role.key, r.model])), ...(builderRows[0]?.model && { [crewMode ? "main" : "builders"]: builderRows[0].model }) } };
     api.save();
     agents = agents.filter((a, i) => builderRows[i].on);
     if (!agents.length) return print(c.dim("   No builders picked, so nothing ran."));
     const memberRows = items.filter((r) => r.role && r.on);
     const members = memberRows.map((r) => r.role);
-    if (agents.length === 1 && !members.length) {
+    if (agents.length === 1 && !members.length && !crewMode) { // /crew always runs on the board: its builder commissions helpers
       ui.note(`${c.accent("◆")} ${c.ink("Just one builder, so yAI does it here on its own.")}`);
       return d.runAgent(agents[0].task === task ? task : `${task}\n\n(Your part: ${agents[0].task})`);
     }
@@ -1778,10 +1879,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         list = (Array.isArray(plan.agents) ? plan.agents : []).slice(0, 6).filter((x) => x && x.task);
       } catch (err) { planner.error = err.message; }
       const seen = new Set();
+      if (crewMode && list.length) list = [{ name: "main builder", task: list.map((x) => `- ${x.name}: ${x.task}`).join("\n"), files: [] }];
       const added = list.map((x, i) => fresh({
         name: clip(String(x.name || `improve ${i + 1}`).trim(), 24), task: String(x.task).trim(), round: r + 1, phase: base + 1,
         files: (Array.isArray(x.files) ? x.files : []).map((p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "")).map((p) => (planFolder && !p.startsWith(planFolder + "/") && !require("fs").existsSync(path.join(root, p)) ? `${planFolder}/${p}` : p)).filter((p) => p && !seen.has(p) && seen.add(p)),
-        model: agents.find((a) => !a.role && rnd(a) === 1)?.model,
+        model: agents.find((a) => !a.role && !a.helperOf && rnd(a) === 1)?.model, crewLead: crewMode || undefined,
       }));
       if (added.length) {
         const like = (key) => agents.find((a) => a.role === key && rnd(a) === 1);
@@ -1875,6 +1977,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
                 if (state.interrupted) { Object.assign(a, { state: "stopped", ended: Date.now() }); return d.wake(); }
                 startAgent(a, task, agents);
               });
+            } else if (a.role === "fixer" && a.fixRound === 2) {
+              // carries on in fixer 1's conversation while that process is still open; otherwise a fresh fixer
+              const prev = agents.find((x) => x.role === "fixer" && !x.fixRound && rnd(x) === rnd(a) && x.kept);
+              if (prev && prev.kept.child.exitCode === null && !prev.kept.child.killed) continueFixer(prev, a, agents);
+              else { if (prev) letGoKept(agents, rnd(a)); startAgent(a, task, agents); }
             } else startAgent(a, task, agents);
           }
         }
@@ -1894,7 +2001,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     let watching = false;
     const watch = async () => {
       if (watching || over || state.interrupted || api.cfg.team?.watcher === false) return;
-      const busy = agents.filter((a) => a.state === "working" && !a.internal && a.log && !a.paused && a.send);
+      if (crewMode && Date.now() - (watch.last || 0) < 60000) return; // /crew: once a minute
+      watch.last = Date.now();
+      const busy = agents.filter((a) => a.state === "working" && !a.internal && a.log && !a.paused && a.send && !a.awaitingCrew);
       const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 2);
       if (!fresh.length) return;
       watching = true;
@@ -1953,7 +2062,30 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         say("yAI", `the team is waiting on ${a.name} · asked it to wrap up`, "warn");
       }
     };
-    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); watch(); } }, 20000);
+    // (e) Progress against the request while the builders work (2026-10-22: after 25 min of a Doom run the game was an
+    // empty corridor, and nobody said so until the end): every 8 min yAI opens the page, gets past its menus, and a
+    // model that can see says what's there and what's missing next to the request. It goes in the feed and to the
+    // builders still working, as a team chat message.
+    const PROGRESS_SYSTEM = "You check a game or app while it is being built. From the screenshot and the request, say in at most 4 short lines: what is visibly working, and the most important things the request asks for that are not on screen yet. Be concrete and blunt; no praise.";
+    let progressBusy = false, progressAt = Date.now();
+    const progress = async () => {
+      if (progressBusy || over || state.interrupted || Date.now() - progressAt < 480000) return;
+      const building = agents.filter((a) => !a.role && a.state === "working" && a.send);
+      const entry = entryPage(agents);
+      if (!building.length || !entry || !require("fs").existsSync(path.resolve(root, entry))) return;
+      progressBusy = true; progressAt = Date.now();
+      try {
+        const spec = (() => { try { return require("fs").readFileSync(specFile(), "utf8").slice(0, 2500); } catch { return ""; } })();
+        const describe = (img) => X.withVision((m) => X.oneShot({ model: m.id, signal: state.abort?.signal, system: PROGRESS_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: `The request: ${clip(task, 1500)}${spec ? `\n\nThe team's checklist:\n${spec}` : ""}` }, X.imagePart(img, "image/jpeg")] }] }), state.abort?.signal).then((x) => String(x?.text || "").trim());
+        const r = await require("./teamchecks").pageCheck({ entry: path.resolve(root, entry), keys: "KeyW:600", describe });
+        const seen = r.blank ? "The page still draws nothing (a single-colour screen)." : r.frozen ? "The page froze." : (r.lines.find((l) => l.startsWith("On screen")) ? r.lines.slice(r.lines.findIndex((l) => l.startsWith("On screen")) + 1).join(" ") : "");
+        if (!seen) return;
+        const text = `${secs(Date.now() - teamStarted)} in: ${row1(seen)}`;
+        say("yAI", "progress check against the request", "acc", text);
+        for (const a of agents.filter((x) => !x.role && x.state === "working" && x.send)) { a.send({ type: "chat", from: "yAI's progress check", text, to: false }); a.log.push({ k: "chat", from: "yAI's progress check", text }); }
+      } catch {} finally { progressBusy = false; }
+    };
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); watch(); progress(); } }, 20000);
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {
@@ -1998,6 +2130,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     } finally {
       // the full-window app: the board's last state goes into the conversation, where it stays
       // the panel's last board, marked as over (it stays in the conversation there)
+      letGoKept(agents); // a first fixer still kept open for fixer 2
       if (state.stdio) { over = true; viewing = null; emitBoard(true); }
       state.keyHook = null;
       state.teamKeys = null;
@@ -2103,7 +2236,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const learned = { ...(api.cfg.team?.learned || {}) };
       for (const a of agents) {
         if (a.internal || a.state !== "done" || !a.model || !a.started || !a.ended) continue;
-        const k = `${a.role || "builder"}|${a.model}`, min = (a.ended - a.started) / 60000, usd = a.cost || 0;
+        const k = `${a.role || (a.crewLead ? "main" : a.helperOf ? "helper" : "builder")}|${a.model}`, min = (a.ended - a.started) / 60000, usd = a.cost || 0;
         const o = learned[k];
         learned[k] = o ? { usd: o.usd + (usd - o.usd) / 3, min: o.min + (min - o.min) / 3, n: (o.n || 1) + 1 } : { usd, min, n: 1 };
       }
@@ -2126,5 +2259,5 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     );
   }
 
-  return { team, browserCheck, _views: { runView, agentView, V } }; // browserCheck: for trying the check on its own; _views: for testing the screens
+  return { team, crew: (arg) => team(arg, { crew: true }), browserCheck, _views: { runView, agentView, V } }; // browserCheck: for trying the check on its own; _views: for testing the screens
 };

@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.173",
+      "date": "2026-10-22",
+      "title": "/crew",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "A main builder with helpers",
+          "text": "/crew <task>: one main builder (Ultra) builds the whole thing step by step, the way a single session does, and hands separate jobs (level data, sounds, sprites, tests, research) to helpers that work at the same time; their reports come back to it. The same checks, fixes, rounds and report as /team run after it. /crew 6 <task> lets up to 6 helpers work at once. /team is unchanged."
+        },
+        {
+          "area": "Team",
+          "title": "Fixer 2 carries on",
+          "text": "When yAI's re-check still fails, fixer 2 continues in fixer 1's conversation with only what still fails, instead of starting over."
+        },
+        {
+          "area": "Team",
+          "title": "Page checks that see the game",
+          "text": "check_page gets past difficulty and level menus, says plainly when the screen is blank or identical to the last check (and skips the description then), only re-runs for an agent after its own edit, and stores each picture once."
+        },
+        {
+          "area": "Team",
+          "title": "Progress checks",
+          "text": "Every 8 minutes while builders work, yAI looks at the page against the request and tells the feed and the builders what is there and what is missing."
+        }
+      ]
+    },
+    {
       "version": "1.0.172",
       "date": "2026-10-22",
       "title": "A leaner team",

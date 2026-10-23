@@ -16,6 +16,19 @@ const B = require("./browser");
 // screen and its freeze on New World went unseen)
 const START = String.raw`(() => { const el = [...document.querySelectorAll("button, a, [role=button], .btn")].find((e) => e.offsetParent && /^(\W*)(play|start|drop in|begin|new (game|world|run)|create (a )?world|single ?player|enter|let'?s go)/i.test(e.textContent.trim())); if (!el) return ""; setTimeout(() => el.click(), 0); return el.textContent.trim().slice(0, 30); })()`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A menu still showing after Start (a difficulty or level choice, "press Enter to start"): "" when there's none, else
+// "click:<label>" (it clicks the first real choice) or "key" (press Enter). Only when the page's text says it's a menu,
+// so a game's own buttons (Send wave, Build) are never pressed.
+const MENU = String.raw`(() => { const t = document.body.innerText || ""; if (!/difficulty|skill level|select (a |your )?(level|mode|map|character|difficulty)|choose (a |your )?(level|mode|map|character|difficulty)|press (enter|any key|space|start)|click to (start|play|begin)/i.test(t)) return ""; const btn = [...document.querySelectorAll("button, [role=button], .btn, .menu-item, li[tabindex]")].find((e) => e.offsetParent && !/back|setting|option|quit|exit|credit|help|control|sound|music|mute|full ?screen|how to/i.test(e.textContent)); if (btn && !/press (enter|any key|space)/i.test(t)) { setTimeout(() => btn.click(), 0); return "click:" + (btn.innerText || btn.textContent).trim().replace(/\s+/g, " ").slice(0, 40); } return "key"; })()`;
+async function pastMenus(b, lines) {
+  for (let i = 0; i < 3; i++) {
+    const m = await within(B.evaluate(b, MENU), 5000, "");
+    if (!m) return;
+    if (m === "key") { await within(b.send("Input.dispatchKeyEvent", { type: "keyDown", code: "Enter", key: "Enter", windowsVirtualKeyCode: 13 }), 4000); await within(b.send("Input.dispatchKeyEvent", { type: "keyUp", code: "Enter", key: "Enter", windowsVirtualKeyCode: 13 }), 4000); lines.push("A menu was showing: pressed Enter."); }
+    else lines.push(`A menu was showing: chose "${m.slice(6)}".`);
+    await sleep(1000);
+  }
+}
 // does the page still answer? A page whose script never yields (an endless loop) doesn't, and waiting on it would
 // hang the check too
 const alive = (b, ms = 6000) => Promise.race([B.evaluate(b, "1").then(() => true, () => true), sleep(ms).then(() => false)]);
@@ -167,6 +180,7 @@ async function playtest({ root, entry, task, X, signal }) {
   try {
     await snap("the page as it opens");
     const pressed = await B.evaluate(p.b, START).catch(() => "");
+    await sleep(1200); await pastMenus(p.b, notes);
     notes.push(pressed ? `Pressed "${pressed}".` : "No Play/Start button found.");
     await sleep(600);
     // a game that freezes as it starts: its script never yields, so nothing can be played (or even looked at)
@@ -229,7 +243,7 @@ async function pageCheck(o) {
   finally { clearTimeout(timer); p.close?.(); }
 }
 const within = (pr, ms, fallback) => Promise.race([Promise.resolve(pr).catch(() => fallback), sleep(ms).then(() => fallback)]);
-async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo }, lines, at, out) {
+async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo, seenBefore }, lines, at, out) {
   const p = await openPage(entry);
   out.close = p.close;
   {
@@ -238,6 +252,7 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
     const pressed = start ? await Promise.race([B.evaluate(p.b, START), sleep(6000).then(() => "")]).catch(() => "") : "";
     if (start) lines.push(pressed ? `Pressed "${pressed}".` : "No start button to press.");
     await sleep(Math.min(Math.max(Number(wait) || 2500, 500), 15000));
+    if (start) { at.step = "getting past the menus"; await pastMenus(p.b, lines); }
     if (!(await alive(p.b)) && !(await alive(p.b))) {
       lines.push(`FROZEN: the page stopped answering${pressed ? ` after "${pressed}"` : ""} for over 10 s: a loop that never ends (a Set or array growing while it is walked, a while loop that never exits).`);
       return { frozen: true, lines };
@@ -263,10 +278,15 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
     const img = await within(B.screenshot(p.b, { quality: 60 }), 15000, null);
     if (!img) { lines.push("The screenshot timed out: the page stopped drawing."); return { frozen: true, lines }; }
     if (saveTo) { try { require("fs").mkdirSync(path.dirname(saveTo), { recursive: true }); require("fs").writeFileSync(saveTo, img); lines.push(`Screenshot saved: ${saveTo}`); } catch {} }
+    // a single-colour screen compresses to almost nothing (the Doom run's black frames were 5.5 KB at 1280×720)
+    const blank = img.length < 7000;
+    if (blank) lines.push("BLANK: the screen is a single colour: the page draws nothing yet (or only a background).");
+    const same = !blank && typeof seenBefore === "function" ? seenBefore(img) : "";
+    if (same) lines.push(same);
     at.step = "describing the screenshot";
     // 25 s: when the image model is down it fails slowly, and a check an agent runs often must stay quick
-    if (describe) { const seen = await within(describe(img, lookFor), 25000, ""); lines.push(seen ? `On screen (described by a model that can see it):\n${seen}` : "(No description of the screen this time: the image model didn't answer. Judge by the errors, frame rate and text above.)"); }
-    return { frozen: false, lines };
+    if (describe && !blank && !same) { const seen = await within(describe(img, lookFor), 25000, ""); lines.push(seen ? `On screen (described by a model that can see it):\n${seen}` : "(No description of the screen this time: the image model didn't answer. Judge by the errors, frame rate and text above.)"); }
+    return { frozen: false, blank, lines, img };
   }
 }
 
