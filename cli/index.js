@@ -1568,11 +1568,16 @@ async function callModel() {
   outer.signal.addEventListener("abort", onOuter, { once: true });
   if (outer.signal.aborted) local.abort(); // stopped already (a listener added now would never fire)
   try {
-    const price = state.models.find((m) => m.id === state.model)?.price; // US$ per million tokens (yAI Ultra)
+    // after a reply that looped: warmer sampling, maybe the other model, for a few steps (see runAgent)
+    const fix = state.loopFix;
+    if (fix && --fix.steps <= 0) state.loopFix = null;
+    const model = fix?.model || state.model;
+    const price = state.models.find((m) => m.id === model)?.price; // US$ per million tokens (yAI Ultra)
     const promptTokens = usedChars() / 3.6;
     const { usage, cost, fallback } = await api.chat({
       messages: state.messages,
-      model: state.model,
+      model,
+      ...(fix && { temperature: 1 }),
       system: systemPrompt() + (state.crewActive && !state.crewQuiet ? CREW_PROMPT() : ""),
       context: envContext() + (TEAM_AGENT || state.crewActive ? attemptBlock() : ""),
       tools: nativeTools(),
@@ -1985,6 +1990,8 @@ async function runAgent(content) {
   print("");
   ui.resetSections();
   let cutOffs = 0; // replies in a row that were cut off mid-step
+  let loops = 0; // replies in this task stopped for repeating themselves
+  state.loopFix = null;
   let lastError = "", sameError = 0; // the same tool error repeated back to back
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
@@ -2183,7 +2190,18 @@ async function runAgent(content) {
         if (!result && text.length > 8000) state.messages[state.messages.length - 1].content = text.slice(0, 3000).replace(/<tool\b[\s\S]*$/, "").trim() + `\n(${looped ? "I started repeating myself" : `my ${call.name} call was cut off`} after ${text.length.toLocaleString("en")} characters; yAI removed the rest)`;
         if (!result && looped) {
           cutOffs = 0;
-          ui.note(`${c.yellow("!")} ${c.dim(`that reply started repeating itself (${looped.chars.toLocaleString("en")} characters) · stopped · asking yAI to do it differently`)}`);
+          // A model that looped once tends to loop again on the same step, so the advice alone isn't enough (2026-10-23).
+          // The next 3 replies are sampled at temperature 1 (DeepSeek's own default; agents run at 0.3, where loops
+          // are likelier; its repetition penalties are ignored, per its API docs); from the second loop they also go to
+          // the other DeepSeek model (same tool format); a fourth loop in one task stops it.
+          if (++loops >= 4) {
+            if (TEAM_AGENT) ui.event({ type: "error", message: "its replies kept repeating themselves" });
+            ui.note(`${c.yellow("!")} ${c.ink("yAI's replies kept repeating themselves (4 times in this task), so it stopped.")} ${c.dim("Ask for a smaller piece, or try another model (/model).")}`);
+            break;
+          }
+          const other = /^deepseek/i.test(state.model) ? ["deepseek-v4-pro", "deepseek-v4.1-flash"].find((id) => id !== state.model && state.models.some((m) => m.id === id)) : null;
+          state.loopFix = { steps: 3, model: loops >= 2 ? other || null : null };
+          ui.note(`${c.yellow("!")} ${c.dim(`that reply started repeating itself (${looped.chars.toLocaleString("en")} characters) · stopped · asking yAI to do it differently${state.loopFix.model ? ` · next steps on ${modelLabel(state.loopFix.model)}` : ""}`)}`);
           result = { output: `Error: your ${call.name} call was stopped because your reply started repeating ${looped.why || "the same thing over and over"} (${looped.chars.toLocaleString("en")} characters; it was writing: "${String(looped.sample).replace(/\s+/g, " ").slice(-160)}"). Nothing was done. Don't list things one by one: for data with a pattern (block variants, ids, levels), write code that makes it in a loop; for a ${call.name === "commission" ? "helper's job, describe what it should make and the format in a few paragraphs, and let it write the data" : "long file, write it in parts of at most 400 lines"}.` };
         }
         if (!result) {

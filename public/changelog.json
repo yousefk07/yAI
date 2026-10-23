@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.213",
+      "date": "2026-10-23",
+      "title": "Loops caught sooner, and they stop coming back",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Loops caught at 12,000 characters",
+          "text": "A reply stuck repeating itself is now stopped after about 12,000 characters instead of 60,000. Counting-up runs like \"oak_leaves_1829, oak_leaves_1830, …\" are caught too. Real data such as a hand-placed level isn’t flagged, because its numbers don’t count up."
+        },
+        {
+          "area": "Agent",
+          "title": "A different approach after a loop",
+          "text": "After a loop, the next 3 steps run warmer (temperature 1, DeepSeek’s default; agents run at 0.3, where loops are likelier). From a second loop they also switch to the other DeepSeek model. A fourth loop in one task stops it with a message, so it never burns money going round in circles."
+        }
+      ]
+    },
+    {
       "version": "1.0.212",
       "date": "2026-10-23",
       "title": "Long builds stay light",
