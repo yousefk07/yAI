@@ -2001,8 +2001,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     let watching = false;
     const watch = async () => {
       if (watching || over || state.interrupted || api.cfg.team?.watcher === false) return;
-      if (crewMode && Date.now() - (watch.last || 0) < 60000) return; // /crew: once a minute
-      watch.last = Date.now();
+      // /crew: it looks every 20 s too, so each agent's to-do stays accurate (Yousef), but steps in (a note or a stop)
+      // at most once a minute
+      const mayAct = !crewMode || Date.now() - (watch.acted || 0) >= 60000;
       const busy = agents.filter((a) => a.state === "working" && !a.internal && a.log && !a.paused && a.send && !a.awaitingCrew);
       const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 2);
       if (!fresh.length) return;
@@ -2028,6 +2029,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           a.planSeen = Math.min(n, a.plan.steps.length - (a.state === "working" ? 1 : 0)); // the last step ends with the agent
           a.plan = { ...a.plan, done: Math.max(a.plan.done, a.planSeen) };
         }
+        if (!mayAct) acts = [];
+        else if (acts.length) watch.acted = Date.now();
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
           if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
