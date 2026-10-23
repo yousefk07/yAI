@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.199",
+      "date": "2026-10-23",
+      "title": "The plan is back in /crew",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "A plan in the side panel",
+          "text": "The main chat in /crew sometimes skipped its plan, so the side panel showed only the background agents. The crew instructions now remind it, and if its first step still has no plan it's asked once to write one."
+        }
+      ]
+    },
+    {
       "version": "1.0.198",
       "date": "2026-10-23",
       "title": "A tidy screen with PowerShell output",
