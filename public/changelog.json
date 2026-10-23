@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.190",
+      "date": "2026-10-23",
+      "title": "The chat starts after the research",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "No more stopping before it starts",
+          "text": "A stop from an earlier request no longer ends a new /crew at once (it said Stopped. and the researcher worked on alone). The researcher aims for about 3 minutes, and the chat starts after 5 at most."
+        }
+      ]
+    },
+    {
       "version": "1.0.189",
       "date": "2026-10-23",
       "title": "A live panel",

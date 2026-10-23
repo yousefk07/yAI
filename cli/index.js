@@ -2973,6 +2973,9 @@ async function command(line) {
       const task = (m ? m[2] : arg).trim();
       if (!task) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> for up to 6 background agents at once). /crew off ends it."));
       state.crewTask = task;
+      // a stop from an earlier request mustn't end this one (2026-10-23: /crew said "Stopped." at once and its
+      // researcher worked on for 10 minutes with no one waiting)
+      state.interrupted = false;
       CREW.start();
       // a researcher first, always (it shows under "Background agents"); its report opens the chat's first turn
       ui.note(`${c.accent("◆")} ${c.ink("A researcher looks into the topic first")} ${c.dim("· on Ultra Flash · it writes RESEARCH.md")}`);

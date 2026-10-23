@@ -46,7 +46,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Delete any scratch or debug files you make before you finish.";
   const ROLE = {
     researcher: () => [
-      "Your job: research the topic before the main agent builds anything. Search the web (web_search, then web_fetch 3 to 6 of the best sources) for:",
+      "Your job: research the topic before the main agent builds anything, quickly: it waits for you, so aim for about 3 minutes. Search the web (web_search, then web_fetch 3 to 5 of the best sources) for:",
       "- the topic itself: what it is, how it works, its rules, mechanics and the real numbers behind them (speeds, sizes, timings, formulas);",
       "- how it is usually built: the techniques and algorithms people use for it, and the mistakes that commonly go wrong;",
       "- what a great version needs: what users or players expect, and what makes amateur versions feel unfinished.",
@@ -276,7 +276,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     const a = agents.find((x) => x.name === "researcher" && ["starting", "working"].includes(x.state));
     if (!a) return Promise.resolve();
     return new Promise((done) => {
-      const t = setTimeout(done, 600000);
+      const t = setTimeout(done, 300000); // 5 min at most: then the chat starts with what RESEARCH.md has, and the report comes later
       a.onDone = () => { clearTimeout(t); done(); };
       const iv = setInterval(() => { if (!state.crewActive || state.interrupted) { clearInterval(iv); clearTimeout(t); done(); } else if (!["starting", "working"].includes(a.state)) clearInterval(iv); }, 500);
     });
