@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.204",
+      "date": "2026-10-23",
+      "title": "Background agents can ask you",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Questions reach you",
+          "text": "A /crew background agent that wanted to run a command needing approval waited forever: its question went nowhere. Now the question shows in the chat and in the panel (\"waiting for you · click to answer\"); click it, and press y to allow or n to refuse. The crew log records each answer."
+        }
+      ]
+    },
+    {
       "version": "1.0.203",
       "date": "2026-10-23",
       "title": "A researcher that knows when to stop",

@@ -145,6 +145,14 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       else if (e.type === "text") { a.text.push(e.line); seen(a, `   ${c.ink(e.line)}`); }
       else if (e.type === "out" && String(e.text || "").trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n").slice(-6)) seen(a, `     ${c.faint(clip(l, 160))}`);
       else if (e.type === "progress") { if (e.cost != null) a.cost = (a.costPrev || 0) + e.cost; }
+      // a question (run this command?) goes to the user, as on the /team board: the panel shows "waiting for you" and
+      // the agent's view takes y or n (2026-10-23: unanswered, an agent that wanted to run a script waited forever)
+      else if (e.type === "ask") {
+        a.ask = e;
+        seen(a, `   ${c.yellow("?")} ${c.ink(row1(e.title || "A question"))} ${c.dim(clip(row1(e.detail || ""), 160))}`, `     ${c.faint("y allow · n refuse")}`);
+        say(a.name, "you", `asks: ${row1(e.title || "")} ${row1(e.detail || "")}`, "warn");
+        ui.note(`${c.yellow("?")} ${c.ink(`${a.name} asks: ${row1(e.title || "")}`)} ${c.dim(`${clip(row1(e.detail || ""), 80)} · click it under Background agents, then y or n`)}`);
+      }
       else if (e.type === "error") { a.error = e.message; seen(a, `   ${c.red("✕")} ${c.ink(row1(e.message))}`); }
       else if (e.type === "repeat-text") { a.repeats = Number(e.count) || (a.repeats || 0) + 1; if (a.repeats >= 4) takeover(a, `It kept writing the same reasoning (${a.repeats} times) without acting.`); }
       else if (e.type === "flip") { a.flips = (a.flips || 0) + 1; if (a.flips >= 3) takeover(a, `It kept changing ${e.path} back and forth.`); }
@@ -155,6 +163,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       if (e.type === "done" && a.state === "working") {
         if (a.replacing) return; // stopped for a takeover: the new agent reports instead
         a.cost = (a.costPrev || 0) + (e.cost?.session || 0);
+        a.ask = null;
         a.state = a.userStopped || a.stuck ? "stopped" : a.error ? "failed" : "done";
         a.ended = Date.now();
         // it stays open, idle, for a follow-up (reawaken); the crew closes it when it stops
@@ -212,9 +221,25 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   function open(a) {
     if (!a) return;
     if (a === "LOG" && !feed.length) return;
-    if (!viewing) { prevHook = state.keyHook; state.keyHook = (s, key) => { if (key?.name === "left") { close(); return true; } /* ← back: Esc stops the chat (2026-10-23) */ return prevHook ? prevHook(s, key) : false; }; }
+    if (!viewing) {
+      prevHook = state.keyHook;
+      state.keyHook = (s, key) => {
+        if (key?.name === "left") { close(); return true; } /* ← back: Esc stops the chat (2026-10-23) */
+        if (viewing?.ask && /^[yn]$/i.test(s || "")) { answer(viewing, /y/i.test(s)); return true; }
+        return prevHook ? prevHook(s, key) : false;
+      };
+    }
     viewing = a;
     try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
+  }
+  // the user's answer to an agent's question: the first option is yes, the last is no
+  function answer(a, yes) {
+    const q = a.ask;
+    if (!q) return;
+    a.ask = null;
+    a.send({ type: "answer", id: q.id, choice: yes ? 0 : Math.max(1, (q.options?.length || 3) - 1) });
+    seen(a, `     ${yes ? c.green("✓ you allowed it") : c.red("✕ you refused it")}`);
+    say("you", a.name, `${yes ? "allowed" : "refused"}: ${row1(q.detail || q.title || "")}`, yes ? "" : "bad");
   }
   function close() {
     viewing = null;
@@ -232,12 +257,13 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     if (viewing === "LOG") return [c.bold(c.ink("Crew log")) + c.faint("  · the chat, its background agents and the watcher"), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(feed.length ? feed.flatMap((m) => ["", logLine(m, w, true)]) : [c.dim("   Nothing yet.")])];
     const a = viewing;
     const head = `${c.bold(c.ink(a.name))}${a.role !== "builder" ? c.faint(` · ${a.role}`) : ""} ${c.faint(`· ${label(a.model)} · ${a.state} · ${secs((a.ended || Date.now()) - a.started)}${a.cost ? ` · ${money(a.cost)}` : ""}`)}`;
-    return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
+    return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), ...(a.ask ? [c.yellow(`? ${row1(a.ask.title || "")}: ${clip(row1(a.ask.detail || ""), w * 2)}`) + c.faint("  · y allow · n refuse")] : []), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
   }
   // a click on a row of the panel: the background agent whose name is on it
   function clickRow(text) {
     const side = String(text).split("│").pop();
     if (/Crew log/.test(side)) { open("LOG"); return true; }
+    if (/waiting for you/.test(side)) { const q = agents.find((x) => x.ask); if (q) { open(q); return true; } }
     const a = [...agents].sort((x, y) => y.name.length - x.name.length).find((x) => side.includes(x.name));
     if (a) open(a);
     return !!a;
@@ -252,7 +278,8 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       const meta = [label(a.model), secs((a.ended || Date.now()) - a.started), money(a.cost)].filter(Boolean).join(" · ");
       out.push(`${icon} ${c.ink(clip(a.name, w - 4))}${a.role !== "builder" ? c.faint(` ${a.role}`) : ""}`);
       out.push(`  ${c.faint(clip(meta, w - 2))}`);
-      if (["starting", "working"].includes(a.state)) out.push(`  ${c.dim(clip(a.step || "", w - 2))}`);
+      if (a.ask) out.push(`  ${c.yellow(clip("? waiting for you · click to answer", w - 2))}`);
+      else if (["starting", "working"].includes(a.state)) out.push(`  ${c.dim(clip(a.step || "", w - 2))}`);
     }
     if (feed.length) {
       out.push("", c.bold(c.ink("Crew log")) + c.faint("  click for all"), c.line("━".repeat(w)));
@@ -472,5 +499,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return again;
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, snapshot, restore, debate, hunt };
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, asking: () => !!(viewing && viewing.ask), snapshot, restore, debate, hunt };
 };
