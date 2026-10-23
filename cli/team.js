@@ -728,6 +728,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   const crewOpen = (lead, all) => all.filter((x) => x.helperOf === lead.name && rnd(x) === rnd(lead) && ["waiting", "starting", "working"].includes(x.state));
   function commissionHelper(lead, e, task, all) {
     const name = row1(e.name).slice(0, 30), open = crewOpen(lead, all), total = all.filter((x) => x.helperOf === lead.name).length;
+    const earlier = all.find((x) => x.helperOf === lead.name && rnd(x) === rnd(lead) && x.kept && String(x.crewName || "").toLowerCase() === name.toLowerCase());
+    if (earlier && reawaken(earlier, all, String(e.task || "").trim())) return;
     if (state.interrupted || open.length >= crewMax || total >= 16) {
       const why = state.interrupted ? "the team was stopped" : open.length >= crewMax ? `${crewMax} helpers are already working: do it yourself, or wait for one with crew_wait` : "16 helpers is the most for one build";
       lead.send({ type: "crew", name, report: `(not started: ${why})` });
@@ -741,6 +743,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     say(lead.name, `commissioned ${h.name} · ${modelShort(h.model) || "?"}`, "acc", clip(row1(h.task), 220));
     startAgent(h, task, all);
     d.wake();
+  }
+  // A finished helper woken for a follow-up: the same process and conversation, so it remembers its job and its files
+  function reawaken(h, all, text) {
+    const child = h.kept?.child;
+    if (!child || child.exitCode !== null || child.killed) return false;
+    h.kept = null;
+    Object.assign(h, { state: "working", step: "a follow-up from the main builder", lastMove: Date.now(), ended: 0, text: [], error: "", flag: "", watchedAt: h.log.length });
+    h.log.push({ k: "you", text: `(follow-up from the main builder) ${text}` });
+    h.send({ type: "prompt", text: `The main builder has a follow-up for you:\n${text}\n\nYour earlier work is above. Do this, check it, and end with a short report as before.` });
+    say(h.name, "woken for a follow-up", "acc", clip(row1(text), 200));
+    d.wake();
+    return true;
   }
   function reportToLead(h, all) {
     const lead = all.find((x) => x.crewLead && x.name === h.helperOf && rnd(x) === rnd(h));
@@ -907,7 +921,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const m = { at: Date.now(), from: a.name, to: to || "", text };
     chatLog.push(m);
     const want = String(to || "").toLowerCase();
-    const named = want ? all.filter((x) => x !== a && (x.name.toLowerCase() === want || x.role === want || x.name.toLowerCase().startsWith(want))) : [];
+    const named = want ? all.filter((x) => x !== a && (x.name.toLowerCase() === want || x.role === want || x.name.toLowerCase().startsWith(want) || String(x.crewName || "").toLowerCase() === want)) : [];
+    // the main builder writing to a helper that has finished: it wakes up to do what was asked
+    const sleeping = a.crewLead ? named.filter((x) => x.helperOf === a.name && x.kept) : [];
+    for (const x of sleeping) if (reawaken(x, all, text)) { a.log.push({ k: "chat", to: x.name, text, sent: true }); }
+    if (sleeping.length && sleeping.every((x) => x.state === "working")) return;
     const targets = (want ? named : all.filter((x) => x !== a)).filter((x) => x.send && (x.state === "working" || x.state === "starting"));
     for (const x of targets) { x.send({ type: "chat", from: a.name, text, to: !!want }); x.log?.push({ k: "chat", from: a.name, text }); }
     a.log.push({ k: "chat", to: to || "the team", text, sent: true });
@@ -1025,9 +1043,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         // the first fixer stays open, idle, until yAI's re-check: if it still fails, fixer 2 carries on in this same
         // conversation instead of starting over (2026-10-22, Yousef: "fixer 2 should pick up right where fixer 1 ended")
         if (a.role === "fixer" && !a.fixRound && a.state === "done") a.kept = { child, send: a.send };
+        // a /crew helper stays open too: the main builder may come back with a follow-up (reawaken)
+        else if (a.helperOf && a.state === "done" && !state.interrupted) a.kept = { child, send: a.send };
         else child.stdin.end();
         finished(a, all);
         if (a.helperOf) reportToLead(a, all);
+        if (a.crewLead && a.state !== "working") for (const x of all) if (x.helperOf === a.name && rnd(x) === rnd(a) && x.kept) { try { x.kept.child.stdin.end(); } catch {} x.kept = null; }
       }
       d.wake();
     });

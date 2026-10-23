@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.183",
+      "date": "2026-10-22",
+      "title": "Helpers come back",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Follow-ups wake a finished helper",
+          "text": "A helper that has finished stays idle until the main builder is done. Commissioning a job with its name again, or writing to it with team_say, wakes it in its own conversation, so it remembers its work; it reports back as before."
+        }
+      ]
+    },
+    {
       "version": "1.0.182",
       "date": "2026-10-22",
       "title": "Research the topic",
