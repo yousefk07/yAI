@@ -117,7 +117,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       if (e.type === "done" && a.state === "working") {
         if (a.replacing) return; // stopped for a takeover: the new agent reports instead
         a.cost = (a.costPrev || 0) + (e.cost?.session || 0);
-        a.state = a.error ? "failed" : a.stuck ? "stopped" : "done";
+        a.state = a.userStopped || a.stuck ? "stopped" : a.error ? "failed" : "done";
         a.ended = Date.now();
         // it stays open, idle, for a follow-up (reawaken); the crew closes it when it stops
         a.kept = a.state === "done" ? { child } : null;
@@ -284,5 +284,11 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     });
   }
 
-  return { start, stop, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length };
+  // Esc: every background agent still working stops (they show as stopped, and the chat is told)
+  function stopAll() {
+    for (const a of working()) { a.userStopped = true; a.send({ type: "stop" }); }
+    try { ui.screen?.render?.(); } catch {}
+  }
+
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length };
 };

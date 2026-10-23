@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.195",
+      "date": "2026-10-23",
+      "title": "Esc stops everything",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Esc stops /crew",
+          "text": "Esc now stops the wait for the researcher (it did nothing there) and every background agent still working; with the chat idle, Esc stops its background agents. They show as stopped."
+        }
+      ]
+    },
+    {
       "version": "1.0.194",
       "date": "2026-10-23",
       "title": "← leaves the agent view",

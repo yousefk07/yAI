@@ -1174,7 +1174,8 @@ function setupReadline() {
       } else if (state.busy && state.abort && !state.teamView) {
         state.interrupted = true;
         state.abort.abort();
-      }
+        if (state.crewActive) CREW.stopAll(); // /crew: its background agents stop too
+      } else if (state.crewActive && CREW.working()) CREW.stopAll(); // the chat is idle, its background agents aren't
     } else if (key.name === "v" && (key.ctrl || key.meta) && !state.busy && !state.asking) {
       pasteImage();
     } else if (key.name === "tab" && key.shift && !state.busy && !state.asking) {
@@ -2983,8 +2984,9 @@ async function command(line) {
       // a researcher first, always (it shows under "Background agents"); its report opens the chat's first turn
       ui.note(`${c.accent("◆")} ${c.ink("A researcher looks into the topic first")} ${c.dim("· on Ultra Flash · it writes RESEARCH.md")}`);
       state.busy = true; // the panel shows while it works
+      state.abort = new AbortController(); // so Esc stops the wait (and the researcher) like any request
       spinner.start("the researcher is looking into the topic");
-      try { await CREW.research(); } finally { spinner.stop(); state.busy = false; }
+      try { await CREW.research(); } finally { spinner.stop(); state.busy = false; state.abort = null; }
       if (state.interrupted || !state.crewActive) return print(c.dim("   Stopped."));
       ui.note(`${c.accent("◆")} ${c.ink("/crew: this chat works on it, and hands separate jobs to background agents")} ${c.dim("· they show under the plan · /crew off ends it")}`);
       return runAgent(`${task}\n\n(The researcher's notes are in RESEARCH.md, with the topic's facts, how it's usually built and a checklist: read them before you build.)`);
