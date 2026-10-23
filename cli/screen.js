@@ -34,6 +34,10 @@ module.exports = function create({ ui }) {
   const parts = { header: () => "", panel: () => null, input: () => ({ text: "", cursor: 0 }), keys: () => "", view: () => null };
 
   // ---------- ANSI-aware wrapping ----------
+  // Control characters other than colour codes and links are dropped (a tab becomes spaces): PowerShell output ends
+  // its lines in \r, which sent the cursor back to the row's start, so the padding wiped the text and the panel's
+  // divider landed mid-row (2026-10-23 screenshots).
+  const clean = (t) => String(t).replace(/\t/g, "    ").replace(/[\x00-\x06\x08\x0b-\x1a\x1c-\x1f\x7f]/g, "");
   const ESC = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/y;
   function wrap(text, w) {
     if (ui.vis(text) <= w) return [text];
@@ -110,7 +114,7 @@ module.exports = function create({ ui }) {
     const all = [], soft = [];
     const push = (rs) => rs.forEach((r, k) => { all.push(r); soft.push(k > 0); });
     const over = parts.view(tw);
-    if (over) over.forEach((t) => push(wrap(t, tw)));
+    if (over) over.forEach((t) => push(wrap(clean(t), tw)));
     else {
       lines.forEach((e) => push(rowsOf(e, tw)));
       [...extra, ...live].forEach((t) => push(wrap(t, tw)));
@@ -128,7 +132,7 @@ module.exports = function create({ ui }) {
     // where each row's text sits, for selecting: the conversation, the plan panel, or the whole row
     rowInfo = screen.map(() => ({ soft: false, pane: [1, cols] }));
     for (let r = 0; r < midH; r++) rowInfo.push({ soft: !!viewSoft[r], pane: [2, tw + 1], panel: panel ? [tw + 5, tw + 4 + pw - 2] : null });
-    const panelRows = panel ? panel(pw - 2) : [];
+    const panelRows = panel ? panel(pw - 2).map(clean) : [];
     for (let r = 0; r < midH; r++) {
       let row = " " + fit(view[r] || "", tw) + " ";
       if (panel) row += c.line("│") + " " + fit(panelRows[r] || "", pw - 2) + " ";
@@ -239,7 +243,7 @@ module.exports = function create({ ui }) {
       out("\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l");
     },
     add(text) {
-      for (const l of String(text).split("\n")) lines.push({ text: l });
+      for (const l of String(text).split("\n")) lines.push({ text: clean(l) });
       if (lines.length > 6000) lines.splice(0, lines.length - 5000);
       soon();
     },
@@ -247,8 +251,8 @@ module.exports = function create({ ui }) {
     centerFirst(n) { centerUpTo = n; soon(); },
     // The start screen gives way to the conversation (as in the design) when the first message is sent.
     endStart() { if (centerUpTo >= 0 && lines.length <= centerUpTo + 2) lines.length = 0; centerUpTo = -1; soon(); },
-    setLive(l) { live = l || []; soon(); },
-    setExtra(l) { extra = l || []; soon(); },
+    setLive(l) { live = (l || []).map(clean); soon(); },
+    setExtra(l) { extra = (l || []).map(clean); soon(); },
     scrollBy(n) { scroll = Math.max(0, scroll + n); sel = null; soon(); },
     // A mouse report (SGR): the left button down starts a selection, moving with it held extends it, letting go copies.
     mouse(btn, col, row, release) {

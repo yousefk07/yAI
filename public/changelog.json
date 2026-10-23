@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.198",
+      "date": "2026-10-23",
+      "title": "A tidy screen with PowerShell output",
+      "items": [
+        {
+          "area": "Screen",
+          "title": "No more stray lines",
+          "text": "Command output from PowerShell ends its lines in a carriage return, which wiped those lines from the screen and left bits of the side panel's divider scattered across the conversation. Control characters are now dropped before anything is drawn, so the output shows and the side panel stays in its column."
+        }
+      ]
+    },
+    {
       "version": "1.0.197",
       "date": "2026-10-23",
       "title": "No more cut-off files",
