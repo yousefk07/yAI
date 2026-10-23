@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.175",
+      "date": "2026-10-22",
+      "title": "Fastest eyes first",
+      "items": [
+        {
+          "area": "Models",
+          "title": "Image order",
+          "text": "Images go to Gemini 3.5 Flash-Lite first, then Groq (Qwen 3.8 27B), then Gemini 3.8 Flash, and never to Modal. With no image key set up, a clear error instead."
+        }
+      ]
+    },
+    {
       "version": "1.0.174",
       "date": "2026-10-22",
       "title": "Accurate to-dos in /crew",
