@@ -341,7 +341,18 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     if ((x.refused || 0) >= 3) parts.push(`${x.refused} steps refused as repeats`);
     return parts;
   };
-  const COOLDOWN = 180000; // between two instructions to the same agent
+  // the tool behind the step repeated most: what a second instruction blocks when the watcher named no block
+  // (2026-10-23: four notes to a /crew chat, none with a block, and it ran the same page_eval about 100 times)
+  const TOOL_OF = { "page eval": "page_eval", "check page": "check_page", run: "run", search: "search", read: "read_file", page_eval: "page_eval", check_page: "check_page", read_file: "read_file" };
+  const repeatedTool = (lines) => {
+    const n = {};
+    for (const l of lines.slice(-12)) { const k = l.replace(/\s*→.*$/, "").trim(); if (k.startsWith("-")) n[k] = (n[k] || 0) + 1; }
+    const top = Object.entries(n).sort((x, y) => y[1] - x[1])[0];
+    if (!top || top[1] < 3) return "";
+    const head = top[0].slice(1).trim().toLowerCase();
+    return Object.entries(TOOL_OF).find(([v]) => head === v || head.startsWith(v + " "))?.[1] || "";
+  };
+  const COOLDOWN = Number(process.env.YAI_CREW_COOLDOWN_MS) || 180000; // between two instructions to the same agent (shorter only in test/crew-team)
   async function watch() {
     if (watching || !state.crewActive || state.interrupted) return;
     const mainLines = state.busy && state.crewSteps?.length ? state.crewSteps.slice(-20) : [];
@@ -369,14 +380,16 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
           state.crewMainNoted = Date.now();
           state.crewMainNotes = (state.crewMainNotes || 0) + 1;
           say("watcher", "main", msg, "warn");
-          (state.directives ||= []).push({ text: msg, block: state.crewMainNotes > 1 ? block : [], steps });
+          const tool = !block.length && repeatedTool(main);
+          (state.directives ||= []).push({ text: msg, block: state.crewMainNotes > 1 ? (block.length ? block : tool ? [tool] : []) : [], steps });
           ui.note(`${c.accent("◆")} ${c.ink("The watcher:")} ${c.dim(msg)}`);
         } else {
           const a = busy.find((x) => x.name === act.agent);
           if (!a) continue;
           a.notedAt = Date.now(); a.notes = (a.notes || 0) + 1;
           say("watcher", a.name, msg, "warn");
-          a.send({ type: "directive", text: msg, block: a.notes > 1 ? block : [], steps });
+          const tool = !block.length && repeatedTool(a.log);
+          a.send({ type: "directive", text: msg, block: a.notes > 1 ? (block.length ? block : tool ? [tool] : []) : [], steps });
         }
       }
     } catch {} finally { watching = false; }

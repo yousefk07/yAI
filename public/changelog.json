@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "1.0.216",
+      "date": "2026-10-23",
+      "title": "Loops in real /crew builds, stopped",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "The same page check isn't run over and over",
+          "text": "In a real /crew build, the chat ran the same page_eval about 150 times in 18 minutes, past five watcher notes. An identical page_eval or check_page, with no file in the project changed since (another agent's edits count), now gets the earlier result back instead of running again, like a repeated read."
+        },
+        {
+          "area": "Crew",
+          "title": "The watcher's second note blocks the loop",
+          "text": "When the watcher has to repeat itself and names no block, its second instruction now blocks the tool being repeated (page_eval, check_page, a command, a search or a read) for a few steps."
+        },
+        {
+          "area": "Agent",
+          "title": "A silent connection is given up on",
+          "text": "A background agent sat 8 minutes on a connection to yAI that sent nothing. After 330 s of silence (the site ends every reply by 300 s) the request now fails as a dropped connection: tried again before any text, kept and continued after. Plain requests (searches, pages through the site) get 2 minutes."
+        },
+        {
+          "area": "Crew",
+          "title": "No phantom helpers",
+          "text": "A background agent that copied “commission” from its brief was told a helper was on it, then waited in crew_wait for a helper that never existed. Tools an agent wasn't given are now refused with a clear message."
+        },
+        {
+          "area": "Agent",
+          "title": "Page checks don't leak",
+          "text": "Every new browser for page checks added an exit listener; a chat checking its page often hit Node's MaxListenersExceededWarning. It's one listener now."
+        },
+        {
+          "area": "Tests",
+          "title": "156 cases",
+          "text": "test/crew-team now covers these too, and runs yAI's own page checks in a real headless Chrome. YAI_DIR points yAI Code at another settings folder (the tests use a throwaway one)."
+        }
+      ]
+    },
+    {
       "version": "1.0.215",
       "date": "2026-10-23",
       "title": "Hardened /crew and /team",

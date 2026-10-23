@@ -173,6 +173,31 @@ suite(__filename, [
     assert.match(srv.log[1].text, /If you're still writing it in parts, finish it/);
     assert.ok(!/Check:/.test(srv.log[2].messages.slice(-1)[0].content), "whole now: no error");
   } },
+  { name: "a background agent that calls commission or crew_wait anyway is told they aren't there (no phantom helper, no wait)", ms: 30000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, [T("commission", { name: "ghost", task: "Write js/ghost.js with window.GHOST = 1 and check it with node --check.", files: "js/ghost.js" }), T("crew_wait", { minutes: "10" }), T("team_say", { text: "hello" }), "Done."], { env: CREWAGENT });
+    const t0 = Date.now();
+    await ask(y, "go", { mode: "acceptEdits" });
+    assert.ok(Date.now() - t0 < 15000, "crew_wait didn't wait");
+    assert.match(srv.log[1].text, /commission isn't available/);
+    assert.match(srv.log[2].text, /crew_wait isn't available/);
+    assert.match(srv.log[3].text, /team_say isn't available/);
+  } },
+  { name: "the same page_eval again and again with nothing changed isn't run, and the chat is stopped", ms: 90000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, (r) => (r.n < 12 ? T("page_eval", { code: "window.G && window.G.n" }) : "Done."), { files: { "index.html": "<!doctype html><script>window.G = { n: 7 };</script>" } });
+    await ask(y, "check it", { mode: "acceptEdits", ms: 80000 });
+    assert.match(srv.log[1].text, /Result: 7/);
+    assert.match(srv.log[2].text, /You already did this exact step/);
+    assert.ok(srv.log.length <= 9, `stopped after the repeats (${srv.log.length} requests)`);
+    assert.ok(y.notes().some((n) => /kept repeating steps/.test(n)));
+  } },
+  { name: "the same page_eval after a file in the project changed is run again", ms: 90000, fn: async (ctl) => {
+    const { y, srv, dir } = await session(ctl, async (r) => {
+      if (r.n === 1) { await sleep(50); require("fs").writeFileSync(require("path").join(dir, "index.html"), "<!doctype html><script>window.G = { n: 8 };</script>"); } // another agent's edit
+      return r.n < 2 ? T("page_eval", { code: "window.G.n" }) : "Done.";
+    }, { files: { "index.html": "<!doctype html><script>window.G = { n: 7 };</script>" } });
+    await ask(y, "check it", { mode: "acceptEdits", ms: 80000 });
+    assert.match(srv.log[2].text, /Result: 8/);
+  } },
   { name: "the same read again with nothing changed isn't run", fn: async (ctl) => {
     const { y, srv } = await session(ctl, (r) => (r.n < 2 ? T("read_file", { path: "a.txt" }) : "Done."), { files: { "a.txt": "abc" } });
     await ask(y, "go");
@@ -262,6 +287,19 @@ suite(__filename, [
     await ask(y, "go");
     assert.strictEqual(srv.log.length, 4);
     assert.ok(errors(y).length === 1, `one error: ${JSON.stringify(errors(y))}`);
+  } },
+  { name: "a site that never answers is given up on and asked again (no agent waits forever)", ms: 30000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, (r) => (r.n === 0 ? { hang: true } : "Answered."), { env: { ...CREWAGENT, YAI_IDLE_MS: "1500" } });
+    await ask(y, "go");
+    assert.strictEqual(srv.log.length, 2);
+    assert.ok(y.texts().some((t) => /Answered/.test(t)));
+  } },
+  { name: "a stream that goes quiet partway: what came is kept and the agent goes on", ms: 30000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, (r) => (r.n === 0 ? { text: "The first half of my answer and", thenHang: true } : "The rest."), { env: { ...CREWAGENT, YAI_IDLE_MS: "1500" } });
+    await ask(y, "go");
+    assert.strictEqual(srv.log.length, 2);
+    assert.match(srv.log[1].text, /connection/i);
+    assert.deepStrictEqual(errors(y), []);
   } },
   { name: "a dropped stream before any text is tried again", ms: 30000, fn: async (ctl) => {
     const { y, srv } = await session(ctl, (r) => (r.n === 0 ? { drop: 0, text: "x" } : "Recovered."));

@@ -19,7 +19,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DIR = path.join(os.homedir(), ".yai", "packs");
+const DIR = path.join(process.env.YAI_DIR || path.join(os.homedir(), ".yai"), "packs");
 
 function read(name) {
   const file = path.join(DIR, `${String(name).toLowerCase().replace(/[^a-z0-9_-]/g, "")}.md`);

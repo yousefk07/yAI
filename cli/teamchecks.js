@@ -233,7 +233,7 @@ async function playtest({ root, entry, task, X, signal }) {
 // (2) One browser kept open for pageCheck (an agent checks its page again and again): the page is opened again in it,
 // with the site's saved data cleared, so each check still starts like a first visit. Anything odd (a frozen page, a
 // time-out, a closed browser) and it's closed, and the next check starts a fresh one.
-let kept = null; // { dir, server, b, errors, close }
+let kept = null, exitHooked = false; // { dir, server, b, errors, close }
 async function keptPage(entry) {
   const dir = path.dirname(entry);
   if (kept && kept.dir !== dir) { kept.close(); kept = null; }
@@ -248,7 +248,9 @@ async function keptPage(entry) {
     b.on("Runtime.exceptionThrown", (p) => { const t = (p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]; if (!headlessOnly(t)) errors.push(`Uncaught: ${t}`); });
     b.on("Runtime.consoleAPICalled", (p) => { if (p.type !== "error") return; const t = p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 200); if (!headlessOnly(t)) errors.push(`console.error: ${t}`); });
     kept = { dir, server, b, errors, url: server.url, close() { try { b.close(); } catch {} server.close(); } };
-    process.once("exit", () => kept?.close());
+    // once for the process: one per new page added up (2026-10-23: MaxListenersExceededWarning in a /crew chat that
+    // checked its page every few seconds)
+    if (!exitHooked) { exitHooked = true; process.once("exit", () => kept?.close()); }
   }
   const k = kept;
   k.errors.length = 0;

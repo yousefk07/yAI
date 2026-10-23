@@ -44,6 +44,26 @@ const MODES = ["default", "acceptEdits", "yolo", "plan"];
 // Steps that only look at things: the same one again with nothing changed gives the same answer, so it isn't run
 // twice (2026-10-22: a /team builder re-read the same three parts of a file 43 times and wrote nothing, at 20x the cost).
 const LOOK_STEPS = new Set(["read_file", "list_files", "search", "find_files", "run"]);
+// The page checks too, while no file in the project has changed (another agent's edits count): 2026-10-23, a /crew chat
+// ran the same page_eval ("const w = Game.world, p = Game.player.pos; …") about 100 times in 15 minutes, past four
+// watcher notes. They aren't LOOK_STEPS: those also block on "edits-only" before the page checks were looked at.
+const PAGE_STEPS = new Set(["page_eval", "check_page"]);
+// the project's files as one stamp: their newest change and how many there are (3 folders deep, at most 3,000)
+function projectStamp() {
+  let newest = 0, n = 0;
+  const walk = (dir, depth) => {
+    let list = [];
+    try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of list) {
+      if (n > 3000) return;
+      if (e.isDirectory()) { if (depth < 3 && !/^(node_modules|\.git|yai-media|\.yai-old|\.yai-team)$/.test(e.name)) walk(path.join(dir, e.name), depth + 1); continue; }
+      n++;
+      try { newest = Math.max(newest, fs.statSync(path.join(dir, e.name)).mtimeMs); } catch {}
+    }
+  };
+  walk(root, 0);
+  return `${n}:${newest}`;
+}
 // Share of the model's window at which old tool output is dropped, and at which the conversation is
 // summarized automatically so a task never stops at 100%.
 const TRIM_AT = 0.75;
@@ -1786,6 +1806,9 @@ async function execTool(call) {
   ctx.budget = toolBudget();
   const tool = T.tools[call.name];
   if (!tool) return { output: `Error: unknown tool "${call.name}". Available: ${Object.keys(T.tools).join(", ")}.` };
+  // a tool this session wasn't given isn't run (2026-10-23: a /crew background agent copied "commission" from its brief,
+  // was told a helper was "on it", and then sat in crew_wait for a helper that never existed)
+  if (!toolAllowed(call.name)) return { output: `Error: ${call.name} isn't available here. Use the tools in your instructions${CREW_ONLY.has(call.name) ? "; do this part yourself" : ""}.` };
   spinner.stop();
   try {
     if (tool.readOnly) {
@@ -2255,7 +2278,7 @@ async function runAgent(content) {
           let mtime = "";
           if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p.trim().replace(/:\d+(-\d+)?$/, ""))).mtimeMs; } catch { return 0; } }).join(",");
           sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
-        }
+        } else if (PAGE_STEPS.has(call.name)) sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${projectStamp()}`;
         // A result that was trimmed away (trimContext) may be run again: its text is gone. What stops a reader thrashing
         // (2026-10-22: a reviewer read a whole game, had it trimmed, re-read it… 48 reads; a merger on a 6,000-line
         // Minecraft clone was refused the files it needed and stopped) is the rule below: a long file read whole is

@@ -163,7 +163,7 @@ suite(__filename, [
     }, { name: "sessions" });
     await command(y, "/crew build h", { mode: "acceptEdits" });
     await sleep(800);
-    const dir = path.join(homeEnv().USERPROFILE, ".yai", "sessions");
+    const dir = path.join(homeEnv().YAI_DIR, "sessions");
     const mine = fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"))).filter((s) => /background agent working for the main agent|research the topic before/.test(String(s.messages?.[0]?.content || "")));
     assert.strictEqual(mine.length, 0, `${mine.length} background agents saved a session`);
   } },

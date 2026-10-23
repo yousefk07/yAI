@@ -40,6 +40,16 @@ suite(__filename, [
     assert.ok(!srv.of("main").some((r) => /Blocked for your next/.test(r.text)), "the first instruction blocks nothing");
     assert.ok(y.notes().some((n) => /The watcher:/.test(n)));
   } },
+  { name: "a second instruction for the same loop blocks the repeated tool, even when the watcher named no block", ms: 90000, fn: async (ctl) => {
+    const pad = "/* " + "the same long probe of the world and the player, ".repeat(4) + " */ ";
+    const steps = Array.from({ length: 40 }, (_, i) => T("page_eval", { code: `${pad}Game.world.n + ${i}` }));
+    const { y, srv } = await session(ctl, mainWith(steps, { watcher: () => JSON.stringify({ actions: [{ agent: "main", message: STOP }] }) }), { env: { ...ENV, YAI_CREW_COOLDOWN_MS: "1500" } });
+    await command(y, "/crew check the page", { mode: "acceptEdits", ms: 80000 });
+    const banners = srv.of("main").filter((r) => /INSTRUCTION FROM yAI/.test(r.messages[r.messages.length - 1].content));
+    assert.ok(banners.length >= 2, `${banners.length} instructions`);
+    assert.ok(!/Blocked for your next/.test(banners[0].messages.slice(-1)[0].content), "the first blocks nothing");
+    assert.ok(banners.slice(1).some((r) => /Blocked for your next \d+ steps: no page_eval/.test(r.messages.slice(-1)[0].content)), "a later one blocks page_eval");
+  } },
   { name: "a watcher that answers nonsense changes nothing and breaks nothing", ms: 60000, fn: async (ctl) => {
     const steps = Array.from({ length: 6 }, () => T("page_eval", { code: "document.title" }));
     const { y, srv } = await session(ctl, mainWith(steps, { watcher: () => "I think it's fine, no JSON here {broken" }), { env: ENV });

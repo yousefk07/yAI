@@ -5,7 +5,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DIR = path.join(os.homedir(), ".yai");
+// YAI_DIR: another folder for the sign-in, settings and sessions (test/crew-team runs with a throwaway one)
+const DIR = process.env.YAI_DIR || path.join(os.homedir(), ".yai");
 const CONFIG_FILE = path.join(DIR, "config.json");
 const DEFAULT_URL = "https://yousef-llmai.vercel.app";
 const UA = "yai-code/1.0";
@@ -47,8 +48,10 @@ async function errorOf(res) {
   }
 }
 
-async function json(pathname, opts) {
-  const res = await request(pathname, opts);
+async function json(pathname, opts = {}) {
+  // a plain request (sign-in, models, a web search, a page through the site) gets 2 minutes: none of them waits on a
+  // model, and one that never came back held its agent with it (2026-10-23)
+  const res = await request(pathname, { ...opts, signal: opts.signal ? AbortSignal.any?.([opts.signal, AbortSignal.timeout(120000)]) || opts.signal : AbortSignal.timeout(120000) });
   if (res.status === 401) throw Object.assign(new Error("Not signed in"), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));
   return res.json();
@@ -91,11 +94,12 @@ async function models() {
 // real token counts and cost (2026-10-22: stopping at once left most /team steps' cost estimated, and cached tokens
 // unknown). With native tool calls the reply ends at the call, so it comes almost at once.
 const TAIL_MS = 1200;
-async function readEvents(res, onEvent) {
+async function readEvents(res, onEvent, touch = () => {}) {
   const decoder = new TextDecoder();
   let buf = "", tailUntil = 0;
   const it = res.body[Symbol.asyncIterator]();
   for (;;) {
+    touch(); // something came: the quiet timer starts again (see chatOnce)
     let step;
     if (tailUntil) {
       const left = tailUntil - Date.now();
@@ -173,16 +177,33 @@ async function chatOnce({ messages, model, system, context, conversationId, sign
       fs.writeFileSync(path.join(process.env.YAI_DEBUG_DIR, `request-${Date.now()}.json`), JSON.stringify({ model, system, messages }, null, 1));
     } catch {}
   }
-  const res = await request("/api/chat", {
-    method: "POST",
-    signal,
-    // tools/toolFormat: for a host with native tool calling (DeepSeek's API), the site swaps the text format for the
-    // tool list; other hosts ignore them
-    body: { agent: true, system, context, messages, model, temperature: temperature ?? 0.3, conversationId, ...(tools && { tools, toolFormat }) },
-  });
+  // Nothing at all from the site for 330 s (it ends any reply by 300 s) means the connection is dead: it's closed and
+  // the request fails as a network error, so it's tried again or, with text already in, kept (2026-10-23: a /crew
+  // background agent sat 8 minutes on an open connection that sent nothing, with no timer left to wake it).
+  const quietMs = Number(process.env.YAI_IDLE_MS) || 330000;
+  const ctl = new AbortController();
+  const onAbort = () => ctl.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) ctl.abort();
+  let quiet = false, timer = null;
+  const touch = () => { clearTimeout(timer); timer = setTimeout(() => { quiet = true; ctl.abort(); }, quietMs); };
+  const wentQuiet = () => Object.assign(new Error(`the connection to yAI went quiet (nothing for ${Math.round(quietMs / 1000)} s): ETIMEDOUT`), { code: "ETIMEDOUT" });
+  touch();
+  try {
+  let res;
+  try {
+    res = await request("/api/chat", {
+      method: "POST",
+      signal: ctl.signal,
+      // tools/toolFormat: for a host with native tool calling (DeepSeek's API), the site swaps the text format for the
+      // tool list; other hosts ignore them
+      body: { agent: true, system, context, messages, model, temperature: temperature ?? 0.3, conversationId, ...(tools && { tools, toolFormat }) },
+    });
+  } catch (err) { throw quiet ? wentQuiet() : err; }
   if (res.status === 401) throw Object.assign(new Error("Your session expired. Run /login."), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));
   let usage, error, cost, fallback;
+  try {
   await readEvents(res, (ev) => {
     if (ev.fallback) fallback = ev.fallback; // answered by the model's fallback (yAI Lite busy → DeepSeek Flash)
     if (ev.status && onStatus) onStatus(ev.status);
@@ -192,9 +213,11 @@ async function chatOnce({ messages, model, system, context, conversationId, sign
     // What the reply cost (yAI Ultra), and today's total against the allowance, for the status line.
     if (ev.done && typeof ev.costUsd === "number") cost = { usd: ev.costUsd, todayUsd: ev.ultraTodayUsd, limitUsd: ev.ultraLimitUsd };
     if (ev.content) return onText(ev.content);
-  });
+  }, touch);
+  } catch (err) { throw quiet ? wentQuiet() : err; }
   if (error) throw new Error(error);
   return { usage, cost, fallback };
+  } finally { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); }
 }
 
 // ---------- images and videos (the web app's Make Image / Make Video) ----------

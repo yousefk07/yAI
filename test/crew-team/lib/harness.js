@@ -42,7 +42,8 @@ function home() {
   if (!fs.existsSync(cfg)) fs.writeFileSync(cfg, JSON.stringify({ cookie: "yai_session=test-only", user: { username: "sim" }, theme: "dark" }));
   return dir;
 }
-const homeEnv = () => { const h = home(); return { USERPROFILE: h, HOME: h }; };
+// (YAI_DIR, not USERPROFILE: Chrome for page checks doesn't start under a made-up home)
+const homeEnv = () => ({ YAI_DIR: path.join(home(), ".yai") });
 
 // Who sent a chat request, from its system prompt and first message
 function whoOf(b) {
@@ -126,6 +127,7 @@ async function fakeServer(handler, { models = MODELS, defaultModel = "deepseek-v
       await sleep(out.delay || 0); // a turn of the event loop, so a client that hung up is noticed
     }
     if (out.drop != null) { res.destroy(); return; }
+    if (out.thenHang) { r.hung = true; return; } // sent its text, then nothing more, never closed
     send({ done: true, usage: out.usage || { in: 1000, out: 50, cached: 800 }, costUsd: out.cost ?? 0.0001 });
     res.end();
   });
