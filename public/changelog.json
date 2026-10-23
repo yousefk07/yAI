@@ -1,6 +1,58 @@
 {
   "releases": [
     {
+      "version": "1.0.215",
+      "date": "2026-10-23",
+      "title": "Hardened /crew and /team",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Background agents' questions reach VS Code",
+          "text": "In the VS Code panel, a /crew background agent that asked to run a command only showed a note, and waited for an answer nobody could give. The question now comes up in the panel like any other, and your answer goes to the agent."
+        },
+        {
+          "area": "Team",
+          "title": "/team asks you in VS Code instead of answering for you",
+          "text": "Without a terminal, /team's questions were answered with their first option: every builder's “Run this command?” was allowed, and files the plan didn't use were moved aside, all without asking. They now come up in the panel."
+        },
+        {
+          "area": "Crew",
+          "title": "Stop and the mode switch reach background agents in VS Code",
+          "text": "Stopping a /crew chat in the panel now stops its background agents too, as Esc does in the terminal, and switching to auto-accept everything reaches agents already working."
+        },
+        {
+          "area": "Agent",
+          "title": "A dropped connection doesn't end the work",
+          "text": "When the connection to yAI dropped partway through a reply, the whole request ended with “terminated”: a /crew agent was marked failed and a /team agent started over. What arrived is now kept and the agent goes on from it; only three drops in one task end it."
+        },
+        {
+          "area": "Crew",
+          "title": "/resume and yai -c find your chat, not a helper's",
+          "text": "Every background agent saved its own conversation next to yours, so /resume listed them and yai -c could pick up a helper instead of the chat that started it. Agents no longer save sessions; /crew keeps their state in yours."
+        },
+        {
+          "area": "Crew",
+          "title": "Smaller /crew fixes",
+          "text": "A second /crew in the same chat gets a fresh researcher for the new task; a follow-up to “levels” written as “Levels” no longer leaves crew_wait waiting out its minutes; plan mode starts no background agents until the plan is approved; a woken agent gets the chat's current mode; read-only /debate and /hunt agents stay read-only after a restore; the watcher's own request can't hang it; the panel no longer breaks at tiny widths."
+        },
+        {
+          "area": "Team",
+          "title": "The watcher can stop an agent at once",
+          "text": "After a note, the /team watcher's “stop” for an agent that only re-checks finished work waited out a 3-minute cooldown. It now acts at once, like a takeover."
+        },
+        {
+          "area": "Agent",
+          "title": "Files written in parts and cut-off files",
+          "text": "The first part of a file written in parts is no longer told to “fix” its unfinished end (models closed it off, then appended the rest after it), and a long file cut off inside an escape is saved as text instead of with every \\n written out."
+        },
+        {
+          "area": "Tests",
+          "title": "A test suite for /crew and /team",
+          "text": "test/crew-team runs 147 cases against a fake yAI site with no model spend: loops, cut-offs, dropped streams, watcher instructions, takeovers, approvals, /debate, /hunt, /team's picker, checks and fixer, and the panels at odd widths. Run it with node test/crew-team/run.js."
+        }
+      ]
+    },
+    {
       "version": "1.0.214",
       "date": "2026-10-23",
       "title": "A quieter, more accurate watcher",

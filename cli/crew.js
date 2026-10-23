@@ -12,7 +12,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   const { c } = ui;
   const agents = []; // { name, task, files, role, model, state, step, started, ended, cost, child, send, text, log, kept, ... }
   let watchTimer = null, tickTimer = null, watching = false;
-  const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + "…" : String(s));
+  const clip = (s, n) => (String(s).length > n ? (n < 2 ? "…".slice(0, Math.max(0, n)) : String(s).slice(0, n - 1) + "…") : String(s)); // (a tiny n gave nearly the whole text)
   const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
   const secs = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, "0")}s`);
   const money = (x) => (!x ? "" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
@@ -36,7 +36,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     state.crewActive = true;
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
     clearInterval(watchTimer);
-    watchTimer = setInterval(watch, 20000);
+    watchTimer = setInterval(watch, Number(process.env.YAI_CREW_WATCH_MS) || 20000); // (shorter only in test/crew-team)
     clearInterval(tickTimer); tickTimer = setInterval(tick, 1000); // the times in the panel move
     try { ui.screen?.onClick?.((text) => { clickRow(text); }); } catch {}
   }
@@ -117,7 +117,12 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
     // a follow-up to one that has finished: the same agent wakes up, in its own conversation
     const earlier = agents.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.kept);
-    if (earlier && reawaken(earlier, spec.task)) return say("main", earlier.name, `follow-up: ${spec.task}`);
+    if (earlier && reawaken(earlier, spec.task)) {
+      // under its own spelling, so its report clears it (2026-10-23: "Levels" for "levels" stayed open, and crew_wait
+      // waited out its minutes for an agent that had reported)
+      if (name !== earlier.name) { ctx.crew.open.delete(name); ctx.crew.open.add(earlier.name); }
+      return say("main", earlier.name, `follow-up: ${spec.task}`);
+    }
     if (working().length >= (state.crewMax || 4)) return report(name, `(not started: ${state.crewMax || 4} background agents are already working; do it yourself, or wait for one with crew_wait)`);
     const role = ROLE[spec.role] ? spec.role : "builder";
     const model = spec.model === "lite" ? LITE() : spec.model === "pro" ? PRO() : FLASH();
@@ -153,6 +158,9 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
         seen(a, `   ${c.yellow("?")} ${c.ink(row1(e.title || "A question"))} ${c.dim(clip(row1(e.detail || ""), 160))}`, `     ${c.faint("y allow · n refuse")}`);
         say(a.name, "you", `asks: ${row1(e.title || "")} ${row1(e.detail || "")}`, "warn");
         ui.note(`${c.yellow("?")} ${c.ink(`${a.name} asks: ${row1(e.title || "")}`)} ${c.dim(`${clip(row1(e.detail || ""), 80)} · click it under Background agents, then y or n`)}`);
+        // the VS Code panel (and yai remote) answer questions through askHook: there's no agent view to click there
+        // (2026-10-23: the question only showed as a note, and the agent waited for an answer nobody could give)
+        if (state.askHook) state.askHook({ title: `${a.name} asks: ${row1(e.title || "A question")}`, detail: e.detail || "", options: ["Yes", "No"] }).then((i) => { if (a.ask === e) answer(a, i === 0); }, () => {});
       }
       else if (e.type === "error") { a.error = e.message; seen(a, `   ${c.red("✕")} ${c.ink(row1(e.message))}`); }
       else if (e.type === "repeat-text") { a.repeats = Number(e.count) || (a.repeats || 0) + 1; if (a.repeats >= 4) takeover(a, `It kept writing the same reasoning (${a.repeats} times) without acting.`); }
@@ -188,7 +196,10 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     const child = a.kept?.child;
     if (!child || child.exitCode !== null) return false;
     a.kept = null;
-    Object.assign(a, { state: "working", step: "a follow-up", lastMove: Date.now(), ended: 0, text: [], error: "" });
+    // "starting" until its "busy": the mode it's sent first answers with a "done" of its own, which isn't its report.
+    // The mode is sent again: the chat's may have changed (to yolo) while it was idle (2026-10-23).
+    Object.assign(a, { state: "starting", step: "a follow-up", lastMove: Date.now(), ended: 0, text: [], error: "" });
+    a.send({ type: "mode", mode: agentMode(a) });
     a.send({ type: "prompt", text: `The main agent has a follow-up for you:\n${task}\n\nYour earlier work is above. Do this, check it, and end with a short report as before.` });
     return true;
   }
@@ -265,6 +276,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   };
   function viewLines(w) {
     if (!viewing) return null;
+    w = Math.max(10, Math.floor(Number(w) || 0));
     if (viewing === "LOG") return [c.bold(c.ink("Crew log")) + c.faint("  · the chat, its background agents and the watcher"), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(feed.length ? feed.flatMap((m) => ["", logLine(m, w, true)]) : [c.dim("   Nothing yet.")])];
     const a = viewing;
     const head = `${c.bold(c.ink(a.name))}${a.role !== "builder" ? c.faint(` · ${a.role}`) : ""} ${c.faint(`· ${label(a.model)} · ${a.state} · ${secs((a.ended || Date.now()) - a.started)}${a.cost ? ` · ${money(a.cost)}` : ""}`)}`;
@@ -283,7 +295,10 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // ---------- the panel: the background agents under the plan ----------
   function panelLines(w) {
     if (!agents.length) return [];
-    const out = ["", c.bold(c.ink("Background agents")) + c.faint("  click one to watch it"), c.line("━".repeat(w))];
+    w = Math.max(1, Math.floor(Number(w) || 0)); // a width of 0 or less threw ("━".repeat(-1)) and took the screen down
+    // a heading with its hint when both fit (the panel is 30 wide: the hint was cut mid-word)
+    const head = (t, hint) => c.bold(c.ink(clip(t, w))) + (t.length + hint.length <= w ? c.faint(hint) : "");
+    const out = ["", head("Background agents", "  click one to watch it"), c.line("━".repeat(w))];
     for (const a of agents) {
       const icon = a.state === "done" ? c.green("✓") : a.state === "failed" || a.stuck ? c.red("✕") : a.state === "stopped" ? c.yellow("■") : c.accent("◐");
       const meta = [label(a.model), secs((a.ended || Date.now()) - a.started), money(a.cost)].filter(Boolean).join(" · ");
@@ -293,7 +308,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       else if (["starting", "working"].includes(a.state)) out.push(`  ${c.dim(clip(a.step || "", w - 2))}`);
     }
     if (feed.length) {
-      out.push("", c.bold(c.ink("Crew log")) + c.faint("  click for all"), c.line("━".repeat(w)));
+      out.push("", head("Crew log", "  click for all"), c.line("━".repeat(w)));
       for (const m of feed.slice(-6)) out.push(...wrapIn(logLine(m, w, false), w).slice(0, 2));
     }
     return out;
@@ -340,7 +355,8 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
         ...(main.length ? [`## main (the session itself)\nFlagged: ${mainEvidence.join("; ")}\nIts plan: ${state.plan ? state.plan.steps.map((s, i) => `${i + 1}. ${clip(s, 80)}`).join(" ") : "(none)"}\nRecent steps:\n${main.join("\n")}`] : []),
         ...busy.map((a) => `## ${a.name} (${a.role}), working for ${secs(Date.now() - a.started)}\nFlagged: ${evidence({ lines: a.log, flips: a.flips, repeats: a.repeats, refused: a.refused }).join("; ")}\nIts job: ${clip(row1(a.task), 300)}\nRecent steps:\n${a.log.slice(-20).join("\n")}`),
       ];
-      const out = await X.oneShot({ model: FLASH(), system: WATCH_SYSTEM, messages: [{ role: "user", content: `The task: ${clip(state.crewTask || "", 800)}\n\n${parts.join("\n\n")}` }] });
+      // at most 90 s: a request that never came back left `watching` set, and the watcher never ran again
+      const out = await X.oneShot({ model: FLASH(), system: WATCH_SYSTEM, signal: AbortSignal.timeout(90000), messages: [{ role: "user", content: `The task: ${clip(state.crewTask || "", 800)}\n\n${parts.join("\n\n")}` }] });
       for (const a of busy) a.watchedAt = a.log.length;
       let acts = [];
       try { acts = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]).actions || []; } catch {}
@@ -374,6 +390,9 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // the researcher /crew starts with: it shows in the panel, and the main chat starts once it's done (10 min at most)
   function research() {
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+    // a fresh researcher for each /crew: one kept from an earlier /crew in this chat would be woken in that task's
+    // conversation, with "Research the task above" pointing at the old task (2026-10-23)
+    for (const x of agents) if (x.role === "researcher" && x.kept) { try { x.kept.child.stdin.end(); } catch {} x.kept = null; }
     ctx.crew.open.add("researcher");
     commission({ name: "researcher", role: "researcher", model: "flash", task: "Research the task above.", files: ["RESEARCH.md"] });
     const a = agents.find((x) => x.name === "researcher" && ["starting", "working"].includes(x.state));
@@ -485,14 +504,16 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   function snapshot() {
     if (!state.crewActive) return null;
     return {
-      task: state.crewTask || "", feed: feed.slice(-100),
-      agents: agents.map((a) => ({ name: a.name, task: a.task, files: a.files, role: a.role, model: a.model, state: a.state, started: a.started, ended: a.ended || 0, cost: a.cost || 0, changed: [...a.changed], report: a.text.join("\n").slice(-3000) })),
+      // (its mode and extra brief too: a /debate side or the /hunt tracer is read-only, and came back able to write)
+      task: state.crewTask || "", quiet: !!state.crewQuiet, feed: feed.slice(-100),
+      agents: agents.map((a) => ({ name: a.name, task: a.task, files: a.files, role: a.role, model: a.model, mode: a.mode, extra: a.extra || "", state: a.state, started: a.started, ended: a.ended || 0, cost: a.cost || 0, changed: [...a.changed], report: a.text.join("\n").slice(-3000) })),
     };
   }
   function restore(snap) {
     if (!snap) return 0;
     state.crewTask = snap.task || state.crewTask;
     start();
+    state.crewQuiet = !!snap.quiet;
     feed.push(...(snap.feed || []));
     let again = 0;
     for (const s of snap.agents || []) {
@@ -510,5 +531,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return again;
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, syncMode, waiting: () => agents.filter((a) => a.ask).map((a) => a.name), asking: () => !!(viewing && viewing.ask), snapshot, restore, debate, hunt };
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, syncMode, waiting: () => agents.filter((a) => a.ask).map((a) => a.name), asking: () => !!(viewing && viewing.ask), snapshot, restore, debate, hunt, agent: named }; // (agent: for test/crew-team)
 };

@@ -411,8 +411,11 @@ const tools = {
       // cut at 6,000 characters without a word, so the helper got half a brief
       if (task.length > 8000) throw new ToolError(`That <task> is ${task.length.toLocaleString("en")} characters: a brief is at most about 1,000 words. Say what to make, the names and interface other code uses, the format, and how to check it; don't list the data itself (the helper writes it, in code that makes it where there's a pattern).`);
       const files = String(a.files || "").split(/[\n,]+/).map((f) => f.trim().replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean).slice(0, 20);
+      // plan mode is read-only, and a background agent would change files before the plan is approved (2026-10-23)
+      if (ctx.readOnly?.()) throw new ToolError("Not allowed in plan mode: it's read-only, so no background agent starts until the plan is approved. Put the jobs you would hand out in your plan instead.");
       ctx.crew = ctx.crew || { open: new Set(), reports: [] };
-      if (ctx.crew.open.has(name)) throw new ToolError(`A helper called "${name}" is still working. Give the new one another name.`);
+      // in any letter case: "Levels" while "levels" works would be a second agent on the same job
+      if ([...ctx.crew.open].some((n) => n.toLowerCase() === name.toLowerCase())) throw new ToolError(`A helper called "${name}" is still working. Give the new one another name.`);
       ctx.crew.open.add(name);
       toolHeader("Commission", `${name}: ${task.replace(/\s+/g, " ").slice(0, 70)}`);
       const model = /^\s*lite\b/i.test(String(a.model || "")) ? "lite" : "flash";

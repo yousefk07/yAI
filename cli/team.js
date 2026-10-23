@@ -139,6 +139,10 @@ const TESTISH = /\b(test|tests|pytest|jest|vitest|mocha|unittest|spec)\b|--test\
 module.exports = function create(d) {
   const { state, root, api, ui, X } = d;
   const { c, print, spinner } = ui;
+  // A question for you. The VS Code panel (and yai remote) answer through askHook: select() without a terminal answers
+  // its first option at once (2026-10-23: in the panel every builder's "Run this command?" was allowed unasked, and
+  // files the plan didn't use were moved aside without a word).
+  const choose = (o) => (state.askHook ? state.askHook({ title: o.title, detail: o.detail || "", options: o.options }) : d.select(o));
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
   const wrapText = (s, n) => {
     const out = [];
@@ -1385,7 +1389,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       : [...stages.map((g) => ({ label: `${cap(g.name.toLowerCase())}${g.current ? ` · ${g.working} working` : ""}`, total: g.total, done: g.done, working: g.working, current: g.current, past: g.all })),
         { label: "Done", total: 0, done: 0, past: doneN === agents.length }];
     return {
-      title: `${c.bold(c.ink(clip(task, 60)))}${c.faint(` · ${agents.length} agents`)}`,
+      // (cut to fit the board, which is at least 70 wide: a 60-character task and " · 5 agents" made 72)
+      title: `${c.bold(c.ink(clip(task, Math.min(60, Math.max(70, screenW()) - 16))))}${c.faint(` · ${agents.length} agents`)}`,
       stats: [`${c.bold(c.ink(`${doneN} / ${agents.length}`))} ${c.faint("done")}`, working ? `${c.bold(c.ink(String(working)))} ${c.faint("working")}` : "",
         c.bold(c.ink(secs(Date.now() - teamStarted))), `${c.bold(c.ink(money(cost) || "$0.000"))}${estimate ? c.faint(` of ~${money(estimate)}`) : ""}`],
       strip, stages, sel, tick, width: screenW(), height: screenH(),
@@ -1710,7 +1715,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     if (extra.length) {
       print("");
       print(`   ${c.yellow("!")} ${c.ink(`${folders.join(", ")} already has ${extra.length} file${extra.length === 1 ? "" : "s"} the plan doesn't use`)} ${c.faint(clip(extra.join(", "), ui.width() - 30))}`);
-      const i = await d.select({ title: "What should happen to them?", options: ["Move them aside first (to .yai-old/)", "Keep them (the agents see them)", "Cancel"] });
+      const i = await choose({ title: "What should happen to them?", options: ["Move them aside first (to .yai-old/)", "Keep them (the agents see them)", "Cancel"] });
       if (i === 2 || i < 0) return print(c.dim("   Cancelled."));
       if (i === 0) {
         const away = path.join(root, ".yai-old", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -2142,7 +2147,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
           if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
-          if (Date.now() - (a.notedAt || 0) < 180000 && act.do !== "takeover") continue; // 3 min between two instructions to one agent
+          // 3 min between two notes to one agent; a takeover or a stop (both only after a note) needn't wait (2026-10-23: a
+          // stop for an agent only re-checking finished work was held back 3 minutes, and it went on checking)
+          if (Date.now() - (a.notedAt || 0) < 180000 && !["takeover", "stop"].includes(act.do)) continue;
           a.notedAt = Date.now();
           if (act.do === "takeover" && a.watchNotes && !a.takenOver) {
             takeover(a, agents, task, msg);
@@ -2214,7 +2221,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         for (const a of agents.filter((x) => !x.role && x.state === "working" && x.send)) { a.send({ type: "chat", from: "yAI's progress check", text, to: false }); a.log.push({ k: "chat", from: "yAI's progress check", text }); }
       } catch {} finally { progressBusy = false; }
     };
-    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); crewNudge(); watch(); progress(); } }, 20000);
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); crewNudge(); watch(); progress(); } }, Number(process.env.YAI_TEAM_WATCH_MS) || 20000); // (shorter only in test/crew-team)
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {
@@ -2247,7 +2254,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           draw();
           drawn = 0;
           asking = true;
-          const i = state.abort.signal.aborted ? -1 : await d.select({ title: `${a.name}: ${q.title}`, detail: q.detail, options: q.options.slice(0, 2).concat("No") });
+          const i = state.abort.signal.aborted ? -1 : await choose({ title: `${a.name}: ${q.title}`, detail: q.detail, options: q.options.slice(0, 2).concat("No") });
           a.asks.shift();
           a.send({ type: "answer", id: q.id, choice: i === 2 ? 2 : i });
           asking = false;

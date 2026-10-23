@@ -13,6 +13,22 @@ module.exports = function create({ ui }) {
   const vis = ui.vis;
   const clip = (s, n) => { s = String(s ?? ""); return n <= 0 ? "" : s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s; };
   const pad = (s, n) => s + " ".repeat(Math.max(0, n - vis(s)));
+  // a coloured line cut to n visible columns, with … where it was cut
+  const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/y;
+  const cutVis = (s, n) => {
+    s = String(s ?? "");
+    if (vis(s) <= n) return s;
+    let out = "", k = 0;
+    for (let i = 0; i < s.length;) {
+      ANSI.lastIndex = i;
+      const m = ANSI.exec(s);
+      if (m) { out += m[0]; i += m[0].length; continue; }
+      if (k >= n - 1) { out += "…"; break; }
+      const ch = String.fromCodePoint(s.codePointAt(i));
+      out += ch; k++; i += ch.length;
+    }
+    return out + "\x1b[0m";
+  };
   const padL = (s, n) => " ".repeat(Math.max(0, n - vis(s))) + s;
   const SPIN = ["◐", "◓", "◑", "◒"];
   // a state's glyph and colour: done grey, passed green, failed red, working accent (turning), stuck yellow, waiting hollow
@@ -199,7 +215,9 @@ module.exports = function create({ ui }) {
     const room = Math.max(8, (height || 30) - out.length);
     const shown = body.length > room ? body.slice(-room) : body;
     const rows = Math.max(s.length, shown.length);
-    const right = [...Array(Math.max(0, rows - shown.length)).fill(""), ...shown]; // the transcript sits at the bottom
+    // the transcript sits at the bottom, each row cut to its column: it's drawn at the terminal's width, so beside the
+    // side panel its long rows spilled over and wrapped under the panel (2026-10-23)
+    const right = [...Array(Math.max(0, rows - shown.length)).fill(""), ...shown].map((l) => (SW ? cutVis(l, W - SW - 5) : l));
     return [...out, ...(SW ? columns(s, right, SW) : right).map((l) => ` ${l}`)].slice(0, out.length + room);
   }
 

@@ -148,6 +148,8 @@ async function warmup(model, { signal, onProgress }) {
 // Matched against the error's message, code and cause separately (2026-10-22 review: "50[234]" anywhere matched
 // "35024 tokens", and bare "network" or "socket" matched model errors).
 const NET_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR_|socket hang up|other side closed|^terminated$|Bad Gateway|Service Unavailable|Gateway Time-?out|\bHTTP 50[234]\b/i;
+// (callModel uses it too: a drop after the reply started keeps what came, 2026-10-23)
+const isNetError = (err) => [err?.message, err?.cause?.code, err?.cause?.message].some((x) => x && NET_ERROR.test(String(x)));
 async function chat(opts) {
   let got = false;
   const onText = (piece) => { got = true; return opts.onText(piece); };
@@ -155,7 +157,7 @@ async function chat(opts) {
   for (let attempt = 0; ; attempt++) {
     try { return await chatOnce({ ...opts, onText, onTokens }); }
     catch (err) {
-      const net = [err.message, err.cause?.code, err.cause?.message].some((x) => x && NET_ERROR.test(String(x)));
+      const net = isNetError(err);
       if (got || attempt >= 3 || opts.signal?.aborted || err.auth || !net) throw err;
       opts.onStatus?.(`connection dropped · trying again (${attempt + 1} of 3)`);
       await new Promise((r) => setTimeout(r, [1500, 4000, 9000][attempt]));
@@ -233,4 +235,4 @@ async function hub(op, { method = "GET", body, signal } = {}) {
   return json(`/api/hub?op=${op}`, { method, body, signal });
 }
 
-module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, extract };
+module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, isNetError, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, extract };

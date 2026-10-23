@@ -58,6 +58,7 @@ const STARTUP_FOCUS = require("./focus").startup(process.argv);
 const root = path.resolve(process.cwd());
 const ctx = T.makeContext(root);
 ctx.interrupted = () => state.interrupted; // crew_wait stops waiting when the agent is stopped
+ctx.readOnly = () => state.mode === "plan"; // commission: no background agents in plan mode
 const state = {
   pasted: [], // clipboard images pasted this session: [image N] is pasted[N - 1]
   pastedText: [], // long or multi-line pastes: [Pasted text #N +K lines] is pastedText[N - 1]
@@ -323,7 +324,9 @@ function pushUser(content) {
 }
 
 function saveSession() {
-  if (!state.messages.length) return;
+  // a background agent's conversation isn't one of yours: /resume listed them, and yai -c could pick up a /crew helper
+  // instead of the chat that started it (2026-10-23: 579 files, most of them agents'); /crew saves its agents itself
+  if (!state.messages.length || TEAM_AGENT) return;
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     state.title ||= sessionTitle({ messages: state.messages });
@@ -1562,6 +1565,7 @@ async function callModel() {
   // file). Checked every 4,000 characters past 10,000 (lib/loops.js).
   let loopAt = 0;
   state.looped = null;
+  state.dropped = false;
   const local = new AbortController();
   const outer = state.abort;
   const onOuter = () => local.abort();
@@ -1652,7 +1656,11 @@ async function callModel() {
     state.lastPromptTokensPrev = Math.round(promptTokens);
     seen = 0;
   } catch (err) {
-    if (!state.interrupted) {
+    // The connection dropped after the reply had started (api.chat only tries again before any text): what came is
+    // kept and the step goes on from it, as a cut-off reply (2026-10-23: one dropped stream ended a /crew background
+    // agent as "failed: terminated", and restarted a /team agent from scratch). Three in one task and it's an error.
+    if (!state.interrupted && api.isNetError(err) && (text || seen) && ++state.drops <= 3) state.dropped = true;
+    else if (!state.interrupted) {
       spinner.stop();
       if (lineBuf) emit(lineBuf);
       write.end();
@@ -1910,7 +1918,9 @@ async function execTool(call) {
       // checked at once (cli/filecheck.js): a syntax error goes back in this step's result
       const broken = checkFile(plan.abs);
       if (broken) ui.note(`${c.yellow("!")} ${c.ink(`${relPath(plan.abs)} has a problem`)} ${c.dim(`· ${broken}`)}`);
-      const parts = call.name === "write_file" && String(call.args.append).trim() === "true";
+      // (a first part ends early too: "Unexpected end of input" on a new file is how an unfinished part looks, and
+      // "Fix this" made models close it off and then append the rest after it, 2026-10-23)
+      const parts = call.name === "write_file" && (String(call.args.append).trim() === "true" || /Unexpected end of input|Unterminated/i.test(broken));
       return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` + (broken ? `\nCheck: ${relPath(plan.abs)} now has an error: ${broken}. ${parts ? "If you're still writing it in parts, finish it; otherwise fix" : "Fix"} this before you go on.` : "") };
     }
 
@@ -1992,6 +2002,7 @@ async function runAgent(content) {
   let cutOffs = 0; // replies in a row that were cut off mid-step
   let loops = 0; // replies in this task stopped for repeating themselves
   state.loopFix = null;
+  state.drops = 0; // replies in this task whose connection dropped partway (see callModel)
   let lastError = "", sameError = 0; // the same tool error repeated back to back
   let failedRuns = 0; // commands in a row that failed
   const failedCommands = new Set();
@@ -2140,6 +2151,12 @@ async function runAgent(content) {
       // (2026-10-23) 4 instructions became ~100 replies in a row opening "Following the watcher: I'll stop re-pressing
       // Singleplayer…", still steering by advice long out of date
       state.messages.push({ role: "assistant", content: String(call && call.raw ? call.raw : text).replace(/^\W*following the watcher:[^\n]*\n*/i, "") || "(working)" });
+      // words cut short by a dropped connection aren't the answer: it goes on from where they stopped
+      if (!call && state.dropped) {
+        ui.note(c.dim("· the connection dropped partway through the reply · asking yAI to go on"));
+        pushUser("(The connection to yAI dropped partway through your reply, so it was cut short. Go on from where it stopped.)");
+        continue;
+      }
       if (!call && state.crewActive && ctx.crew?.open.size && crewHolds < 2 && !state.interrupted) {
         crewHolds++;
         pushUser(`Your background agents are still working (${[...ctx.crew.open].join(", ")}). Call crew_wait for them, fit in their work, and then finish.`);
@@ -2209,6 +2226,11 @@ async function runAgent(content) {
           state.loopFix = { steps: 3, model: loops >= 2 ? other || null : null };
           ui.note(`${c.yellow("!")} ${c.dim(`that reply started repeating itself (${looped.chars.toLocaleString("en")} characters) · stopped · asking yAI to do it differently${state.loopFix.model ? ` · next steps on ${modelLabel(state.loopFix.model)}` : ""}`)}`);
           result = { output: `Error: your ${call.name} call was stopped because your reply started repeating ${looped.why || "the same thing over and over"} (${looped.chars.toLocaleString("en")} characters; it was writing: "${String(looped.sample).replace(/\s+/g, " ").slice(-160)}"). Nothing was done. Don't list things one by one: for data with a pattern (block variants, ids, levels), write code that makes it in a loop; for a ${call.name === "commission" ? "helper's job, describe what it should make and the format in a few paragraphs, and let it write the data" : "long file, write it in parts of at most 400 lines"}.` };
+        }
+        // cut off by a dropped connection, not by the model: said so, and it doesn't count as the model's mistake
+        if (!result && state.dropped) {
+          result = { output: `Error: the connection to yAI dropped partway through your ${call.name} call, so nothing happened. Make that step again, whole.` };
+          ui.note(c.dim("· the connection dropped partway through that step · asking yAI to make it again"));
         }
         if (!result) {
           if (++cutOffs >= 2) {
@@ -3621,7 +3643,8 @@ async function stdioMode() {
       for (const r of picks.values()) r(null);
       picks.clear();
       answers.clear();
-    } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; if (!state.busy) send({ type: "done", stats: state.lastStats || "", ...info() }); } // mid-run (/crew follows the chat's mode) it isn't a "done"
+      if (state.crewActive) CREW.stopAll(); // as Esc in the terminal: /crew's background agents stop too (2026-10-23)
+    } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; CREW.syncMode(); if (!state.busy) send({ type: "done", stats: state.lastStats || "", ...info() }); } // mid-run (/crew follows the chat's mode) it isn't a "done"
     else if (msg.type === "model" && state.models.some((m) => m.id === msg.id)) { state.model = msg.id; prewarm(); send({ type: "done", stats: state.lastStats || "", ...info() }); }
     else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
     // from the /team board: a note read with the agent's next step result, and pause / resume between steps
