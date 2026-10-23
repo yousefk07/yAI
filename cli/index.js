@@ -171,13 +171,31 @@ ctx.webSearch = async (q) => {
     return require("../lib/search").search(q);
   }
 };
-// check_page's eyes (2026-10-22): a model that can see describes the screenshot, plainly and critically, so a text-only
-// model building a game knows what's actually on screen
-ctx.describeImage = (img, lookFor) => X.withVision((m) => X.oneShot({ // → { vm, text }
+// The eyes of a model that only reads text (2026-10-22, check_page; 2026-10-23 read_file on an image, and what to fix):
+// a model that can see (Ultra's image route: Gemini, then Groq) looks at the picture with the task in mind and says
+// what's there and what needs fixing, with the change that would fix each.
+const taskNow = () => {
+  if (state.crewTask) return state.crewTask;
+  const typed = [...state.messages].reverse().find((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("<tool_result"));
+  return String(typed?.content || "").split(/\n\n<(?:file|folder) path=/)[0].slice(0, 1200);
+};
+const EYES = (kind) => [
+  `You are the eyes of a developer who can't see images: they only read your words. You're looking at ${kind}.`,
+  ...(taskNow() ? [`What they're working on: ${taskNow()}`] : []),
+  "Reply in two parts. What's there: 3 to 6 short, specific lines (layout, colours, text, what's drawn, anything blank, black, missing, placeholder, overlapping or cut off, error text).",
+  "What needs fixing: numbered, most important first, judged against what they're working on. For each: the problem as you see it, then the likely cause and the change in the code that would fix it (for example: the sky is black, so the renderer's clear colour is probably 0x000000; set it to a sky blue). If nothing needs fixing, say so.",
+  "Be specific and honest; don't praise.",
+].join("\n");
+ctx.describeImage = (img, lookFor) => X.withVision((m) => X.oneShot({ // check_page's screenshot → its text
   model: m.id, signal: state.abort?.signal,
-  system: "You look at a screenshot of a web app or game for the developer building it. In 3 to 6 short lines say what is on screen and what looks wrong or unfinished: blank or black areas, missing or placeholder graphics (plain boxes where there should be shapes), overlapping or cut-off UI, error text, anything that doesn't look like a finished product. Be specific and honest; don't praise.",
-  messages: [{ role: "user", content: [{ type: "text", text: lookFor ? `Check especially: ${lookFor}` : "Describe it." }, X.imagePart(img, "image/jpeg")] }],
+  system: EYES("a screenshot of the web app or game they're building"),
+  messages: [{ role: "user", content: [{ type: "text", text: lookFor ? `Check especially: ${lookFor}` : "Look at it." }, X.imagePart(img, "image/jpeg")] }],
 }), state.abort?.signal).then((r) => String(r?.text || "").trim());
+ctx.lookAtImage = (buf, mime, lookFor) => X.withVision((m) => X.oneShot({ // read_file on an image → { by, text }
+  model: m.id, signal: state.abort?.signal,
+  system: EYES("an image file in their project (a screenshot, a sprite or texture, a mockup, a chart)"),
+  messages: [{ role: "user", content: [{ type: "text", text: lookFor ? `Check especially: ${lookFor}` : "Look at it." }, X.imagePart(buf, mime)] }],
+}), state.abort?.signal).then((r) => ({ by: r.vm.label, text: String(r?.text || "").trim() || "(it gave no description)" }));
 // A background command that ends on its own: yAI hears about it with the next message, and so does the user.
 ctx.onTaskDone = (t) => {
   if (t.stopped) return;

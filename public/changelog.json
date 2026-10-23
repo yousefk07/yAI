@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.207",
+      "date": "2026-10-23",
+      "title": "Eyes for text-only models",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Images explained, with what to fix",
+          "text": "When a model that only reads text opens an image in the project (read_file on a .png, .jpg, .webp or .gif: a screenshot, a sprite, a mockup), a model that can see now looks at it (yAI Ultra's image route: Gemini first, then Groq) and says what's there and what needs fixing, numbered, each with the likely cause and the change in the code that would fix it. It's told what you're working on, so it judges the picture against the task; <look_for> says what to check. check_page's screenshots are described the same way."
+        }
+      ]
+    },
+    {
       "version": "1.0.206",
       "date": "2026-10-23",
       "title": "No step limit",

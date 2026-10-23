@@ -52,6 +52,7 @@ function splitPaths(p, root) {
 }
 
 const isBinary = (buf) => buf.subarray(0, 8000).includes(0);
+const IMAGE_MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 function clipOutput(s, max = MAX_OUTPUT) {
   if (s.length <= max) return s;
   const head = s.slice(0, Math.floor(max * 0.4)), tail = s.slice(-Math.floor(max * 0.6));
@@ -181,11 +182,12 @@ const tools = {
   },
 
   read_file: {
-    params: ["path", "offset", "limit"],
+    params: ["path", "offset", "limit", "look_for"],
     describe:
       "Read a file with line numbers. Optional <offset> (first line, default 1) and <limit> (lines, default 600), or a " +
       "line range in the path: src/app.js:120-180. To read several files or ranges at once, put up to 8 in <path>, one " +
-      "per line: one step instead of several.",
+      "per line: one step instead of several. An image (.png, .jpg, .webp, .gif) is looked at by a model that can see: " +
+      "it says what's in it and what needs fixing; optional <look_for> says what to check.",
     readOnly: true,
     run(ctx, a) {
       // a line range in the path (src/app.js:120-180, the way yAI shows a read), when no file has that literal name
@@ -200,7 +202,7 @@ const tools = {
       if (many.length > 1) {
         const per = Math.max(4000, Math.floor((ctx.budget || 40000) / many.length));
         const parts = many.slice(0, 8).map((p) => {
-          try { return `=== ${p} ===\n${tools.read_file.run({ ...ctx, budget: per }, /:\d+(-\d+)?$/.test(p) ? { path: p } : { path: p, limit: 400 })}`; }
+          try { return `=== ${p} ===\n${tools.read_file.run({ ...ctx, budget: per, manyRead: true }, /:\d+(-\d+)?$/.test(p) ? { path: p } : { path: p, limit: 400 })}`; }
           catch (err) { return `=== ${p} ===\nError: ${err.message}`; }
         });
         if (many.length > 8) parts.push(`(only the first 8 paths were read; ask again for the rest)`);
@@ -212,6 +214,19 @@ const tools = {
         buf = fs.readFileSync(abs);
       } catch {
         throw new ToolError(`File not found: ${a.path}`);
+      }
+      // an image: a model that can see looks at it and says what's in it and what needs fixing, since the model
+      // reading it may see only text (2026-10-23, Yousef: "have gemini analyze the image then explain what needs to
+      // be fixed"). In a read of several files it's only named: each image is a request of its own.
+      const mime = IMAGE_MIME[path.extname(abs).toLowerCase()];
+      if (mime && ctx.lookAtImage) {
+        if (ctx.manyRead) return `(an image, ${Math.round(buf.length / 1024)} KB: read it on its own to have it described)`;
+        if (buf.length > 2_500_000) throw new ToolError(`${a.path} is an image over 2.5 MB, too big to look at.`);
+        toolHeader("Look", rel(ctx, abs));
+        return ctx.lookAtImage(buf, mime, String(a.look_for || "")).then(({ by, text }) => {
+          toolResult(`described by ${by}`);
+          return `${a.path} is an image. A model that can see it (${by}) says:\n${text}`;
+        }, (err) => { throw new ToolError(`Couldn't look at ${a.path}: ${err.message}`); });
       }
       if (isBinary(buf)) throw new ToolError(`${a.path} is a binary file.`);
       const lines = buf.toString("utf8").split(/\r?\n/);
