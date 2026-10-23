@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.200",
+      "date": "2026-10-23",
+      "title": "Sturdier runs",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "A cut-off file is kept",
+          "text": "When a reply runs out of room in the middle of a new file, yAI saves the complete lines it got to and asks the model to go on from the last one, instead of throwing it all away and starting over in parts."
+        },
+        {
+          "area": "Agent",
+          "title": "Files checked as they're written",
+          "text": "Every JavaScript, JSON or HTML file yAI writes gets a syntax check straight away (node --check, a JSON parse, the page's inline scripts). An error goes back with that step's result, so it's fixed at once instead of turning up later as a blank page."
+        },
+        {
+          "area": "Sessions",
+          "title": "Pick up after a crash",
+          "text": "The conversation is saved after every step, with /crew's log and background agents, the plan and whether a task was still running. /resume or yai -c brings it back: /crew is on again, finished agents show as before, the ones that were working start again where they stopped, and yAI tells you to type continue."
+        }
+      ]
+    },
+    {
       "version": "1.0.199",
       "date": "2026-10-23",
       "title": "The plan is back in /crew",

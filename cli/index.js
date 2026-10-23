@@ -19,6 +19,7 @@ const { execSync } = require("child_process");
 const api = require("./api");
 const ui = require("./ui");
 const T = require("./tools");
+const checkFile = require("./filecheck"); // a syntax check of each file yAI writes
 const { c, print, spinner } = ui;
 const LOOK = require("./look")({ ui }); // the v2 look: status pill, key bar, plan card, approvals, summaries
 // The full-window app (cli/screen.js): header, conversation, plan panel, input box and key bar, like the design.
@@ -141,6 +142,8 @@ ctx.approve = async (name, args) => {
 // /crew: this chat with background agents it commissions (cli/crew.js)
 const CREW = require("./crew")({ state, root, ui, X, ctx });
 ctx.onCommission = (spec) => (state.crewActive ? CREW.commission(spec) : null);
+// /crew: its background agents move on while the chat is idle, so the conversation is saved every 15 s while they work
+if (!process.env.YAI_TEAM_AGENT) setInterval(() => { if (state.crewActive && CREW.working()) saveSession(); }, 15000).unref();
 const TEAM = require("./team")({
   state, root, api, ui, X,
   syncMute: () => syncMute(),
@@ -301,8 +304,19 @@ function saveSession() {
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     state.title ||= sessionTitle({ messages: state.messages });
-    fs.writeFileSync(sessionFile(), JSON.stringify({ id: state.conversationId, title: state.title, root, model: state.model, savedAt: new Date().toISOString(), messages: state.messages }));
+    // with /crew's state and the plan, and whether a request was still running (saved after every step too), so a
+    // closed window or a crash can be picked up again with /resume or yai -c (2026-10-23)
+    const crew = state.crewActive ? CREW.snapshot() : null;
+    const unfinished = !!state.busy && !state.interrupted;
+    fs.writeFileSync(sessionFile(), JSON.stringify({ id: state.conversationId, title: state.title, root, model: state.model, savedAt: new Date().toISOString(), messages: state.messages, ...(crew && { crew }), ...(unfinished && { unfinished, plan: state.plan }) }));
   } catch {}
+}
+// after a step: at most every 3 s (the file holds the whole conversation)
+let savedStepAt = 0;
+function saveStep() {
+  if (TEAM_AGENT || Date.now() - savedStepAt < 3000) return;
+  savedStepAt = Date.now();
+  saveSession();
 }
 
 function gitBranch() {
@@ -1318,6 +1332,20 @@ const TAG_ALIASES = {
   pattern: ["query", "regex", "glob"],
 };
 
+// A write_file cut off by the reply's length limit (or the site's time limit): its path and the complete lines of
+// content it got to, so they're saved and the model goes on from there instead of starting over in parts
+// (2026-10-23). The last line may be half written, so it's dropped; under 20 lines isn't worth keeping.
+function partialWrite(name, rest) {
+  if (name !== "write_file") return null;
+  const p = /<path>\s*([^<\n]+?)\s*<\/path>/.exec(rest);
+  const open = rest.indexOf("<content>");
+  if (!p || open < 0) return null;
+  const lines = rest.slice(open + "<content>".length).replace(/^\r?\n/, "").split("\n");
+  lines.pop();
+  if (lines.length < 20) return null;
+  return { path: p[1], content: lines.join("\n").replace(/\r$/, ""), append: /<append>\s*true\s*<\/append>/.test(rest.slice(0, open)), lines: lines.length };
+}
+
 function parseToolCall(text) {
   // <tool name="run">, and the attribute style some models use: <tool name="run" command="npm test">.
   const head = /(^|\n)[ \t]*<tool\s+name\s*=\s*["']?([\w-]+)["']?((?:\s+[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*>/.exec(text);
@@ -1337,7 +1365,7 @@ function parseToolCall(text) {
   if (end < 0) {
     const t = rest.trimEnd();
     const opened = [...t.matchAll(/<([a-z_][\w-]*)>/g)].map((m) => m[1]);
-    if (!opened.length || !/<\/[a-z_][\w-]*>$/.test(t) || !opened.every((tag) => t.includes(`</${tag}>`))) return { name, cutOff: true };
+    if (!opened.length || !/<\/[a-z_][\w-]*>$/.test(t) || !opened.every((tag) => t.includes(`</${tag}>`))) return { name, cutOff: true, partial: partialWrite(name, rest) };
     end = t.length;
     unclosed = true;
   }
@@ -1817,7 +1845,11 @@ async function execTool(call) {
         state.task.files.set(f, { a: was.a + counts.added, d: was.d + counts.removed });
       }
       ui.note(`${c.green("✓")} ${c.dim(plan.created ? "created · 1 new file" : "applied · 1 file changed")}`);
-      return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` };
+      // checked at once (cli/filecheck.js): a syntax error goes back in this step's result
+      const broken = checkFile(plan.abs);
+      if (broken) ui.note(`${c.yellow("!")} ${c.ink(`${relPath(plan.abs)} doesn't parse`)} ${c.dim(`· ${broken}`)}`);
+      const parts = call.name === "write_file" && String(call.args.append).trim() === "true";
+      return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` + (broken ? `\nCheck: ${relPath(plan.abs)} now has an error: ${broken}. ${parts ? "If you're still writing it in parts, finish it; otherwise fix" : "Fix"} this before you go on.` : "") };
     }
 
     // Shell commands
@@ -2067,19 +2099,36 @@ async function runAgent(content) {
         // stopped without finishing the step (a short one). They need different advice. Two in a row
         // and yAI stops, so a model stuck on the same mistake can't loop.
         const long = text.length > 6000;
-        cutOffs++;
-        if (cutOffs >= 2) {
-          state.messages[state.messages.length - 1].content = long ? "(my reply was cut off again)" : "(I didn't finish that step again)";
-          if (TEAM_AGENT) ui.event({ type: "error", message: long ? "its reply was cut off twice" : "it twice wrote a step without finishing it" });
-          ui.note(`${c.yellow("!")} ${c.ink(long ? "yAI's reply was cut off twice: it tried to write more than one reply can hold." : "yAI twice wrote a step without finishing it.")} ${c.dim(long ? "Ask for something shorter, or use a bigger model (/model)." : "Small models do this; try a bigger one (/model).")}`);
-          break;
+        // a long write_file cut off mid-file: the complete lines it had are saved and it goes on from the last one. A
+        // file that exists is only added to when the call said append (a cut-off call may have lost that tag).
+        const part = long && call.partial;
+        const partAbs = part ? path.resolve(root, part.path) : "";
+        if (part && (part.append || !fs.existsSync(partAbs)) && !((TEAM_AGENT || state.crewActive) && blockedBy({ name: "write_file", args: { path: part.path } }))) {
+          const saved = await execTool({ name: "write_file", args: { path: part.path, content: part.content, append: part.append ? "true" : "" } });
+          if (!String(saved.output).startsWith("Error")) {
+            cutOffs = 0;
+            const last = part.content.split("\n").filter((l) => l.trim()).pop() || "";
+            // the reply itself is shortened in the history: its lines are in the file now
+            state.messages[state.messages.length - 1].content = text.slice(0, text.search(/<tool\b/)).trim() + `\n(write_file ${part.path} was cut off by the length limit after ${part.lines} lines; yAI saved them)`;
+            ui.note(`${c.yellow("!")} ${c.dim(`that step was cut off · ${part.lines} lines saved · asking yAI to go on from there`)}`);
+            call.args = { path: part.path, append: part.append ? "true" : "" }; // for the attempt log below
+            result = { output: `${String(saved.output).split("\nCheck:")[0]}\nYour reply hit its length limit partway through ${part.path}, so yAI saved the ${part.lines} complete lines it had${part.append ? ", added to the end of the file" : ""}. The last saved line is:\n${last}\nGo on from the line after it: write_file with path ${part.path}, append set to true, and the rest of the file. Don't write the saved part again.` };
+          }
         }
-        result = {
-          output: long
-            ? `Error: your ${call.name} call was cut off before it was closed because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 400 lines: write_file with the first part, then write_file with append set to true for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
-            : `Error: your ${call.name} call isn't finished: it was never closed, so nothing happened. Write the whole step again in the tool-call format from your instructions, with every tag opened and closed (for edit_file: path, then old, then new) and the call closed at the end.`,
-        };
-        ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);
+        if (!result) {
+          if (++cutOffs >= 2) {
+            state.messages[state.messages.length - 1].content = long ? "(my reply was cut off again)" : "(I didn't finish that step again)";
+            if (TEAM_AGENT) ui.event({ type: "error", message: long ? "its reply was cut off twice" : "it twice wrote a step without finishing it" });
+            ui.note(`${c.yellow("!")} ${c.ink(long ? "yAI's reply was cut off twice: it tried to write more than one reply can hold." : "yAI twice wrote a step without finishing it.")} ${c.dim(long ? "Ask for something shorter, or use a bigger model (/model)." : "Small models do this; try a bigger one (/model).")}`);
+            break;
+          }
+          result = {
+            output: long
+              ? `Error: your ${call.name} call was cut off before it was closed because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 400 lines: write_file with the first part, then write_file with append set to true for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
+              : `Error: your ${call.name} call isn't finished: it was never closed, so nothing happened. Write the whole step again in the tool-call format from your instructions, with every tag opened and closed (for edit_file: path, then old, then new) and the call closed at the end.`,
+          };
+          ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);
+        }
       } else {
         cutOffs = 0;
         // "Nothing changed" = none of yAI's own edits since, and (for a file) the file on disk is untouched, since
@@ -2209,6 +2258,7 @@ async function runAgent(content) {
         ui.event({ type: "flip", path: f.path, count: f.n });
       }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
+      saveStep();
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result
       if (ctx.screenNotes?.length) pushUser(ctx.screenNotes.splice(0).join("\n\n"));
@@ -2718,6 +2768,18 @@ function loadSession(s) {
   ctx.readFiles.clear();
   redrawTranscript();
   ui.note(`${c.green("✓")} ${c.ink(`Continuing “${sessionTitle(s)}”`)} ${c.dim(`· ${typedCount(s)} messages · ${ago(s.savedAt)}`)}`);
+  // /crew comes back with its log and agents; the ones that were still working start again
+  if (state.crewActive) CREW.stop();
+  if (s.crew) {
+    const again = CREW.restore(s.crew);
+    ui.note(`${c.accent("◆")} ${c.ink("/crew is back on")} ${c.dim(`· ${s.crew.agents?.length || 0} background agent${s.crew.agents?.length === 1 ? "" : "s"}${again ? ` · ${again} picking up where ${again === 1 ? "it" : "they"} stopped` : ""} · /crew off ends it`)}`);
+  }
+  // it was closed in the middle of a request: the next message says so, with the plan it had
+  if (s.unfinished) {
+    const p = s.plan?.steps?.length ? `\nYour plan was:\n${s.plan.steps.map((x, i) => `${i + 1}. ${x}${i < s.plan.done ? " (done)" : ""}`).join("\n")}` : "";
+    state.pendingContext.push(`(yAI was closed while you were still working on the last request, so it was cut short. Check what's already done in the files before you go on.${p})`);
+    ui.note(`${c.yellow("!")} ${c.ink("It was closed in the middle of a task.")} ${c.dim("Type “continue” to pick up where it stopped.")}`);
+  }
 }
 async function resumeSession(arg = "") {
   const list = folderSessions();

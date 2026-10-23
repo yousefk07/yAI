@@ -323,5 +323,36 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     try { ui.screen?.render?.(); } catch {}
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length };
+  // ---------- saved with the conversation, for /resume and yai -c (2026-10-23) ----------
+  // The crew log, and each agent's job, state and report. On resume, finished agents show as before, and the ones
+  // that were still working start again with their job and a note that their files may be partly done.
+  function snapshot() {
+    if (!state.crewActive) return null;
+    return {
+      task: state.crewTask || "", feed: feed.slice(-100),
+      agents: agents.map((a) => ({ name: a.name, task: a.task, files: a.files, role: a.role, model: a.model, state: a.state, started: a.started, ended: a.ended || 0, cost: a.cost || 0, changed: [...a.changed], report: a.text.join("\n").slice(-3000) })),
+    };
+  }
+  function restore(snap) {
+    if (!snap) return 0;
+    state.crewTask = snap.task || state.crewTask;
+    start();
+    feed.push(...(snap.feed || []));
+    let again = 0;
+    for (const s of snap.agents || []) {
+      const was = ["starting", "working"].includes(s.state);
+      const a = { ...s, state: was ? "starting" : s.state, step: was ? "picking up again" : "", cost: s.cost || 0, costPrev: s.cost || 0, text: was ? [] : String(s.report || "").split("\n"), log: [], changed: new Set(s.changed || []), defied: 0, view: [c.faint("(from before yAI was closed)")] };
+      if (!was) { agents.push(a); continue; }
+      if (s.model && !has(s.model)) a.model = FLASH();
+      a.started = Date.now();
+      agents.push(a);
+      ctx.crew.open.add(a.name);
+      say("main", a.name, "picking up again after yAI was closed");
+      spawnAgent(a, `yAI was closed while you were working on this job, so you're starting again. Your files may be partly done${a.changed.size ? ` (you had changed: ${[...a.changed].join(", ")})` : ""}: read what's there first, then finish the job rather than starting over.\n\n---\n\n` + brief(a));
+      again++;
+    }
+    return again;
+  }
+
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length, snapshot, restore };
 };
