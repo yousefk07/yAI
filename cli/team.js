@@ -753,14 +753,23 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // The watcher's takeover: an agent that didn't listen is stopped, and its job goes to a fresh agent on the strongest
   // model, which keeps its name (helpers and the board still find it) and starts from a hand-over: what's done, what the
   // loop was, what to do instead. The stopped one is renamed "… (taken over)".
-  const TOP_MODEL = () => ["deepseek-v4-pro", "deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
+  // Ultra Flash (Yousef: the takeover shouldn't be Ultra)
+  const TAKEOVER_MODEL = () => ["deepseek-v4.1-flash", "deepseek-v4-pro"].find((id) => state.models.some((m) => m.id === id)) || state.model;
   function takeover(a, all, task, why) {
     if (a.takenOver || a.state !== "working") return;
+    if (a.isTakeover) {
+      // one takeover per job: the second time, it's stopped and left for you (a third agent would likely loop too)
+      a.takenOver = true; a.watchStopped = true; a.flag = `needs you: stuck again after a takeover (${clip(row1(why), 140)})`;
+      a.log.push({ k: "you", text: `(the watcher stopped it; it needs you) ${why}` });
+      say("watcher", `${a.name} is stuck again after a takeover · stopped · it needs you`, "bad", why);
+      a.send?.({ type: "stop" });
+      return d.wake();
+    }
     a.takenOver = true; a.watchStopped = true; a.flag = "taken over by the watcher";
     const steps = a.log.filter((x) => ["step", "result", "diff", "note", "you"].includes(x.k)).slice(-25).map((x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 120)}` : x.k === "result" ? `    → ${clip(row1(x.text), 100)}` : x.k === "diff" ? `- changed ${x.path}` : `- (${clip(row1(x.text || ""), 140)})`);
     const next = {
       name: a.name, task: a.task, files: a.files, role: a.role, crewLead: a.crewLead, helperOf: a.helperOf, crewName: a.crewName, round: a.round, phase: a.phase,
-      readOnly: a.readOnly, hasVerdict: a.hasVerdict, fixRound: a.fixRound, model: TOP_MODEL(), state: "waiting", step: "taking over", started: Date.now(),
+      readOnly: a.readOnly, hasVerdict: a.hasVerdict, fixRound: a.fixRound, model: TAKEOVER_MODEL(), isTakeover: true, state: "waiting", step: "taking over", started: Date.now(),
       changed: new Set(a.changed), created: new Set(a.created), text: [], cost: 0, asks: [],
       handover: [
         "You are taking over this job from an agent that got stuck, so yAI's watcher stopped it. Its work so far is in the files (it changed: " + (a.changed.size ? [...a.changed].join(", ") : "nothing yet") + ").",
@@ -940,6 +949,18 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "progress") { if (e.usage) a.usage = e.usage; a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "commission" && a.crewLead) commissionHelper(a, e, task, all);
+      // the same reasoning written again and again: a loop like any other
+      else if (e.type === "repeat-text") {
+        a.textLoops = Number(e.count) || (a.textLoops || 0) + 1;
+        log({ k: "note", text: `wrote the same reasoning again (${a.textLoops}×)` });
+        if (a.textLoops === 2 && !state.interrupted) {
+          const msg = "You're repeating the same reasoning without acting. Stop analysing: measure one fact with page_eval, or ask check_page a specific question with look_for, or make one change and check it.";
+          a.watchNotes = (a.watchNotes || 0) + 1; a.watchTotal = (a.watchTotal || 0) + 1;
+          a.send?.({ type: "note", text: `From the team's watcher: ${msg}` });
+          a.log.push({ k: "you", text: `(the watcher) ${msg}` });
+          say("watcher", `→ ${a.name}`, "acc", msg);
+        } else if (a.textLoops >= 4 && a.watchNotes && !a.takenOver && !state.interrupted) takeover(a, all, task, `It kept writing the same reasoning (${a.textLoops} times) without getting new evidence or changing anything.`);
+      }
       else if (e.type === "flip") {
         a.flips = (a.flips || 0) + 1;
         log({ k: "note", text: `went back to an earlier version of ${e.path} (${e.count}×)` });
@@ -2068,7 +2089,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       try {
         const show = (x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 140)}` : x.k === "result" ? `    → ${clip(row1(x.text), 110)}` : x.k === "diff" ? `- changed ${x.path}` : x.k === "you" ? `- (a note it got: ${clip(row1(x.text), 140)})` : `- (${x.k}: ${clip(row1(x.text || x.line), 120)})`;
         const lines = fresh.map((a) => [
-          `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}${a.flips ? `, went back to an earlier version of a file ${a.flips} time(s)` : ""}`,
+          `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}${a.flips ? `, went back to an earlier version of a file ${a.flips} time(s)` : ""}${a.textLoops ? `, wrote the same reasoning again ${a.textLoops} time(s)` : ""}${a.isTakeover ? ", it is ALREADY a takeover (one more loop and it goes to the user)" : ""}`,
           `Its job: ${clip(row1(a.task), 300)}`,
           ...(a.plan?.steps?.length ? ["Its plan:", ...a.plan.steps.map((l, i) => `${i + 1}. ${clip(row1(l), 120)}`), `(it has marked ${a.plan.done} finished)`] : []),
           "Recent steps:",

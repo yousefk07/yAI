@@ -1936,6 +1936,8 @@ async function runAgent(content) {
     }
   };
   let reads = 0; // /team agents: reads and searches before their first change
+  let refusedInRow = 0; // steps refused as repeats, one after another
+  const recentProse = []; let textRepeats = 0, repeatTextNow = false; // the same reasoning written again
   const sameRuns = new Map(); // a command's first 60 characters -> { n: times run, undo: changes made by then }
   let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
   let repeats = 0; // look-only steps asked for again with nothing changed
@@ -1988,6 +1990,16 @@ async function runAgent(content) {
       }
       emptyRetried = false; // a reply came: the next empty one gets its own quiet retry
       const call = parseToolCall(text);
+      // The same reasoning written again (2026-10-22: a takeover agent wrote "the atlas is 256×256… this is correct"
+      // paragraph after paragraph): what it says before its tool call, compared with its last few replies.
+      if (TEAM_AGENT) {
+        const prose = text.slice(0, Math.max(0, text.search(/<tool[\s>]|<｜|<\|/) === -1 ? text.length : text.search(/<tool[\s>]|<｜|<\|/))).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+        const grams = new Set(prose.split(" ").map((w, i, all) => all.slice(i, i + 3).join(" ")).filter((g) => g.split(" ").length === 3));
+        const same = grams.size >= 25 && recentProse.some((p) => { let n = 0; for (const g of grams) if (p.has(g)) n++; return n / Math.min(grams.size, p.size) >= 0.6; });
+        if (same) { textRepeats++; ui.event({ type: "repeat-text", count: textRepeats }); }
+        if (grams.size >= 25) { recentProse.push(grams); if (recentProse.length > 4) recentProse.shift(); }
+        repeatTextNow = same;
+      }
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
       if (!call) {
         // "Now I'll create the CSS file:" and then nothing: the model said what it would do and ended its reply
@@ -2065,10 +2077,14 @@ async function runAgent(content) {
               : again
                 ? `${again.join(", ")} ${again.length === 1 ? "is a long file you already read whole" : "are long files you already read whole"}, and ${again.length === 1 ? "it hasn't" : "they haven't"} changed since: the text is further up, or was removed to save space. Don't read it whole again: read only the lines you need (path:120-180, several ranges in one read_file), or search for one name.`
                 : `You already did this exact step (step ${before.step + 1}) and nothing has changed since, so it wasn't run again: its result is the same as before, further up. Use what you already have.`) +
-              (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : ""),
+              (repeats >= 3 ? ` You have now repeated ${repeats} steps you already did. Stop looking again: make your change now (write_file or edit_file), or give your final answer with what you know.` : "") +
+              // the second refusal in a row: which tool gets new evidence (2026-10-22: an agent kept asking to "look at
+              // the screenshot" with the same refused command)
+              (++refusedInRow >= 2 ? ` To get NEW evidence instead: to see the screen, check_page with <look_for> (a specific question); to measure something in the page (a value, a size, a pixel colour, a WebGL error), page_eval; to test an idea, make one change with edit_file and check it.` : ""),
           };
           ui.note(c.dim(samey ? "· the same command again, a little changed · not run" : everything ? "· a search for everything · not run" : inside ? "· lines it already has · not read again" : again ? `· ${again.length === 1 ? "a long file" : "long files"} read whole before · asked for the lines it needs` : `· same step as before (${call.name}) · not run again`));
         } else {
+          refusedInRow = 0;
           result = await execTool(call);
           if (runKey.length >= 30) sameRuns.set(runKey, like && like.undo === state.undo.length ? { n: like.n + 1, undo: like.undo } : { n: 1, undo: state.undo.length });
           // a /team agent's command still runs (the watcher decides when it's gone on too long); it's told, though
@@ -2126,6 +2142,7 @@ async function runAgent(content) {
         else if (call.name === "check_page") logAttempt(`check_page${arg.keys ? ` (${String(arg.keys).slice(0, 30)})` : ""} → ${String(result.output).split("\n").filter((l) => /^(FROZEN|BLANK|SAME SCREEN|Compared with your last check|Errors in the browser|No errors)/.test(l)).map((l) => l.replace(/\s+/g, " ").slice(0, 110)).join(" · ") || "checked"}`);
         else if (call.name === "run") logAttempt(`ran ${String(arg.command || "").replace(/\s+/g, " ").slice(0, 70)} → ${/\n\[(exit code [1-9]\d*|command [^\]]+)\]$/.test(String(result.output)) ? "FAILED" : "ok"}`);
       }
+      if (repeatTextNow) result.output += `\nYou just wrote nearly the same reasoning as before (${textRepeats} time${textRepeats === 1 ? "" : "s"} now). Thinking it over again won't settle it: get one new fact (page_eval to measure it, check_page with <look_for> to see it) or make one change and check it.`;
       // a flip-flop: this edit put a file back to a version it already had
       if (ctx.flip) {
         const f = ctx.flip; ctx.flip = null;

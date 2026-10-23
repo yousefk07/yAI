@@ -343,4 +343,40 @@ const capped = (fn, ms, what) => (opts) => {
   const run = fn(opts); run.catch(() => {});
   return Promise.race([run, cap]).finally(() => clearTimeout(t));
 };
-module.exports = { mobile: capped(mobile, 120000, "mobile"), performance: capped(performance, 90000, "performance"), accessibility: capped(accessibility, 90000, "accessibility"), playtest: capped(playtest, 180000, "playtest"), pageCheck };
+// page_eval: the page opened as check_page opens it (started, past its menus), then the agent's JavaScript run in it.
+// screenPixels([[x, y], ...]) reads colours from a real screenshot, so it works on a WebGL canvas too (which can't read
+// its own pixels back). The result comes back as JSON, cut to 4,000 characters. 30 s at most.
+async function pageEval({ entry, code, keys = "", wait = 1500 }) {
+  const out = {};
+  let timer;
+  const run = (async () => {
+    const p = await keptPage(entry);
+    out.drop = p.drop;
+    await settle(p.b, 300, 1500);
+    const pressed = await within(B.evaluate(p.b, START), 5000, "");
+    await settle(p.b, pressed ? 600 : 200, 2500);
+    const notes = [];
+    await pastMenus(p.b, notes);
+    for (const k of String(keys || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8)) {
+      const [c, ms] = k.split(":"); const key = c.replace(/^Key/, "").replace(/^Digit/, "").toLowerCase();
+      await within(p.b.send("Input.dispatchKeyEvent", { type: "keyDown", code: c, key: c === "Space" ? " " : key }), 5000);
+      await sleep(Math.min(Number(ms) || 150, 4000));
+      await within(p.b.send("Input.dispatchKeyEvent", { type: "keyUp", code: c, key: c === "Space" ? " " : key }), 5000);
+    }
+    await sleep(Math.min(Math.max(Number(wait) || 0, 0), 8000));
+    // the screenshot for screenPixels, drawn into a 2D canvas inside the page
+    const shot = await within(p.b.send("Page.captureScreenshot", { format: "png" }), 10000, null);
+    if (shot?.data) await within(B.evaluate(p.b, `(async () => { const img = new Image(); img.src = "data:image/png;base64,${shot.data}"; await img.decode(); const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0); window.__yaiShot = g; window.screenPixels = (pts) => pts.map(([x, y]) => { const d = g.getImageData(Math.round(x), Math.round(y), 1, 1).data; return { x, y, rgb: [d[0], d[1], d[2]] }; }); return true; })()`), 10000, false);
+    const value = await within(B.evaluate(p.b, `(async () => { try { const r = await (async () => { ${/\breturn\b/.test(code) ? code : `return (${code});`} })(); return JSON.stringify(r === undefined ? null : r, (k, v) => (typeof v === "function" ? "[function]" : v instanceof Element ? "<" + v.tagName.toLowerCase() + (v.id ? "#" + v.id : "") + ">" : v)) ?? "null"; } catch (e) { return "Error: " + (e && e.message || e); } })()`), 12000, null);
+    return { notes, pressed, value, errors: [...new Set(p.errors)].slice(0, 6) };
+  })();
+  run.catch(() => {});
+  const cap = new Promise((ok) => { timer = setTimeout(() => ok({ timedOut: true }), 30000); });
+  try {
+    const r = await Promise.race([run, cap]);
+    if (r.timedOut || r.value == null) out.drop?.();
+    return r;
+  } finally { clearTimeout(timer); }
+}
+
+module.exports = { pageEval, mobile: capped(mobile, 120000, "mobile"), performance: capped(performance, 90000, "performance"), accessibility: capped(accessibility, 90000, "accessibility"), playtest: capped(playtest, 180000, "playtest"), pageCheck };

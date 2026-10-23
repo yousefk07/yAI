@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.181",
+      "date": "2026-10-22",
+      "title": "Measure, don't guess",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "page_eval",
+          "text": "Agents can run JavaScript in the live page (started, past its menus) and get the result: a value, a size, a WebGL error, or real pixel colours with screenPixels(), even on a WebGL canvas. For bugs an agent can't see."
+        },
+        {
+          "area": "Agent",
+          "title": "A pointer when stuck",
+          "text": "The second step in a row refused as a repeat says which tool gets new evidence: check_page with look_for to see, page_eval to measure, one change to test."
+        },
+        {
+          "area": "Team",
+          "title": "Repeated reasoning is a loop",
+          "text": "An agent that writes the same reasoning again is told at once; the second time it gets a watcher note, the fourth time it is taken over."
+        },
+        {
+          "area": "Team",
+          "title": "One takeover per job",
+          "text": "The takeover runs on Ultra Flash. If it gets stuck too, it is stopped and flagged as needing you, instead of handing over again."
+        }
+      ]
+    },
+    {
       "version": "1.0.180",
       "date": "2026-10-22",
       "title": "Agents that remember what they tried",

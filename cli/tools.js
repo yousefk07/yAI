@@ -425,6 +425,40 @@ const tools = {
       ].join("\n");
     },
   },
+  page_eval: {
+    params: ["code", "path", "keys"],
+    describe: "Measure something in the live web page or game instead of guessing: yAI opens it (started, past its menus), runs your JavaScript in it, and returns the result as JSON. <code> is an expression or a function body with return, e.g. document.querySelectorAll('canvas').length, or: const gl = document.querySelector('canvas').getContext('webgl2'); return gl && gl.getError(). screenPixels([[x, y], ...]) gives the real colours at screen points (works for WebGL). Your game's globals are there (window.Game…). Optional <keys> to hold first (KeyW:800,Space). Use it to check a fact (a value, a size, a colour, a count) when reading the code doesn't settle it.",
+    readOnly: true,
+    async run(ctx, a) {
+      const code = String(a.code || "").trim();
+      if (!code) throw new ToolError("<code> is required: the JavaScript to run in the page.");
+      let page = String(a.path || "").trim();
+      if (!page) {
+        const found = [];
+        const look = (dir, depth) => { let list = []; try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; } for (const e of list) { if (e.isFile() && /^index\.html?$/i.test(e.name)) found.push(path.join(dir, e.name)); else if (e.isDirectory() && depth < 2 && !/^(node_modules|\.git|yai-media|\.yai-old|\.yai-team)$/.test(e.name)) look(path.join(dir, e.name), depth + 1); } };
+        look(ctx.root, 0);
+        found.sort((x, y) => fs.statSync(y).mtimeMs - fs.statSync(x).mtimeMs);
+        if (!found.length) throw new ToolError("No index.html found. Give <path>.");
+        page = found[0];
+      }
+      const abs = resolve(ctx, page);
+      if (!fs.existsSync(abs)) throw new ToolError(`${page} doesn't exist.`);
+      toolHeader("Page eval", code.replace(/\s+/g, " ").slice(0, 70));
+      spinner.start("running it in the page");
+      let r;
+      try { r = await require("./teamchecks").pageEval({ entry: abs, code, keys: a.keys || "" }); }
+      catch (err) { throw new ToolError(`Couldn't open it: ${err.message}`); }
+      finally { spinner.stop(); }
+      if (r.timedOut) { toolResult("timed out", { color: c.red }); return "The page didn't answer within 30 s: it may be frozen (a loop that never ends), or your code waits on something that never comes."; }
+      const value = String(r.value ?? "null");
+      toolResult(value.startsWith("Error:") ? "error in the code" : `${value.length} chars`);
+      return [
+        r.pressed ? `(Pressed "${r.pressed}"${r.notes.length ? "; " + r.notes.join(" ") : ""})` : r.notes.length ? `(${r.notes.join(" ")})` : "",
+        `Result: ${value.length > 4000 ? value.slice(0, 4000) + "… (cut)" : value}`,
+        r.errors.length ? `Errors in the browser:\n${r.errors.map((e) => `- ${e}`).join("\n")}` : "",
+      ].filter(Boolean).join("\n");
+    },
+  },
   check_page: {
     params: ["path", "keys", "look_for"],
     describe: "Open the web page (or game) in a real browser as it is right now, press its start button, and report: errors, a frozen page, the frame rate, the buttons and text on it, and a description of what's on screen. " +
