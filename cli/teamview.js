@@ -100,10 +100,18 @@ module.exports = function create({ ui }) {
     // the stage bar: one segment per stage, sized by how many agents it has
     const barW = W - 2 - (strip.length - 1);
     const weight = strip.reduce((s, x) => s + Math.max(1, x.total), 0);
-    let used = 0;
+    // widths that always add up to the bar: at least 4 each when there is room (2026-10-22 review: many stages on a
+    // narrow screen pushed the last one below zero and "━".repeat threw)
+    const minW = barW >= strip.length * 4 ? 4 : barW >= strip.length ? 1 : 0;
+    const widths = strip.map((x) => Math.max(minW, Math.round((barW * Math.max(1, x.total)) / weight)));
+    let sum = widths.reduce((s2, w) => s2 + w, 0);
+    for (let guard = 0; sum !== Math.max(0, barW) && guard < 10000; guard++) {
+      const i = sum > barW ? widths.indexOf(Math.max(...widths)) : widths.indexOf(Math.min(...widths));
+      if (sum > barW && widths[i] <= minW) break;
+      widths[i] += sum > barW ? -1 : 1; sum += sum > barW ? -1 : 1;
+    }
     const segs = strip.map((x, i) => {
-      const w = i === strip.length - 1 ? barW - used : Math.max(4, Math.round((barW * Math.max(1, x.total)) / weight));
-      used += w;
+      const w = Math.max(0, widths[i]);
       const doneW = x.total ? Math.round((w * x.done) / x.total) : x.past ? w : 0;
       const workW = x.total ? Math.min(w - doneW, Math.round((w * x.working) / x.total)) : 0;
       const bar = c.dim("━".repeat(doneW)) + c.accent("━".repeat(workW)) + c.line("━".repeat(w - doneW - workW));

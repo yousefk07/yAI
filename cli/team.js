@@ -117,7 +117,7 @@ const ROLES = [
 ];
 // Rounds (2026-10-22): round r's phases are 10*(r-1) + the usual phase, so lp() is the phase within a round and rnd() an
 // agent's round (1 when it has none).
-const lp = (p) => (p || 1) % 10;
+const lp = (p) => Math.round(((p || 1) % 10) * 10) / 10; // rounded: 11.6 % 10 is 1.5999…
 const rnd = (a) => a.round || 1;
 const WAIT_STEP = { 0.2: "first", 0.5: "first", 0.8: "after the architect", 1: "after the architect", 1.2: "after the builders", 1.3: "after the builders", 1.5: "after the builders", 1.6: "after the builders", 2: "after the builders", 3: "if anything is found", 3.2: "after the fixer", 3.4: "after the re-check", 3.6: "after fixer 2", 4: "at the end" };
 const BAD = /^(PROBLEMS|FAIL|PARTLY)$/;
@@ -563,7 +563,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   async function startBrowser(a, task, all) {
     Object.assign(a, { state: "working", step: "opening the page in a browser", started: Date.now(), log: [{ k: "brief", text: a.task }] });
     d.wake();
-    const r = await browserCheck(a, task, all, { signal: state.abort?.signal });
+    // a browser or local server that fails to start is a skipped check, not a crash (2026-10-22 review)
+    const r = await browserCheck(a, task, all, { signal: state.abort?.signal }).catch((err) => ({ verdict: "", lines: [`Couldn't open the page: ${err.message}`] }));
     a.text = [...r.lines, ...(r.verdict ? [`VERDICT: ${r.verdict}`] : [])];
     for (const l of r.lines) a.log.push({ k: "text", line: l });
     a.verdict = r.verdict;
@@ -599,13 +600,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       for (const x of all.filter((y) => ["mobile", "accessibility", "performance"].includes(y.role) && BAD.test(y.verdict || ""))) {
         if (!entryPage(all) || !TCx[x.role]) continue;
         a.step = `running the ${x.role} check again`;
-        const r = await TCx[x.role]({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: "", lines: [`Couldn't run it: ${err.message}`] }));
+        const r = await TCx[x.role]({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: /frozen|didn't answer/.test(err.message) ? "FAIL" : "", lines: [`Couldn't run it: ${err.message}`] }));
         if (r.verdict) results.push({ name: `the ${x.role} check`, ok: !BAD.test(r.verdict), lines: r.lines });
       }
       if (all.some((x) => x.role === "playtester") && entryPage(all)) {
         a.step = "playing it again";
         const TC = require("./teamchecks");
-        const r = await TC.playtest({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: "", lines: [`Couldn't play it: ${err.message}`] }));
+        const r = await TC.playtest({ root, entry: path.resolve(root, entryPage(all)), task, X, signal: state.abort?.signal }).catch((err) => ({ verdict: /frozen|didn't answer/.test(err.message) ? "FAIL" : "", lines: [`Couldn't play it: ${err.message}`] }));
         if (r.verdict) results.push({ name: "playing it", ok: r.verdict === "PASS", lines: r.lines });
       }
     } catch (err) { results.push({ name: "the re-check", ok: false, lines: [err.message] }); }
@@ -693,7 +694,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     d.wake();
     let r;
     if (!fn || !entry || !require("fs").existsSync(path.resolve(root, entry))) r = { verdict: "", lines: ["There's no page to open."] };
-    else { try { r = await fn({ root, entry: path.resolve(root, entry), task, X, signal: state.abort?.signal }); } catch (err) { r = { verdict: "", lines: [`Couldn't run it: ${err.message}`] }; } }
+    else { try { r = await fn({ root, entry: path.resolve(root, entry), task, X, signal: state.abort?.signal }); } catch (err) { r = { verdict: /frozen|didn't answer/.test(err.message) ? "FAIL" : "", lines: [`Couldn't run it: ${err.message}`] }; } }
     a.text = [...r.lines, ...(r.verdict ? [`VERDICT: ${r.verdict}`] : [])];
     for (const l of r.lines) a.log.push({ k: "text", line: l });
     a.verdict = r.verdict;
@@ -722,7 +723,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     say(a.name, `${want ? `→ ${to}` : "→ team"}${note}`, "acc", text);
   }
   function startAgent(a, task, all) {
-    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(); a.created = new Set(); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
+    // a restart (network drop, stuck, or you) keeps what the earlier run spent and changed (2026-10-22 review: totals,
+    // learned estimates and the summary lost them)
+    a.costPrev = a.child !== undefined ? a.cost || 0 : 0; // a.cost already includes any earlier restarts
+    a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(a.changed || []); a.created = new Set(a.created || []); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
+    a.watchedAt = 0; a.watchNotes = 0; a.watchStopped = false;
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
@@ -744,27 +749,27 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (e.model !== want) a.send({ type: "model", id: want });
         a.send({ type: "prompt", text: a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
-      else if (e.type === "status" && e.text) a.step = String(e.text);
+      else if (e.type === "status" && e.text) { a.step = String(e.text); a.lastMove = Date.now(); }
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
       // the agent took in your notes (after its step): they're marked read, in its view and the feed
       else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
-      else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost || a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
+      else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
-      else if (e.type === "diff" && e.path) { a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
+      else if (e.type === "diff" && e.path) { a.lastMove = Date.now(); a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
       else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
-      else if (e.type === "text") { a.text.push(e.line); log({ k: "text", line: e.line }); }
+      else if (e.type === "text") { a.text.push(e.line); a.lastMove = Date.now(); log({ k: "text", line: e.line }); }
       else if (e.type === "note" && e.text) {
         log({ k: "note", text: e.text });
         if (/kept repeating steps|kept checking without changing/.test(e.text)) a.flag = "stuck · stopped";
         else if (/^paused after \d+ steps/.test(e.text)) a.flag = "hit the step limit";
       }
-      else if (e.type === "out" && String(e.text).trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n")) log({ k: "out", line: l });
+      else if (e.type === "out" && String(e.text).trim()) for (const l of (a.lastMove = Date.now(),  String(e.text).replace(/\n$/, "").split("\n"))) log({ k: "out", line: l });
       else if (e.type === "ask") { a.asks.push(e); log({ k: "ask", text: e.title, detail: e.detail }); d.wake(); }
       else if (e.type === "error") { a.error = e.message; log({ k: "error", text: e.message }); if (a.state !== "working") a.state = "failed"; }
       else if (e.type === "done" && a.state === "working") {
-        a.cost = e.cost?.session || 0;
+        a.cost = (a.costPrev || 0) + (e.cost?.session || 0);
         a.fallbacks = e.fallbacks || 0;
         // it ended without a step, a word or an edit: it never got to work (the model refused, the allowance ran out…)
         if (!a.error && !a.text.length && !a.changed.size && !a.log.some((x) => x.k === "step")) {
@@ -774,18 +779,23 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         if (/today'?s \$|allowance|resets at midnight|daily limit/i.test(a.error || "") && !state.interrupted) {
           say("yAI", "today's yAI allowance ran out, so the team stopped", "bad", a.error);
           state.teamStopReason = a.error;
+          state.interrupted = true; // as Esc does: no later phase, round or re-run starts
           setTimeout(() => state.abort?.abort(), 0);
         }
         // the connection to yAI dropped (after the client's own retries): start it again, twice at most
-        if (/fetch failed|ECONNRESET|socket|other side closed|terminated|network|Bad Gateway|Service Unavailable|Gateway Time/i.test(a.error || "") && !state.interrupted && (a.netRetries || 0) < 2) {
+        if (/fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|other side closed|^terminated$|Bad Gateway|Service Unavailable|Gateway Time|HTTP 50[234]/i.test(a.error || "") && !state.interrupted && (a.netRetries || 0) < 2) {
           a.netRetries = (a.netRetries || 0) + 1;
           say(a.name, `lost the connection · restarting it (${a.netRetries} of 2)`, "warn", a.error);
           a.child = null; a.error = ""; a.plan = null;
           try { child.stdin.end(); } catch {}
-          setTimeout(() => { if (!state.interrupted && !a.child) startAgent(a, task, all); }, 5000 * a.netRetries);
+          setTimeout(() => {
+            if (a.child || a.state !== "working") return; // skipped or restarted from the board meanwhile
+            if (state.interrupted) { Object.assign(a, { state: "stopped", ended: Date.now() }); return d.wake(); }
+            startAgent(a, task, all);
+          }, 5000 * a.netRetries);
           return;
         }
-        a.state = state.interrupted ? "stopped" : a.error ? "failed" : "done";
+        a.state = state.interrupted || a.watchStopped ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
         a.ended = Date.now();
         child.stdin.end();
@@ -998,7 +1008,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   };
   const clock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
   const STUCK_MS = 120000; // no step for two minutes
-  const stuck = (a) => a.state === "working" && !a.paused && Date.now() - (a.lastMove || a.started) > STUCK_MS;
+  // yAI's own rows (re-check, judge, the planner…) have their own time limits and no restart: never "stuck"
+  const stuck = (a) => a.state === "working" && !a.internal && !a.paused && Date.now() - (a.lastMove || a.started) > STUCK_MS;
   const money = (x) => (!x ? "" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
   const tokensOf = (n) => (!n ? "0" : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const modelShort = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
@@ -1494,7 +1505,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (m.action === "skip") skip(a);
       else if (m.action === "pause") togglePause(a);
       else if (m.action === "go") feedbackWait = null;
-      else if (m.action === "open") openPage();
+      else if (m.action === "play") openPage();
       else if (m.action === "note" && String(m.text || "").trim()) {
         const keep = viewing;
         viewing = a || null;
@@ -1693,7 +1704,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       }));
       if (added.length) {
         const like = (key) => agents.find((a) => a.role === key && rnd(a) === 1);
-        const members = agents.filter((a) => rnd(a) === 1 && a.role && roundKeys.has(a.role)).map((m) => fresh({ name: m.name, task: m.task, role: m.role, round: r + 1, phase: base + lp(m.phase), readOnly: m.readOnly, internal: m.internal, hasVerdict: m.hasVerdict, model: m.model }));
+        const members = agents.filter((a) => rnd(a) === 1 && a.role && roundKeys.has(a.role) && !a.fixRound).map((m) => fresh({ name: m.name, task: m.task, role: m.role, round: r + 1, phase: base + lp(m.phase), readOnly: m.readOnly, internal: m.internal, hasVerdict: m.hasVerdict, model: m.model }));
         if (like("browser")) members.push(fresh({ name: "browser", task: like("browser").task, role: "browser", round: r + 1, phase: base + 1.5, readOnly: true, hasVerdict: true, internal: true }));
         if (members.some((m) => m.role === "fixer")) members.push(fresh({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", role: "recheck", round: r + 1, phase: base + 3.2, readOnly: true, internal: true, hasVerdict: true }));
         members.push(fresh({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", role: "judge", round: r + 1, phase: base + 3.8, readOnly: true, internal: true, hasVerdict: true }));
@@ -1721,7 +1732,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // page opened cleanly and every built-in check passed, the pieces visibly fit, so it isn't needed.
     const integrationNotNeeded = (a) => {
       if (agents.some((x) => x.role === "reviewer" && x.state === "waiting")) return (a.merged = true, a.step = "done by the reviewer");
-      const page = agents.filter((x) => x.internal);
+      const page = agents.filter((x) => x.internal && rnd(x) === rnd(a) && (x.phase || 1) < a.phase);
       if (page.some((x) => x.role === "browser") && page.every((x) => x.state === "done" && x.verdict && !BAD.test(x.verdict))) return (a.step = "the page checks all passed");
       return false;
     };
@@ -1734,7 +1745,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       try {
         const files = [...new Set(builders.flatMap((x) => [...(x.files || []), ...(x.changed || [])]))].filter((f) => !/TEAM_CONTRACT/i.test(f));
         const m = PM.projectMap(root, files);
-        if (!m.text || m.mismatches.length) return false;
+        if (!m.text || m.mismatches.length || m.modules) return false; // the map doesn't follow imports
       } catch { return false; }
       return (a.step = "the pieces already fit");
     };
@@ -1790,6 +1801,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 4);
       if (!fresh.length) return;
       watching = true;
+      const askedAt = Date.now();
       try {
         const show = (x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 140)}` : x.k === "result" ? `    → ${clip(row1(x.text), 110)}` : x.k === "diff" ? `- changed ${x.path}` : x.k === "you" ? `- (a note it got: ${clip(row1(x.text), 140)})` : `- (${x.k}: ${clip(row1(x.text || x.line), 120)})`;
         const lines = fresh.map((a) => [
@@ -1804,9 +1816,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         try { acts = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]).actions || []; } catch {}
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
-          if (!a || !msg || a.state !== "working") continue;
+          if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
           if (act.do === "stop" && a.watchNotes) {
-            a.flag = "stopped by the watcher";
+            a.flag = "stopped by the watcher"; a.watchStopped = true;
             a.log.push({ k: "you", text: `(the watcher stopped it) ${msg}` });
             say("watcher", `stopped ${a.name}`, "warn", msg);
             a.send({ type: "stop" });
@@ -1826,7 +1838,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           // an agent with no step for two minutes is stuck: once in the feed (the board offers r retry · s skip)
           // the first time, yAI restarts it itself (2026-10-22); a second time it's flagged for you
           for (const a of agents) {
-            if (!stuck(a) || a.stuckSaid) continue;
+            if (!stuck(a) || a.stuckSaid || state.interrupted) continue;
             if (!a.autoRetried && !a.internal) { a.autoRetried = true; say(a.name, "no progress for 2m · restarted automatically", "warn"); retry(a, true); }
             else { a.stuckSaid = true; say(a.name, "has not done anything for 2m", "warn"); }
           }

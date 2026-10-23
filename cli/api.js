@@ -130,15 +130,18 @@ async function warmup(model, { signal, onProgress }) {
 // onStatus gets what the cloud GPU is doing (queued, starting...) until the reply starts.
 // A dropped connection or a busy gateway before any reply text arrived is tried again, up to 3 times (2026-10-22: one
 // "fetch failed" ended a /team builder 15 s in). Once text has arrived it isn't: the reply would start over twice.
-const NET_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR|socket|other side closed|terminated|network|Bad Gateway|Service Unavailable|Gateway Time-?out|50[234]/i;
+// Matched against the error's message, code and cause separately (2026-10-22 review: "50[234]" anywhere matched
+// "35024 tokens", and bare "network" or "socket" matched model errors).
+const NET_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR_|socket hang up|other side closed|^terminated$|Bad Gateway|Service Unavailable|Gateway Time-?out|\bHTTP 50[234]\b/i;
 async function chat(opts) {
   let got = false;
   const onText = (piece) => { got = true; return opts.onText(piece); };
+  const onTokens = (n) => { got = true; return opts.onTokens?.(n); }; // thinking tokens count: a retry would bill them twice
   for (let attempt = 0; ; attempt++) {
-    try { return await chatOnce({ ...opts, onText }); }
+    try { return await chatOnce({ ...opts, onText, onTokens }); }
     catch (err) {
-      const msg = `${err.message} ${err.cause?.code || ""} ${err.cause?.message || ""}`;
-      if (got || attempt >= 3 || opts.signal?.aborted || err.auth || !NET_ERROR.test(msg)) throw err;
+      const net = [err.message, err.cause?.code, err.cause?.message].some((x) => x && NET_ERROR.test(String(x)));
+      if (got || attempt >= 3 || opts.signal?.aborted || err.auth || !net) throw err;
       opts.onStatus?.(`connection dropped · trying again (${attempt + 1} of 3)`);
       await new Promise((r) => setTimeout(r, [1500, 4000, 9000][attempt]));
       if (opts.signal?.aborted) throw err;

@@ -23,16 +23,19 @@ const alive = (b, ms = 6000) => Promise.race([B.evaluate(b, "1").then(() => true
 // Opens the page in a fresh browser at a size; collects console errors. Call close() when done.
 async function openPage(entry, { width = 1280, height = 720, mobile = false, beforeLoad = "" } = {}) {
   const server = await B.serveFolder(path.dirname(entry));
-  const b = await B.launch({ width, height });
+  let b;
+  try { b = await B.launch({ width, height }); } catch (err) { server.close(); throw err; }
   const errors = [];
   // a headless browser can't capture the mouse, so a game's pointer-lock request fails here and nowhere else: not
   // the game's fault (2026-10-22: a working Minecraft clone failed its playtest on it)
   const headlessOnly = (t) => /pointer ?lock|WrongDocumentError/i.test(t);
   b.on("Runtime.exceptionThrown", (p) => { const t = (p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]; if (!headlessOnly(t)) errors.push(`Uncaught: ${t}`); });
   b.on("Runtime.consoleAPICalled", (p) => { if (p.type !== "error") return; const t = p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 200); if (!headlessOnly(t)) errors.push(`console.error: ${t}`); });
-  if (mobile || width !== 1280 || height !== 720) await B.setViewport(b, width, height, mobile);
-  if (beforeLoad) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: beforeLoad });
-  await B.open(b, `${server.url}/${encodeURIComponent(path.basename(entry))}`);
+  try {
+    if (mobile || width !== 1280 || height !== 720) await B.setViewport(b, width, height, mobile);
+    if (beforeLoad) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: beforeLoad });
+    await B.open(b, `${server.url}/${encodeURIComponent(path.basename(entry))}`);
+  } catch (err) { try { b.close(); } catch {} server.close(); throw err; }
   return { b, errors, url: server.url, close: () => { try { b.close(); } catch {} server.close(); } };
 }
 const keyHold = async (b, [code, key, vk], ms) => {
@@ -198,7 +201,7 @@ async function playtest({ root, entry, task, X, signal }) {
     await snap("after reloading the page");
     notes.push(before === "{}" ? "Nothing was saved in the browser (localStorage)." : `Saved: ${before}; after a reload: ${after}${before === after ? " (kept)" : " (CHANGED)"}.`);
     const content = [{ type: "text", text: `The task: ${task}\nWhat the script did: ${notes.join(" ")}` }];
-    for (const s of shots) content.push({ type: "text", text: s.label }, X.imagePart(s.img, "image/jpeg"));
+    for (const s of shots) content.push({ type: "text", text: s.label }, X?.imagePart?.(s.img, "image/jpeg"));
     const seen = X?.imagePart ? await judge(X, PLAY_SYSTEM, content, signal) : "";
     const file = save(root, "team-playtest", shots[shots.length - 2]?.img || shots[0].img);
     const problems = /PLAYTEST:\s*PROBLEMS/i.test(seen) || p.errors.length;
@@ -267,4 +270,12 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
   }
 }
 
-module.exports = { mobile, performance, accessibility, playtest, pageCheck };
+// Each built-in check has an overall time limit as well (2026-10-22 review: on a frozen page they never ended). The
+// browser's own call limits close what they opened soon after.
+const capped = (fn, ms, what) => (opts) => {
+  let t;
+  const cap = new Promise((ok) => { t = setTimeout(() => ok({ verdict: "FAIL", lines: [`The ${what} check gave up after ${Math.round(ms / 1000)} s: the page stopped answering (a loop that never ends?).`] }), ms); });
+  const run = fn(opts); run.catch(() => {});
+  return Promise.race([run, cap]).finally(() => clearTimeout(t));
+};
+module.exports = { mobile: capped(mobile, 120000, "mobile"), performance: capped(performance, 90000, "performance"), accessibility: capped(accessibility, 90000, "accessibility"), playtest: capped(playtest, 180000, "playtest"), pageCheck };

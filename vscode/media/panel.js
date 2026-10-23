@@ -236,7 +236,7 @@
       return `<div class="sg ${s.current ? "cur" : s.past ? "past" : ""}" style="flex:${total}"><div class="bar"><i style="width:${d}%"></i><i class="w" style="width:${w}%"></i></div><span>${esc(s.label)}</span></div>`; }).join("");
     const head = `<div class="tc-head"><b title="${esc(v.task)}">${esc(v.task)}</b></div><div class="tc-stats"><span><b>${v.done} / ${v.total}</b> done</span>${v.working ? `<span><b>${v.working}</b> working</span>` : ""}<span><b>${esc(v.elapsed)}</b></span><span><b>${esc(v.cost)}</b>${v.estimate ? ` of ~${esc(v.estimate)}` : ""}</span>${v.over ? `<span class="muted">finished</span>` : ""}</div><div class="strip">${strip}</div>` +
       // between rounds: play it, say what to change, or go on
-      (v.waiting ? `<div class="waitbar"><b>Round ${v.waiting.round} is done.</b> <button type="button" class="link" data-act="open">Open it to play</button> · type what to change below · <button type="button" class="link" data-act="go">Go on</button> <span class="muted">${v.waiting.seconds}s</span></div>` : "");
+      (v.waiting ? `<div class="waitbar"><b>Round ${v.waiting.round} is done.</b> <button type="button" class="link" data-act="play">Open it to play</button> · type what to change below · <button type="button" class="link" data-act="go">Go on</button> <span class="muted">${v.waiting.seconds}s</span></div>` : "");
     if (v.agent) { team.card.innerHTML = head + agentHtml(v.agent); }
     else {
       const stages = v.stages.map((g) => `<div class="stage"><div class="stage-name ${g.current ? "cur" : ""}"><b>${esc(g.name)}</b> ${esc(g.note)}</div>` + g.rows.map((r) =>

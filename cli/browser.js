@@ -87,14 +87,22 @@ function serveFolder(dir) {
 async function launch({ width = 1280, height = 720 } = {}) {
   const exe = findChrome();
   if (!exe) throw new Error("No Chrome or Edge found. Install Chrome, or set YAI_CHROME to the browser's path.");
+  // folders left by earlier runs (2026-10-22 review: 83 of them, ~12 MB each) are swept once they're an hour old
+  try { for (const n of fs.readdirSync(os.tmpdir())) if (n.startsWith("yai-browser-")) { const p = path.join(os.tmpdir(), n); if (Date.now() - fs.statSync(p).mtimeMs > 3600000) fs.rmSync(p, { recursive: true, force: true, maxRetries: 2 }); } } catch {}
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "yai-browser-"));
   const proc = spawn(exe, [
     "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
     "--hide-scrollbars", "--mute-audio", "--disable-extensions", `--window-size=${width},${height}`, "about:blank",
   ], { stdio: "ignore", windowsHide: true });
+  const tidy = () => { try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 }); } catch {} };
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     try { proc.kill(); } catch {}
-    setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true }); } catch {} }, 1500);
+    // the profile is still in use until the browser's processes are gone
+    if (proc.exitCode !== null) setTimeout(tidy, 500);
+    else { proc.once("exit", () => setTimeout(tidy, 500)); setTimeout(tidy, 8000); }
   };
   try {
     // Chrome writes the port it picked into DevToolsActivePort.
@@ -130,11 +138,15 @@ async function launch({ width = 1280, height = 720 } = {}) {
         for (const l of listeners) if (l.method === msg.method) { try { l.fn(msg.params); } catch {} }
       }
     };
-    const send = (method, params = {}) => new Promise((resolve, reject) => {
+    // every call has a time limit, and a closed connection fails whatever is waiting (2026-10-22 review: on a frozen
+    // page the mobile, performance, accessibility and playtest checks waited forever)
+    const send = (method, params = {}, ms = 20000) => new Promise((resolve, reject) => {
       const n = ++id;
-      pending.set(n, { resolve, reject });
-      ws.send(JSON.stringify({ id: n, method, params }));
+      const timer = setTimeout(() => { if (pending.delete(n)) reject(new Error(`The browser didn't answer (${method}): the page may be frozen.`)); }, ms);
+      pending.set(n, { resolve: (x) => { clearTimeout(timer); resolve(x); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+      try { ws.send(JSON.stringify({ id: n, method, params })); } catch (err) { pending.get(n)?.reject(err); pending.delete(n); }
     });
+    ws.onclose = () => { for (const [n, p] of pending) { pending.delete(n); p.reject(new Error("The browser closed.")); } };
     const waitFor = (method, ms = 15000) => new Promise((resolve) => {
       const w = { method, resolve };
       waiters.push(w);

@@ -1466,6 +1466,7 @@ async function callModel() {
   const outer = state.abort;
   const onOuter = () => local.abort();
   outer.signal.addEventListener("abort", onOuter, { once: true });
+  if (outer.signal.aborted) local.abort(); // stopped already (a listener added now would never fire)
   try {
     const price = state.models.find((m) => m.id === state.model)?.price; // US$ per million tokens (yAI Ultra)
     const promptTokens = usedChars() / 3.6;
@@ -1885,13 +1886,14 @@ async function runAgent(content) {
   const readRanges = new Map();
   const rangesOf = (call) => {
     if (call.name !== "read_file" || call.args?.offset || call.args?.limit) return [];
-    const paths = T.splitPaths(call.args?.path, root);
+    const paths = T.splitPaths(call.args?.path, root).slice(0, 8); // read_file reads the first 8
     return paths.map((p) => {
       const m = /^(.*?)(?::(\d+)(?:-(\d+))?)?$/.exec(p.trim());
       try {
         const abs = path.resolve(root, m[1]);
         // read_file's own limits: a whole read shows 600 lines, or 400 each when several files are read at once
-        return { p: p.trim(), abs, mtime: fs.statSync(abs).mtimeMs, from: m[2] ? +m[2] : 1, to: m[2] ? (m[3] ? +m[3] : +m[2] + 199) : paths.length > 1 ? 400 : 600 };
+        const from = m[2] ? +m[2] : 1;
+        return { p: p.trim(), abs, mtime: fs.statSync(abs).mtimeMs, from, to: Math.min(from + 1999, m[2] ? (m[3] ? +m[3] : from + 199) : paths.length > 1 ? 400 : 600) };
       } catch { return null; }
     }).filter(Boolean);
   };
@@ -1939,6 +1941,7 @@ async function runAgent(content) {
     for (let step = 0; step < MAX_STEPS; step++) {
       // paused from the /team board: wait here, between steps, until it's resumed or stopped
       while (state.paused && !state.interrupted) await new Promise((r) => setTimeout(r, 250));
+      if (state.interrupted) { print(c.yellow("   ■ stopped")); return; }
       const text = await callModel();
       teamProgress();
       spinner.stop();
@@ -1958,10 +1961,12 @@ async function runAgent(content) {
           continue;
         }
         state.messages.push({ role: "assistant", content: "(no reply)" });
+        if (TEAM_AGENT) ui.event({ type: "error", message: "the model sent back nothing, twice" });
         const full = contextPercent() >= 85;
         ui.note(`${c.yellow("!")} ${c.ink("No reply from the model.")} ${c.dim(full ? "The conversation is too long for it: /compact, /clear, or a bigger model with /model." : "Try again, or pick another model with /model.")}`);
         break;
       }
+      emptyRetried = false; // a reply came: the next empty one gets its own quiet retry
       const call = parseToolCall(text);
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
       if (!call) {
@@ -1994,6 +1999,7 @@ async function runAgent(content) {
         cutOffs++;
         if (cutOffs >= 2) {
           state.messages[state.messages.length - 1].content = long ? "(my reply was cut off again)" : "(I didn't finish that step again)";
+          if (TEAM_AGENT) ui.event({ type: "error", message: long ? "its reply was cut off twice" : "it twice wrote a step without finishing it" });
           ui.note(`${c.yellow("!")} ${c.ink(long ? "yAI's reply was cut off twice: it tried to write more than one reply can hold." : "yAI twice wrote a step without finishing it.")} ${c.dim(long ? "Ask for something shorter, or use a bigger model (/model)." : "Small models do this; try a bigger one (/model).")}`);
           break;
         }
@@ -2010,7 +2016,7 @@ async function runAgent(content) {
         let sig = "";
         if (LOOK_STEPS.has(call.name)) {
           let mtime = "";
-          if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p)).mtimeMs; } catch { return 0; } }).join(",");
+          if (call.name === "read_file") mtime = T.splitPaths(call.args?.path, root).map((p) => { try { return fs.statSync(path.resolve(root, p.trim().replace(/:\d+(-\d+)?$/, ""))).mtimeMs; } catch { return 0; } }).join(",");
           sig = `${call.name} ${JSON.stringify(call.args || {})} @${state.undo.length} ${mtime}`;
         }
         // A result that was trimmed away (trimContext) may be run again: its text is gone. What stops a reader thrashing
@@ -2018,7 +2024,7 @@ async function runAgent(content) {
         // Minecraft clone was refused the files it needed and stopped) is the rule below: a long file read whole is
         // never read whole again unless it changed; the agent is pointed to the lines it needs instead.
         const before = sig && doneSteps.get(sig);
-        const lost = before && /old tool output removed/.test(String(before.msg?.content || ""));
+        const lost = before && !stillThere(before); // trimmed, or summarized away with the old messages
         const again = !before || lost ? wholeAgain(call) : null;
         const everything = call.name === "search" && /^\s*(\^?\.[*+]?\$?|\^|\$|\\[sSwW][*+]?|\[\\s\\S\][*+]?)?\s*$/.test(String(call.args?.pattern ?? ""));
         const inside = !(before && !lost) && !again && !everything ? haveLines(call) : null;
@@ -2048,7 +2054,7 @@ async function runAgent(content) {
           // a /team agent's command still runs (the watcher decides when it's gone on too long); it's told, though
           if (TEAM_AGENT && like && like.undo === state.undo.length && like.n >= 4) result.output += `\nYou have now run commands starting "${runKey}" ${like.n + 1} times without changing a file. More variations rarely tell you more: change the code, use check_page, or finish.`;
           if (sig) doneSteps.set(sig, (resultOf = { step, msg: null }));
-          if (call.name === "read_file") { noteWhole(call); if (resultOf && !String(result.output).startsWith("Error")) noteRanges(call, resultOf); }
+          if (call.name === "read_file") { noteWhole(call); if (resultOf && !/^Error|characters cut/.test(String(result.output))) noteRanges(call, resultOf); }
         }
       }
       if (state.interrupted) {

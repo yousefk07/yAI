@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "1.0.170",
+      "date": "2026-10-22",
+      "title": "/team, reviewed end to end",
+      "items": [
+        {
+          "area": "Team",
+          "title": "Nothing hangs",
+          "text": "Every browser call has a time limit and each built-in check an overall one; a frozen page is a failed check, not a run that never ends. A network restart, Esc or skip can no longer leave an agent working forever."
+        },
+        {
+          "area": "Team",
+          "title": "Stops mean stop",
+          "text": "When today's allowance runs out the team stops like Esc; agents the watcher stops show as stopped; failures show as failed."
+        },
+        {
+          "area": "Team",
+          "title": "Money",
+          "text": "Later rounds no longer pay for an extra fixer; the integration check is skipped when the page checks passed; long test runs are not mistaken for stuck agents; restarts keep their cost and files in the totals."
+        },
+        {
+          "area": "Agent",
+          "title": "Reading",
+          "text": "The already-read check only counts lines the agent was really shown, sees other agents' edits, and lets a summarized-away result be read again."
+        },
+        {
+          "area": "Models",
+          "title": "Faster failures",
+          "text": "A host that refuses (quota, billing) is left out for the rest of the request: an image request that can't be served fails in 4 requests instead of 36. Network errors are retried only when they are network errors."
+        },
+        {
+          "area": "Team",
+          "title": "Sharper project map",
+          "text": "Finds misspelt roots and calls and lowercase namespaces, ignores comments and shared setup lines, and never skips the merger for ES modules."
+        }
+      ]
+    },
+    {
       "version": "1.0.169",
       "date": "2026-10-22",
       "title": "The watcher",

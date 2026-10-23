@@ -14,8 +14,9 @@ const BUILTIN = new Set(["window", "document", "console", "Math", "JSON", "Objec
 
 // What one JavaScript file defines and uses.
 function readJs(text) {
+  text = text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")); // /* … */ and JSDoc aren't code
   const lines = text.split(/\r?\n/);
-  const defs = [], uses = [], ids = [];
+  const defs = [], uses = [], ids = [], calls = [];
   // a file's own names (var Input = …, function build …) and the members of its private object literals, so that
   // `MC.Input = Input` publishes Input's members (2026-10-22: a Minecraft clone built every module as a private
   // object published this way, and the map called all of their members missing)
@@ -25,7 +26,7 @@ function readJs(text) {
   lines.forEach((raw, i) => {
     const line = raw.replace(/\/\/.*$/, "");
     const at = i + 1;
-    const indent = raw.match(/^\s*/)[0].length;
+    const indent = raw.match(/^\s*/)[0].replace(/\t/g, "    ").length;
     let m;
     if (obj && indent <= obj.indent && /^\s*}/.test(raw)) obj = null;
     // MC.world.getBlock = …, window.MC = … (a capitalised root: player.position.x = … is a local's field, not a name the
@@ -37,7 +38,7 @@ function readJs(text) {
       const parts = m[1].split(".");
       // Raycaster.cast = function …: a member added to a private object after it was made
       if (parts.length === 2 && localObjs.has(parts[0])) localObjs.get(parts[0]).push({ key: parts[1], line: at });
-      else defs.push({ name: m[1], line: at, closed: opens(m[2]), alias });
+      else defs.push({ name: m[1], line: at, closed: opens(m[2]), alias, member: new RegExp(`^${m[1].replace(/[.$]/g, "\\$&")}\\s*\\|\\|`).test(m[2].trim()) || undefined });
       if (opens(m[2])) obj = { name: m[1], indent };
     } else if ((m = /^\s*window\.([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.*)$/.exec(line))) {
       defs.push({ name: m[1], line: at, closed: opens(m[2]) });
@@ -60,6 +61,10 @@ function readJs(text) {
     if ((m = /^\s{0,4}(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/.exec(line))) defs.push({ name: m[1], line: at, closed: false, local: indent > 0 });
     // what it uses: dotted names (MC.world.getBlock), and element ids
     for (const u of line.matchAll(/(?<![\w$.'"`])([A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)+)/g)) if (!BUILTIN.has(u[1].split(".")[0])) uses.push({ name: u[1], line: at });
+    // lowercase dotted names (game.update) count only when the root is a global some file defines (window.game = …)
+    for (const u of line.matchAll(/(?<![\w$.'"`])([a-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)/g)) if (!BUILTIN.has(u[1].split(".")[0])) uses.push({ name: u[1], line: at, lower: true });
+    // plain calls (drawHUD()), checked against the functions other files define
+    for (const u of line.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g)) calls.push({ name: u[1], line: at });
     for (const u of line.matchAll(/getElementById\(\s*['"]([\w-]+)['"]\s*\)|querySelector(?:All)?\(\s*['"]#([\w-]+)['"]/g)) ids.push({ id: u[1] || u[2], line: at });
   });
   // MC.Input = Input: the published name gets the private object's members, and its own members are now known
@@ -69,7 +74,7 @@ function readJs(text) {
     d.closed = true;
     for (const x of members) defs.push({ name: `${d.name}.${x.key}`, line: x.line, closed: false, member: true });
   }
-  return { defs, uses, ids, declared, lines: lines.length };
+  return { defs, uses, ids, calls, declared, lines: lines.length, module: /^\s*(import|export)\s/m.test(text) };
 }
 
 // What one HTML page has: element ids and the scripts it loads, in order.
@@ -122,13 +127,28 @@ function projectMap(root, files) {
     const seen = new Set();
     for (const u of r.uses) {
       const root = u.name.split(".")[0];
-      if (!roots.has(root)) continue;
+      if (u.lower && !defined.has(root)) continue; // a local's field (player.x), not a shared name
+      if (!roots.has(root)) {
+        const near = root.length >= 3 && /^[A-Z]/.test(root) && !r.declared.has(root) && [...roots].find((x) => x !== root && (x.toLowerCase() === root.toLowerCase() || (x.length >= 4 && dist(x.toLowerCase(), root.toLowerCase()) <= 1)));
+        if (near && !seen.has(root)) { seen.add(root); mismatches.push(`\`${r.f}:${u.line}\` uses \`${root}\`, which no file defines (did it mean \`${near}\`?)`); }
+        continue;
+      }
       if (r.declared.has(root) && !defined.has(root)) continue; // the file's own local (Input inside input.js)
       const name = missing(u.name);
       if (!name || seen.has(name)) continue;
       seen.add(name);
       const alt = similar(name, defined);
       mismatches.push(`\`${r.f}:${u.line}\` uses \`${name}\`, which no file defines${alt ? ` (did it mean \`${alt}\`?)` : ""}`);
+    }
+  }
+  // misspelt calls: drawHUD() when another file defines drawHud (only when a defined name is that close)
+  const fnNames = [...defined.keys()].filter((n) => !n.includes("."));
+  for (const r of js) {
+    const seen = new Set();
+    for (const u of r.calls) {
+      if (seen.has(u.name) || defined.has(u.name) || r.declared.has(u.name) || BUILTIN.has(u.name) || u.name.length < 4 || /^(if|for|while|switch|return|function|catch|typeof|new|await|super|import)$/.test(u.name)) continue;
+      const near = fnNames.find((x) => x.toLowerCase() === u.name.toLowerCase() || (x.length >= 5 && dist(x, u.name) === 1));
+      if (near) { seen.add(u.name); mismatches.push(`\`${r.f}:${u.line}\` calls \`${u.name}()\`, which no file defines (did it mean \`${near}\`?)`); }
     }
   }
   for (const [name, list] of defined) {
@@ -138,7 +158,8 @@ function projectMap(root, files) {
     if (files.length > 1 && !list.some((x) => x.member) && name.includes(".")) mismatches.push(`\`${name}\` is defined in ${files.length} files: ${list.map((x) => `\`${x.f}:${x.line}\``).join(", ")}`);
   }
   const allIds = new Set(html.flatMap((h) => [...h.ids]));
-  if (html.length) for (const r of js) for (const u of r.ids) if (!allIds.has(u.id) && !new RegExp(`['"\`]${u.id}['"\`]`).test(fs.readFileSync(path.join(root, r.f), "utf8").replace(/getElementById\([^)]*\)|querySelector(All)?\([^)]*\)/g, ""))) mismatches.push(`\`${r.f}:${u.line}\` looks up #${u.id}, which no HTML file has`);
+  const jsText = js.map((r) => { try { return fs.readFileSync(path.join(root, r.f), "utf8").replace(/getElementById\([^)]*\)|querySelector(All)?\([^)]*\)/g, ""); } catch { return ""; } }).join("\n");
+  if (html.length) for (const r of js) for (const u of r.ids) if (!allIds.has(u.id) && !new RegExp(`['"\`]${u.id}['"\`]`).test(jsText)) mismatches.push(`\`${r.f}:${u.line}\` looks up #${u.id}, which no HTML file has`);
   for (const h of html) for (const s of h.scripts) if (!/^(https?:)?\/\//.test(s) && !fs.existsSync(path.join(root, path.dirname(h.f), s))) mismatches.push(`\`${h.f}\` loads ${s}, which doesn't exist`);
   // the map itself: each file's size and what it defines
   const lines = read.map((r) => {
@@ -151,7 +172,7 @@ function projectMap(root, files) {
   });
   let text = lines.join("\n");
   if (text.length > 9000) text = text.slice(0, text.lastIndexOf("\n", 9000)) + "\n- … (the rest left out)";
-  return { text, mismatches: mismatches.slice(0, 40), total: read.reduce((s, r) => s + r.lines, 0) };
+  return { text, mismatches: mismatches.slice(0, 40), total: read.reduce((s, r) => s + r.lines, 0), modules: js.some((r) => r.module) };
 }
 
 // The closest defined name with the same parent, when it differs by a little (getBlok → getBlock)
