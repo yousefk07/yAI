@@ -2024,7 +2024,7 @@ async function runAgent(content) {
   ui.resetSections();
   let cutOffs = 0; // replies in a row that were cut off mid-step
   let loops = 0; // replies in this task stopped for repeating themselves
-  state.loopFix = null;
+  state.loopFix = null; state.repeatFixed = false;
   state.drops = 0; // replies in this task whose connection dropped partway (see callModel)
   let lastError = "", sameError = 0; // the same tool error repeated back to back
   let failedRuns = 0; // commands in a row that failed
@@ -2457,6 +2457,15 @@ async function runAgent(content) {
       } else sameError = 0;
       lastError = result.output;
       if (result.stop) return;
+      // three refused repeats: the next 4 steps go out warmer and on the other DeepSeek model, as after a looping reply,
+      // before the stop at six (2026-10-23: a /crew chat probing a broken page re-asked the same page_eval until it was
+      // stopped, the game still broken; a rut a change of model often gets out of)
+      if (repeats === 3 && !state.loopFix && !state.repeatFixed) {
+        state.repeatFixed = true;
+        const other = /^deepseek/i.test(state.model) ? ["deepseek-v4-pro", "deepseek-v4.1-flash"].find((id) => id !== state.model && state.models.some((m) => m.id === id)) : null;
+        state.loopFix = { steps: 4, model: other || null };
+        ui.note(c.dim(`· it keeps asking for steps it already took · the next steps ${other ? `go to ${modelLabel(other)}, ` : ""}at a warmer setting`));
+      }
       if (repeats >= 6 && !TEAM_AGENT) {
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim(TEAM_AGENT ? "Its report is what it found so far." : "Try a bigger model (/model) or say what to do next.")}`);
         break;

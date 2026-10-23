@@ -198,6 +198,15 @@ suite(__filename, [
     await ask(y, "check it", { mode: "acceptEdits", ms: 80000 });
     assert.match(srv.log[2].text, /Result: 8/);
   } },
+  { name: "three refused repeats: the next steps go out warmer, on the other model, before the stop at six", ms: 60000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, (r) => (r.n < 12 ? T("read_file", { path: "a.txt" }) : "Done."), { files: { "a.txt": "abc" } });
+    await ask(y, "go");
+    // request 0 reads; 1, 2, 3 are refused; from request 4 the next steps are warmer and on the other model
+    assert.deepStrictEqual(srv.log.slice(0, 4).map((r) => r.model), Array(4).fill("deepseek-v4.1-flash"));
+    assert.strictEqual(srv.log[4].model, "deepseek-v4-pro");
+    assert.strictEqual(srv.log[4].temperature, 1);
+    assert.ok(y.notes().some((n) => /kept repeating steps/.test(n)));
+  } },
   { name: "the same read again with nothing changed isn't run", fn: async (ctl) => {
     const { y, srv } = await session(ctl, (r) => (r.n < 2 ? T("read_file", { path: "a.txt" }) : "Done."), { files: { "a.txt": "abc" } });
     await ask(y, "go");

@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.218",
+      "date": "2026-10-23",
+      "title": "A way out of repeated steps",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Out of a rut before the stop",
+          "text": "A chat that keeps asking for steps it already took (the same read, the same page check) is stopped after six. In a real /crew build that stop came with the game still broken. Now, after three, its next steps go out warmer and on the other DeepSeek model, as after a looping reply, which often gets it unstuck before the stop."
+        },
+        {
+          "area": "Tests",
+          "title": "160 cases",
+          "text": "test/crew-team covers the new step too."
+        }
+      ]
+    },
+    {
       "version": "1.0.217",
       "date": "2026-10-23",
       "title": "Takeovers and fixers that stop, from a real /team run",
