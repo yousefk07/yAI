@@ -20,6 +20,13 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   const FLASH = () => ["deepseek-v4.1-flash", "deepseek-v4-pro"].find(has) || state.model;
   const LITE = () => (has("glm-4.7-flash") ? "glm-4.7-flash" : FLASH());
   const label = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
+  // the crew log: { at, from, to, text, tone }
+  const feed = [];
+  function say(from, to, text, tone = "") {
+    feed.push({ at: Date.now(), from, to, text: row1(text), tone });
+    if (feed.length > 300) feed.splice(0, 100);
+    try { ui.screen?.render?.(); } catch {}
+  }
   const working = () => agents.filter((a) => ["starting", "working"].includes(a.state));
 
   // ---------- on and off ----------
@@ -79,12 +86,13 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
     // a follow-up to one that has finished: the same agent wakes up, in its own conversation
     const earlier = agents.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.kept);
-    if (earlier && reawaken(earlier, spec.task)) return;
+    if (earlier && reawaken(earlier, spec.task)) return say("main", earlier.name, `follow-up: ${spec.task}`);
     if (working().length >= (state.crewMax || 4)) return report(name, `(not started: ${state.crewMax || 4} background agents are already working; do it yourself, or wait for one with crew_wait)`);
     const role = ["qa", "tester", "researcher"].includes(spec.role) ? spec.role : "builder";
     const model = spec.model === "lite" ? LITE() : FLASH();
     const a = { name, task: String(spec.task || "").trim(), files: (spec.files || []).map(String).filter((p) => p && !p.includes("..")), role, model, state: "starting", step: "starting", started: Date.now(), cost: 0, text: [], log: [], changed: new Set(), defied: 0 };
     agents.push(a);
+    say("main", a.name, `${a.role !== "builder" ? `(${a.role}) ` : ""}${a.task}`);
     spawnAgent(a, brief(a));
   }
   function spawnAgent(a, firstPrompt) {
@@ -132,6 +140,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   }
   // its report goes to the main chat: with a step's result, or at the start of its next turn
   function report(name, text) {
+    say(name, "main", text.replace(/^\([^)]*\)\s*/, (m) => (/stopped|failed/.test(m) ? m : "")).split("\n").find((l) => l.trim()) || text, /failed|stopped/.test(text.slice(0, 40)) ? "bad" : "");
     ctx.crew.open.delete(name);
     ctx.crew.reports.push({ name, report: text });
   }
@@ -158,6 +167,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     setTimeout(() => { try { old.stdin.end(); old.kill(); } catch {} }, 1500);
     const handover = [`You are taking over this job from a background agent that got stuck, so the watcher stopped it. Why: ${why}`, `It changed: ${a.changed.size ? [...a.changed].join(", ") : "nothing yet"}. Its last steps:`, ...a.log.slice(-20), "Don't repeat its loop: read the current files, decide what's actually wrong, say what you expect each change to do, and finish the job.", "", "---", ""].join("\n");
     Object.assign(a, { replacing: false, isTakeover: true, model: FLASH(), state: "starting", step: "taking over", started: Date.now(), costPrev: a.cost, text: [], log: [], defied: 0 });
+    say("watcher", a.name, `took over: ${why}`, "warn");
     ui.note(`${c.yellow("!")} ${c.ink(`The watcher took over from ${a.name}`)} ${c.dim(`· ${why}`)}`);
     spawnAgent(a, handover + brief(a));
   }
@@ -171,6 +181,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   }
   function open(a) {
     if (!a) return;
+    if (a === "LOG" && !feed.length) return;
     if (!viewing) { prevHook = state.keyHook; state.keyHook = (s, key) => { if (key?.name === "left") { close(); return true; } /* ← back: Esc stops the chat (2026-10-23) */ return prevHook ? prevHook(s, key) : false; }; }
     viewing = a;
     try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
@@ -180,8 +191,15 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     state.keyHook = prevHook; prevHook = null;
     try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
   }
+  const who = (n) => (n === "main" ? c.accent("main") : n === "watcher" ? c.yellow("watcher") : n === "you" ? c.red("you") : c.ink(n));
+  const logLine = (m, w, full) => {
+    const t = new Date(m.at), hm = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    const text = m.tone === "bad" ? c.red(m.text) : m.tone === "warn" ? c.ink(m.text) : c.dim(m.text);
+    return `${c.faint(hm)} ${who(m.from)} ${c.faint("→")} ${who(m.to)}: ${full ? text : clip(m.text, Math.max(20, w * 2 - 20))}`;
+  };
   function viewLines(w) {
     if (!viewing) return null;
+    if (viewing === "LOG") return [c.bold(c.ink("Crew log")) + c.faint("  · the chat, its background agents and the watcher"), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(feed.length ? feed.flatMap((m) => ["", logLine(m, w, true)]) : [c.dim("   Nothing yet.")])];
     const a = viewing;
     const head = `${c.bold(c.ink(a.name))}${a.role !== "builder" ? c.faint(` · ${a.role}`) : ""} ${c.faint(`· ${label(a.model)} · ${a.state} · ${secs((a.ended || Date.now()) - a.started)}${a.cost ? ` · ${money(a.cost)}` : ""}`)}`;
     return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
@@ -189,6 +207,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // a click on a row of the panel: the background agent whose name is on it
   function clickRow(text) {
     const side = String(text).split("│").pop();
+    if (/Crew log/.test(side)) { open("LOG"); return true; }
     const a = [...agents].sort((x, y) => y.name.length - x.name.length).find((x) => side.includes(x.name));
     if (a) open(a);
     return !!a;
@@ -205,7 +224,18 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       out.push(`  ${c.faint(clip(meta, w - 2))}`);
       if (["starting", "working"].includes(a.state)) out.push(`  ${c.dim(clip(a.step || "", w - 2))}`);
     }
+    if (feed.length) {
+      out.push("", c.bold(c.ink("Crew log")) + c.faint("  click for all"), c.line("━".repeat(w)));
+      for (const m of feed.slice(-6)) out.push(...wrapIn(logLine(m, w, false), w).slice(0, 2));
+    }
     return out;
+  }
+  function wrapIn(line, w) {
+    const plain = ui.stripAnsi ? ui.stripAnsi(line) : line.replace(/\x1b\[[0-9;]*m/g, "");
+    if (plain.length <= w) return [line];
+    // broken at a space, so no word is cut in two; the second row ends with … if there's more
+    const cut = plain.lastIndexOf(" ", w) > w / 2 ? plain.lastIndexOf(" ", w) : w;
+    return [plain.slice(0, cut), "  " + clip(plain.slice(cut).trim(), w - 2)].map((l, i) => (i ? c.dim(l) : l));
   }
   const count = () => agents.length;
 
@@ -253,12 +283,14 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
           if (!state.busy || !main.length) continue;
           state.crewMainNoted = Date.now();
           state.crewMainNotes = (state.crewMainNotes || 0) + 1;
+          say("watcher", "main", msg, "warn");
           (state.directives ||= []).push({ text: msg, block: state.crewMainNotes > 1 ? block : [], steps });
           ui.note(`${c.accent("◆")} ${c.ink("The watcher:")} ${c.dim(msg)}`);
         } else {
           const a = busy.find((x) => x.name === act.agent);
           if (!a) continue;
           a.notedAt = Date.now(); a.notes = (a.notes || 0) + 1;
+          say("watcher", a.name, msg, "warn");
           a.send({ type: "directive", text: msg, block: a.notes > 1 ? block : [], steps });
         }
       }
@@ -286,6 +318,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
 
   // Esc: every background agent still working stops (they show as stopped, and the chat is told)
   function stopAll() {
+    if (working().length) say("you", "all", "stopped the background agents", "bad");
     for (const a of working()) { a.userStopped = true; a.send({ type: "stop" }); }
     try { ui.screen?.render?.(); } catch {}
   }

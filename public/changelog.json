@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.196",
+      "date": "2026-10-23",
+      "title": "The crew log",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Who said what",
+          "text": "/crew keeps a crew log: the jobs and follow-ups the chat gives its background agents, their reports, and the watcher's instructions and takeovers. The latest show in the panel under Background agents; click Crew log for all of it, ← to go back."
+        }
+      ]
+    },
+    {
       "version": "1.0.195",
       "date": "2026-10-23",
       "title": "Esc stops everything",
