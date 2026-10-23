@@ -756,7 +756,7 @@ ${toolDocs}${CONN.promptBlock({ readOnly: true })}${FOCUS.block()}
 - Everything you were given in your brief (the task, the contract) is already in front of you: don't read it again from disk.
 - Each step re-sends the whole conversation, so don't re-read files you already read unless they changed.
 - Read a file before editing it; copy <old> exactly, without the line numbers. Small edit_file changes; write_file for new files.
-- Write long files in parts of at most 60 lines (write_file, then write_file with <append>true</append>).
+- Write very long files (over 400 lines) in parts of at most 400 lines (write_file, then write_file with <append>true</append>).
 - Check your work when you can (a syntax check such as node --check file.js, or the tests). Delete scratch files.
 - Before a fix, say in one line what you expect it to change. After checking, say whether it did. If it didn't, say what is different about your next attempt before you make it, and look at your <attempt_log> first: never make a change you already made and undid.
 - If a tool returns an error, fix the cause instead of repeating the call.
@@ -804,7 +804,7 @@ ${toolDocs}${CONN.promptBlock()}${FOCUS.block()}
 - If you create scratch or debug files to try something out, delete them before you finish.
 - Read a file before editing it. Copy <old> exactly from the read_file output, without the line numbers.
 - Make small, focused edit_file changes; use write_file only for new files or full rewrites. Keep the project's existing style.
-- A reply has a length limit. Write long files in parts of at most 60 lines: write_file with the first part, then write_file with <append>true</append> for the rest.
+- A reply has a length limit. Write very long files (over 400 lines) in parts of at most 400 lines: write_file with the first part, then write_file with <append>true</append> for the rest.
 - If the user asks for text (an answer, an essay, an explanation) and doesn't ask for a file, reply with the text itself; don't write a file.
 - After changing code, check it when you can (run the tests, or a quick syntax check such as node --check file.js).
 - When you need documentation, an error message explained, a library's current API or anything recent, use web_search, then web_fetch the best result. Don't guess at APIs you're unsure of.
@@ -2075,7 +2075,7 @@ async function runAgent(content) {
         }
         result = {
           output: long
-            ? `Error: your ${call.name} call was cut off before it was closed because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 60 lines: write_file with the first part, then write_file with append set to true for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
+            ? `Error: your ${call.name} call was cut off before it was closed because the reply hit its length limit, so nothing was written. Don't repeat it. Write the content in parts of at most 400 lines: write_file with the first part, then write_file with append set to true for each next part. If the user only asked for text (an answer, an essay, an explanation), just reply with it instead of writing a file.`
             : `Error: your ${call.name} call isn't finished: it was never closed, so nothing happened. Write the whole step again in the tool-call format from your instructions, with every tag opened and closed (for edit_file: path, then old, then new) and the call closed at the end.`,
         };
         ui.note(`${c.yellow("!")} ${c.dim(long ? "that step was cut off · asking yAI to split it up" : "that step wasn't finished · asking yAI to write it again")}`);

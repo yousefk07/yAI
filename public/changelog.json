@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.197",
+      "date": "2026-10-23",
+      "title": "No more cut-off files",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Room for big files",
+          "text": "Agent replies on yAI Ultra and Ultra Flash can now be up to 384K tokens long (DeepSeek's full limit), and up to 96K on yAI Lite, instead of 16K. A big file is written in one step instead of being cut off and split into 60-line pieces; only very long files (over 400 lines) are written in parts."
+        }
+      ]
+    },
+    {
       "version": "1.0.196",
       "date": "2026-10-23",
       "title": "The crew log",
