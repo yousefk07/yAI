@@ -1,0 +1,204 @@
+// /crew (2026-10-23, Yousef: "rework /crew to move off of the /team model"): a normal yAI Code chat, plan and all, that
+// commissions its own background agents for work it wants done on the side: building a separate piece, QA, or tests.
+// They run as their own processes (index.js --stdio, like /team's agents), show up under the plan in the panel, and
+// report back to the chat. A watcher looks over the chat and the background agents every 20 s and steps in when one
+// is going round in circles: an instruction that can block what it keeps doing, and for a background agent one
+// takeover (a fresh agent on Ultra Flash with a hand-over) before it's left for you.
+const path = require("path");
+const readline = require("readline");
+const { spawn } = require("child_process");
+
+module.exports = function createCrew({ state, root, ui, X, ctx }) {
+  const { c } = ui;
+  const agents = []; // { name, task, files, role, model, state, step, started, ended, cost, child, send, text, log, kept, ... }
+  let watchTimer = null, watching = false;
+  const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + "…" : String(s));
+  const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
+  const secs = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, "0")}s`);
+  const money = (x) => (!x ? "" : x < 0.001 ? "<$0.001" : `$${x.toFixed(3)}`);
+  const has = (id) => state.models.some((m) => m.id === id);
+  const FLASH = () => ["deepseek-v4.1-flash", "deepseek-v4-pro"].find(has) || state.model;
+  const LITE = () => (has("glm-4.7-flash") ? "glm-4.7-flash" : FLASH());
+  const label = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
+  const working = () => agents.filter((a) => ["starting", "working"].includes(a.state));
+
+  // ---------- on and off ----------
+  function start() {
+    if (state.crewActive) return;
+    state.crewActive = true;
+    ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+    clearInterval(watchTimer);
+    watchTimer = setInterval(() => { tick(); watch(); }, 20000);
+  }
+  function stop() {
+    state.crewActive = false;
+    clearInterval(watchTimer); watchTimer = null;
+    for (const a of agents) { try { a.child?.stdin.end(); } catch {} try { a.kept?.child.stdin.end(); } catch {} }
+    agents.length = 0;
+    if (ctx.crew) { ctx.crew.open.clear(); ctx.crew.reports.length = 0; }
+  }
+
+  // ---------- briefs ----------
+  const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Delete any scratch or debug files you make before you finish.";
+  const ROLE = {
+    builder: (a) => [
+      "Your job, as the main agent described it:", a.task, "",
+      a.files.length ? `Files you own (create and change only these; read anything else you need): ${a.files.join(", ")}.` : "Change only what your job needs.",
+      "Do exactly this job, with the names, interface and formats it gives. Check your work (a syntax check, check_page or page_eval if it shows on a page). If something is unclear, make the most sensible choice and say so.",
+      "End with a short report: what you made, the names other code should call, and anything left undone.",
+    ],
+    qa: (a) => [
+      "Your job: quality-check the project for the main agent. Its focus:", a.task, "",
+      "Read the core files whole, then walk through a session the way a user or player would: what breaks, freezes, does nothing, feels wrong, or doesn't match the request? Confirm what you suspect with check_page, page_eval or the tests. Don't change the app's code: the main agent fixes it from your report.",
+      "End with a short report: every real problem worst first, each with its file, line, what's wrong and how to fix it.",
+    ],
+    tester: (a) => [
+      "Your job: write and run tests for the main agent. What to test:", a.task, "",
+      "Write tests only in test files (tests/, test/, *.test.*), with the project's runner or the language's built-in one (node --test), without installing anything, and run them. If a test fails because of a bug in the app, don't fix the app: report it.",
+      "End with a short report: the command you ran, what passed, and every failure with its file and line.",
+    ],
+  };
+  const brief = (a) => [`You are a background agent working for the main agent in a yAI Code session. The overall task is: ${clip(state.crewTask || "", 1500)}`, "", ...ROLE[a.role](a), "", RULES].join("\n");
+
+  // ---------- commissioning ----------
+  // spec: { name, task, files, model: "lite" | "flash", role: "builder" | "qa" | "tester" }
+  function commission(spec) {
+    const name = row1(spec.name).slice(0, 30) || "helper";
+    ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+    // a follow-up to one that has finished: the same agent wakes up, in its own conversation
+    const earlier = agents.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.kept);
+    if (earlier && reawaken(earlier, spec.task)) return;
+    if (working().length >= (state.crewMax || 4)) return report(name, `(not started: ${state.crewMax || 4} background agents are already working; do it yourself, or wait for one with crew_wait)`);
+    const role = ["qa", "tester"].includes(spec.role) ? spec.role : "builder";
+    const model = spec.model === "lite" ? LITE() : FLASH();
+    const a = { name, task: String(spec.task || "").trim(), files: (spec.files || []).map(String).filter((p) => p && !p.includes("..")), role, model, state: "starting", step: "starting", started: Date.now(), cost: 0, text: [], log: [], changed: new Set(), defied: 0 };
+    agents.push(a);
+    spawnAgent(a, brief(a));
+  }
+  function spawnAgent(a, firstPrompt) {
+    const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
+      cwd: root, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, YAI_TEAM_AGENT: "1", YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_COLUMNS: "1000", YAI_MAX_STEPS: "100000", YAI_TRIM_TOKENS: a.role === "builder" ? "48000" : "80000",
+        ...(a.role === "builder" && a.files.length && { YAI_OWN_FILES: JSON.stringify(a.files) }), ...(a.role !== "builder" && { YAI_SAFE_CHECKS: "1" }) },
+    });
+    a.child = child;
+    a.send = (o) => { try { child.stdin.write(JSON.stringify(o) + "\n"); } catch {} };
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      if (a.child !== child) return;
+      let e; try { e = JSON.parse(line); } catch { return; }
+      if (e.type === "ready") { a.send({ type: "mode", mode: "acceptEdits" }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
+      else if (e.type === "busy") { a.state = "working"; a.lastMove = Date.now(); }
+      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.log.push(`- ${e.verb} ${clip(String(e.arg || ""), 120)}`); }
+      else if (e.type === "step-result") a.log.push(`    → ${clip(row1(e.summary || e.text), 100)}`);
+      else if (e.type === "diff" && e.path) a.changed.add(e.path);
+      else if (e.type === "text-start") a.text = [];
+      else if (e.type === "text") a.text.push(e.line);
+      else if (e.type === "progress") { if (e.cost != null) a.cost = (a.costPrev || 0) + e.cost; }
+      else if (e.type === "error") a.error = e.message;
+      else if (e.type === "repeat-text" && Number(e.count) >= 4) takeover(a, `It kept writing the same reasoning (${e.count} times) without acting.`);
+      else if (e.type === "flip" && Number(e.count) >= 3) takeover(a, `It kept changing ${e.path} back and forth.`);
+      else if ((e.type === "directive-ignored" || e.type === "directive-defied") && ++a.defied >= 2) takeover(a, "It ignored the watcher's instructions.");
+      if (a.log.length > 200) a.log.splice(0, 100);
+      if (e.type === "done" && a.state === "working") {
+        if (a.replacing) return; // stopped for a takeover: the new agent reports instead
+        a.cost = (a.costPrev || 0) + (e.cost?.session || 0);
+        a.state = a.error ? "failed" : a.stuck ? "stopped" : "done";
+        a.ended = Date.now();
+        // it stays open, idle, for a follow-up (reawaken); the crew closes it when it stops
+        a.kept = a.state === "done" ? { child } : null;
+        if (!a.kept) try { child.stdin.end(); } catch {}
+        report(a.name, `(${a.state}${a.error ? `: ${row1(a.error)}` : ""}; files changed: ${a.changed.size ? [...a.changed].join(", ") : "none"})\n${(a.text.join("\n").trim() || "(no report)").slice(-3000)}`);
+      }
+    });
+    child.on("exit", () => { if (a.child === child && ["starting", "working"].includes(a.state)) { a.state = "failed"; a.ended = Date.now(); report(a.name, "(failed: its process ended)"); } });
+  }
+  // its report goes to the main chat: with a step's result, or at the start of its next turn
+  function report(name, text) {
+    ctx.crew.open.delete(name);
+    ctx.crew.reports.push({ name, report: text });
+  }
+  function reawaken(a, task) {
+    const child = a.kept?.child;
+    if (!child || child.exitCode !== null) return false;
+    a.kept = null;
+    Object.assign(a, { state: "working", step: "a follow-up", lastMove: Date.now(), ended: 0, text: [], error: "" });
+    a.send({ type: "prompt", text: `The main agent has a follow-up for you:\n${task}\n\nYour earlier work is above. Do this, check it, and end with a short report as before.` });
+    return true;
+  }
+  // one takeover per agent: a fresh one on Ultra Flash with a hand-over; the second time it's stopped and reported
+  function takeover(a, why) {
+    if (a.replacing || !["starting", "working"].includes(a.state)) return;
+    if (a.isTakeover) {
+      a.stuck = true;
+      a.send({ type: "stop" });
+      ui.note(`${c.yellow("!")} ${c.ink(`${a.name} is stuck again after a takeover, so it was stopped.`)}`);
+      return;
+    }
+    a.replacing = true;
+    a.send({ type: "stop" });
+    const old = a.child;
+    setTimeout(() => { try { old.stdin.end(); old.kill(); } catch {} }, 1500);
+    const handover = [`You are taking over this job from a background agent that got stuck, so the watcher stopped it. Why: ${why}`, `It changed: ${a.changed.size ? [...a.changed].join(", ") : "nothing yet"}. Its last steps:`, ...a.log.slice(-20), "Don't repeat its loop: read the current files, decide what's actually wrong, say what you expect each change to do, and finish the job.", "", "---", ""].join("\n");
+    Object.assign(a, { replacing: false, isTakeover: true, model: FLASH(), state: "starting", step: "taking over", started: Date.now(), costPrev: a.cost, text: [], log: [], defied: 0 });
+    ui.note(`${c.yellow("!")} ${c.ink(`The watcher took over from ${a.name}`)} ${c.dim(`· ${why}`)}`);
+    spawnAgent(a, handover + brief(a));
+  }
+
+  // ---------- the panel: the background agents under the plan ----------
+  function panelLines(w) {
+    if (!agents.length) return [];
+    const out = ["", c.bold(c.ink("Background agents")), c.line("━".repeat(w))];
+    for (const a of agents) {
+      const icon = a.state === "done" ? c.green("✓") : a.state === "failed" || a.stuck ? c.red("✕") : a.state === "stopped" ? c.yellow("■") : c.accent("◐");
+      const meta = [label(a.model), secs((a.ended || Date.now()) - a.started), money(a.cost)].filter(Boolean).join(" · ");
+      out.push(`${icon} ${c.ink(clip(a.name, w - 4))}${a.role !== "builder" ? c.faint(` ${a.role}`) : ""}`);
+      out.push(`  ${c.faint(clip(meta, w - 2))}`);
+      if (["starting", "working"].includes(a.state)) out.push(`  ${c.dim(clip(a.step || "", w - 2))}`);
+    }
+    return out;
+  }
+  const count = () => agents.length;
+
+  // ---------- the watcher ----------
+  const WATCH_SYSTEM = [
+    "You supervise a coding session: a main agent working with the user, and background agents it commissioned. Every 20 seconds you see each one's recent steps, newest last.",
+    "Catch one wasting time or going wrong: re-reading the same files, near-identical commands or checks with nothing changed in between, changing something and changing it back, writing the same reasoning again, drifting from its job. Be firm the first time you see a loop.",
+    "Leave alone anyone making progress. Most of the time the right answer is no action.",
+    "Reply with JSON only: {\"actions\":[{\"agent\":\"main\" or \"<background agent name>\",\"message\":\"<one or two plain sentences: what to do instead>\",\"block\":[optional: \"check_page\", \"page_eval\", \"run\", \"read:<path>\" or \"edits-only\"],\"steps\":<how long the block lasts, default 8>}]}. An empty list is fine.",
+  ].join("\n");
+  async function watch() {
+    if (watching || !state.crewActive || state.interrupted) return;
+    const main = state.busy && state.crewSteps?.length ? state.crewSteps.slice(-20) : [];
+    const busy = working().filter((a) => a.log.length >= (a.watchedAt || 0) + 2);
+    if (!main.length && !busy.length) return;
+    watching = true;
+    try {
+      const parts = [
+        ...(main.length ? [`## main (the session itself)\nIts plan: ${state.plan ? state.plan.steps.map((s, i) => `${i + 1}. ${clip(s, 80)}`).join(" ") : "(none)"}\nRecent steps:\n${main.join("\n")}`] : []),
+        ...busy.map((a) => `## ${a.name} (${a.role}), working for ${secs(Date.now() - a.started)}\nIts job: ${clip(row1(a.task), 300)}\nRecent steps:\n${a.log.slice(-20).join("\n")}`),
+      ];
+      const out = await X.oneShot({ model: FLASH(), system: WATCH_SYSTEM, messages: [{ role: "user", content: `The task: ${clip(state.crewTask || "", 800)}\n\n${parts.join("\n\n")}` }] });
+      for (const a of busy) a.watchedAt = a.log.length;
+      let acts = [];
+      try { acts = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]).actions || []; } catch {}
+      for (const act of acts.slice(0, 3)) {
+        const msg = row1(act.message); if (!msg) continue;
+        const block = (Array.isArray(act.block) ? act.block : []).map(String).filter((b) => /^(check_page|page_eval|run|search|read_file|edits-only|read:.+)$/.test(b)).slice(0, 4);
+        const steps = Number(act.steps) || 8;
+        if (String(act.agent).toLowerCase() === "main") {
+          if (!state.busy) continue;
+          (state.directives ||= []).push({ text: msg, block, steps });
+          ui.note(`${c.accent("◆")} ${c.ink("The watcher:")} ${c.dim(msg)}`);
+        } else {
+          const a = busy.find((x) => x.name === act.agent);
+          if (!a) continue;
+          a.send({ type: "directive", text: msg, block, steps });
+        }
+      }
+    } catch {} finally { watching = false; }
+  }
+  // the panel shows times that move
+  function tick() { if (working().length) try { ui.screen?.draw?.(); } catch {} }
+
+  return { start, stop, commission, panelLines, count, working: () => working().length };
+};

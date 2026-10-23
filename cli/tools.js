@@ -385,8 +385,8 @@ const tools = {
   // /crew (2026-10-22): the main builder hands separate jobs to helpers that work at the same time. ctx.crew is
   // { open: Set of helper names, reports: [{ name, report }] }; the board fills in the reports.
   commission: {
-    params: ["name", "task", "files", "model"],
-    describe: "Hand a separate, well-defined job to a helper agent that works at the same time as you (for example: level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, research). <name>: 1-3 words. <task>: everything it needs to do the job alone: what to make, the exact names and interface other code will use, the data format, and how to check it. <files>: the files it owns (it may only create and change those), one per line. Optional <model>: lite for a simple, mechanical job (data, lists, straightforward drawing code), flash (the default) for one that needs thought (logic, tests, research). It returns at once; the helper's report reaches you after one of your later steps, or use crew_wait.",
+    params: ["name", "task", "files", "model", "role"],
+    describe: "Hand a separate, well-defined job to a helper agent that works at the same time as you (for example: level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, research). <name>: 1-3 words. <task>: everything it needs to do the job alone: what to make, the exact names and interface other code will use, the data format, and how to check it. <files>: the files it owns (it may only create and change those), one per line. Optional <role>: builder (the default: it makes the files you give it), qa (reviews the project like a user or player and reports problems, changing nothing) or tester (writes and runs tests). Optional <model>: lite for a simple, mechanical job (data, lists, straightforward drawing code), flash (the default) for one that needs thought (logic, tests, research). It returns at once; the helper's report reaches you after one of your later steps, or use crew_wait.",
     readOnly: true,
     async run(ctx, a) {
       const name = String(a.name || "").replace(/\s+/g, " ").trim().slice(0, 30);
@@ -398,7 +398,10 @@ const tools = {
       ctx.crew.open.add(name);
       toolHeader("Commission", `${name}: ${task.replace(/\s+/g, " ").slice(0, 70)}`);
       const model = /^\s*lite\b/i.test(String(a.model || "")) ? "lite" : "flash";
-      require("./ui").event({ type: "commission", name, task: task.slice(0, 6000), files, model });
+      const role = /^\s*(qa|tester)\b/i.exec(String(a.role || ""))?.[1].toLowerCase() || "builder";
+      // in a /crew chat the session itself starts it; a /team main builder's board does
+      if (ctx.onCommission) ctx.onCommission({ name, task: task.slice(0, 6000), files, model, role });
+      else require("./ui").event({ type: "commission", name, task: task.slice(0, 6000), files, model, role });
       toolResult(`helper started · ${model === "lite" ? "Lite" : "Ultra Flash"}`);
       return `Helper "${name}" is on it${files.length ? ` (it owns ${files.join(", ")})` : ""}. Carry on with your own work: its report reaches you after one of your later steps, or call crew_wait when you need it.`;
     },

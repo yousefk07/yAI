@@ -138,6 +138,9 @@ ctx.approve = async (name, args) => {
   return r === "yes" || r === "always";
 };
 
+// /crew: this chat with background agents it commissions (cli/crew.js)
+const CREW = require("./crew")({ state, root, ui, X, ctx });
+ctx.onCommission = (spec) => (state.crewActive ? CREW.commission(spec) : null);
 const TEAM = require("./team")({
   state, root, api, ui, X,
   syncMute: () => syncMute(),
@@ -725,7 +728,7 @@ const TEAM_SKIP = new Set(["ask_user"]);
 const TEAM_ONLY = new Set(["team_say"]); // tools only a /team agent has (the team chat)
 // /crew's main builder (YAI_CREW_LEAD) also commissions helpers and waits for them
 const CREW_LEAD = !!process.env.YAI_CREW_LEAD, CREW_ONLY = new Set(["commission", "crew_wait"]);
-const toolAllowed = (name) => (CREW_ONLY.has(name) ? CREW_LEAD : TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
+const toolAllowed = (name) => (CREW_ONLY.has(name) ? CREW_LEAD || !!state.crewActive : TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
@@ -921,14 +924,14 @@ function liveBranch() {
   if (Date.now() - branchCache.at > 5000) branchCache = { at: Date.now(), name: gitBranch() };
   return branchCache.name;
 }
-const panelOpen = () => !!(SCREEN.on && state.busy && state.plan && state.plan.steps.length && state.task && !state.task.over && (process.stdout.columns || 0) >= 100);
+const panelOpen = () => !!(SCREEN.on && (process.stdout.columns || 0) >= 100 && ((state.busy && state.plan && state.plan.steps.length && state.task && !state.task.over) || (state.crewActive && CREW.count())));
 SCREEN.parts.header = (cols) => {
   let [st, label] = pillState();
   if (state.selecting && state.busy) [st, label] = ["waiting", "Waiting for you"];
   else if (state.busy) [st, label] = ["working", state.plan && state.plan.steps.length ? `Working · step ${Math.min(state.plan.done + 1, state.plan.steps.length)} of ${state.plan.steps.length}` : "Working"];
   return LOOK.headerRow(cols, { project: state.focus ? `${state.focus.title} · ${path.basename(root)}` : path.basename(root), branch: liveBranch(), st, label });
 };
-SCREEN.parts.panel = () => (panelOpen() ? (w) => LOOK.panelLines(state.plan, state.task, w) : null);
+SCREEN.parts.panel = () => (panelOpen() ? (w) => [...(state.busy && state.plan?.steps.length && state.task && !state.task.over ? LOOK.panelLines(state.plan, state.task, w) : []), ...(state.crewActive ? CREW.panelLines(w) : [])] : null);
 SCREEN.parts.input = () => {
   const text = rl ? rl.line : "";
   if (state.asking) {
@@ -1487,8 +1490,8 @@ async function callModel() {
     const { usage, cost, fallback } = await api.chat({
       messages: state.messages,
       model: state.model,
-      system: systemPrompt(),
-      context: envContext() + (TEAM_AGENT ? attemptBlock() : ""),
+      system: systemPrompt() + (state.crewActive ? CREW_PROMPT() : ""),
+      context: envContext() + (TEAM_AGENT || state.crewActive ? attemptBlock() : ""),
       tools: nativeTools(),
       toolFormat: toolFormat(),
       conversationId: state.conversationId,
@@ -1869,7 +1872,14 @@ function announcesStep(text) {
 }
 
 // Runs a full request: model reply → tool → model reply … until the model answers without a tool.
+// /crew: what the main chat knows about its background agents
+const CREW_PROMPT = () => `
+
+# Your crew (/crew)
+You can hand separate pieces of work to background agents with the commission tool, when you like: a self-contained module or data behind an interface you specify, sound, sprites or textures, research, a QA pass (role qa: it reviews the project like a user or player and reports problems) or tests (role tester). Give each one everything it needs in <task> and the files it owns; pick model lite for a simple, mechanical job and flash for one that needs thought. At most ${state.crewMax || 4} work at once. They work while you go on; their reports reach you after your steps, or call crew_wait. Keep the core yourself, don't commission what takes you a few steps, and before you finish call crew_wait and fit in their work. A watcher looks over you and them: follow its instructions.`;
 async function runAgent(content) {
+  // /crew: reports from background agents that finished while this chat was idle open its next turn
+  if (ctx.crew?.reports.length) content = ctx.crew.reports.splice(0).map((x) => `Your background agent "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + "\n\n" + content;
   pushUser([...state.pendingContext, content].join("\n\n"));
   state.pendingContext = [];
   state.busy = true;
@@ -1937,6 +1947,7 @@ async function runAgent(content) {
   };
   let reads = 0; // /team agents: reads and searches before their first change
   let refusedInRow = 0; // steps refused as repeats, one after another
+  let crewHolds = 0; // /crew: times the chat was held to wait for its background agents
   // the watcher's directive in force: { text, block: ["check_page", "read:<path>", "edits-only"], left: steps, ack: false }
   let directive = null, awaitingAck = false;
   // is this step blocked by it? A read block ends when the file is edited, "edits-only" with the first edit.
@@ -2003,7 +2014,7 @@ async function runAgent(content) {
       }
       emptyRetried = false; // a reply came: the next empty one gets its own quiet retry
       const call = parseToolCall(text);
-      if (TEAM_AGENT && awaitingAck) {
+      if ((TEAM_AGENT || state.crewActive) && awaitingAck) {
         awaitingAck = false;
         if (!/^\W*following the watcher/i.test(text.trim())) ui.event({ type: "directive-ignored" });
       }
@@ -2018,6 +2029,11 @@ async function runAgent(content) {
         repeatTextNow = same;
       }
       state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
+      if (!call && state.crewActive && ctx.crew?.open.size && crewHolds < 2 && !state.interrupted) {
+        crewHolds++;
+        pushUser(`Your background agents are still working (${[...ctx.crew.open].join(", ")}). Call crew_wait for them, fit in their work, and then finish.`);
+        continue;
+      }
       if (!call) {
         // "Now I'll create the CSS file:" and then nothing: the model said what it would do and ended its reply
         // without the tool call (yAI 3 Coder does this a lot). Push it on, at most twice per request.
@@ -2082,7 +2098,7 @@ async function runAgent(content) {
         const runKey = call.name === "run" ? String(call.args?.command || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
         const like = runKey.length >= 30 ? sameRuns.get(runKey) : null;
         const samey = !TEAM_AGENT && !!like && like.undo === state.undo.length && like.n >= 4;
-        const blocked = TEAM_AGENT ? blockedBy(call) : "";
+        const blocked = TEAM_AGENT || state.crewActive ? blockedBy(call) : "";
         if (blocked) {
           directive.defied = (directive.defied || 0) + 1;
           ui.event({ type: "directive-defied", count: directive.defied, what: blocked });
@@ -2165,7 +2181,9 @@ async function runAgent(content) {
         if (planAt !== state.plan.done) { planAt = state.plan.done; planSteps = 0; }
         if (++planSteps % 6 === 0) result.output += `\n(Your plan's step ${state.plan.done + 1} is "${state.plan.steps[state.plan.done]}". If it's finished, start your next reply with <done>${state.plan.done + 1}</done>, or a higher number if later steps are finished too.)`;
       }
-      if (TEAM_AGENT && !String(result.output).startsWith("Error")) {
+      // /crew: the watcher sees the main chat's steps
+      if (state.crewActive) { (state.crewSteps ||= []).push(`- ${call.name} ${String((call.args || {}).path || (call.args || {}).command || (call.args || {}).pattern || "").replace(/\s+/g, " ").slice(0, 100)} → ${String(result.output).split("\n")[0].slice(0, 90)}`); if (state.crewSteps.length > 60) state.crewSteps.splice(0, 30); }
+      if ((TEAM_AGENT || state.crewActive) && !String(result.output).startsWith("Error")) {
         const arg = call.args || {};
         if (["edit_file", "write_file"].includes(call.name)) logAttempt(`${call.name === "write_file" ? (arg.append ? "appended to" : "wrote") : "edited"} ${String(arg.path || "").trim()}${ctx.flip ? ` · BACK TO AN EARLIER VERSION (${ctx.flip.n}×)` : ""}${arg.old ? `: "${String(arg.old).replace(/\s+/g, " ").trim().slice(0, 50)}" → "${String(arg.new ?? "").replace(/\s+/g, " ").trim().slice(0, 50)}"` : ""}`);
         else if (call.name === "check_page") logAttempt(`check_page${arg.keys ? ` (${String(arg.keys).slice(0, 30)})` : ""} → ${String(result.output).split("\n").filter((l) => /^(FROZEN|BLANK|SAME SCREEN|Compared with your last check|Errors in the browser|No errors)/.test(l)).map((l) => l.replace(/\s+/g, " ").slice(0, 110)).join(" · ") || "checked"}`);
@@ -2946,8 +2964,18 @@ async function command(line) {
       return X.toggleDuo(arg);
     case "/team":
       return TEAM.team(arg);
-    case "/crew":
-      return TEAM.crew(arg);
+    case "/crew": {
+      // /crew <task>: this chat, with background agents it commissions; /crew off ends it (2026-10-23)
+      if (/^\s*off\s*$/i.test(arg)) { CREW.stop(); return print(c.dim("   /crew is off: this is a plain chat again.")); }
+      const m = /^([1-8])\s+([\s\S]+)$/.exec(arg.trim());
+      state.crewMax = m ? Number(m[1]) : 4;
+      const task = (m ? m[2] : arg).trim();
+      if (!task) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> for up to 6 background agents at once). /crew off ends it."));
+      state.crewTask = task;
+      CREW.start();
+      ui.note(`${c.accent("◆")} ${c.ink("/crew: this chat works on it, and hands separate jobs to background agents")} ${c.dim("· they show under the plan · /crew off ends it")}`);
+      return runAgent(task);
+    }
     case "/connections":
       return CONN.connections();
     case "/focus":

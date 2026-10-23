@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.185",
+      "date": "2026-10-23",
+      "title": "/crew, rebuilt",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "A chat with background agents",
+          "text": "/crew <task> is now this chat itself, with its plan, that commissions background agents when it likes: builders for a separate piece, QA to review it like a player, or testers, on Lite or Ultra Flash. They show under the plan with their model, step, time and cost, and report back to the chat; a finished one wakes up for a follow-up. A watcher looks over the chat and its agents every 20 s and can block what one keeps doing; a stuck background agent gets one takeover. /crew 6 <task> allows 6 at once; /crew off ends it. /team is unchanged."
+        }
+      ]
+    },
+    {
       "version": "1.0.184",
       "date": "2026-10-22",
       "title": "The watcher is obeyed",
