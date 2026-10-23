@@ -1917,6 +1917,11 @@ async function execTool(call) {
     }
 
     if (tool.kind === "edit") {
+      // yAI's own stand-ins for text it took out of the history (compactWrites, trimContext) are never file text: a model
+      // copying its earlier, shortened call wrote "[157 lines, now in js/mesher.js: read it if you need them]" over the
+      // whole file (2026-10-23, a real /crew build)
+      const standIn = /^\s*\[\d+ lines(, now in [^\]]*| replaced)?\]\s*$|\[old tool output removed/m;
+      if (standIn.test(String(call.args.content ?? "")) || standIn.test(String(call.args.new ?? ""))) return { output: `Error: that ${call.name === "write_file" ? "content" : "new text"} is yAI's stand-in note for text it took out of the conversation ("[N lines, now in …]"), not the text itself, so nothing was written. Read the file (or the lines you need) and write the real text.` };
       const plan = tool.prepare(ctx, call.args);
       if (plan.before === plan.after) return { output: "No change: the new content is the same as the old." };
       const name = path.basename(plan.abs);

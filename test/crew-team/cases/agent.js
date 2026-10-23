@@ -207,6 +207,13 @@ suite(__filename, [
     assert.strictEqual(srv.log[4].temperature, 1);
     assert.ok(y.notes().some((n) => /kept repeating steps/.test(n)));
   } },
+  { name: "a write whose content is yAI's own stand-in note isn't written over the file", fn: async (ctl) => {
+    const { y, srv, file } = await session(ctl, [T("read_file", { path: "js/mesher.js" }), T("write_file", { path: "js/mesher.js", content: "[157 lines, now in js/mesher.js: read it if you need them]" }), T("edit_file", { path: "js/mesher.js", old: "const a = 1;", new: "[40 lines, now in the file]" }), "Done."], { files: { "js/mesher.js": "const a = 1;\nconst b = 2;\n" } });
+    await ask(y, "go", { mode: "acceptEdits" });
+    assert.strictEqual(file("js/mesher.js"), "const a = 1;\nconst b = 2;\n");
+    assert.match(srv.log[2].text, /stand-in/);
+    assert.match(srv.log[3].text, /stand-in/);
+  } },
   { name: "the same read again with nothing changed isn't run", fn: async (ctl) => {
     const { y, srv } = await session(ctl, (r) => (r.n < 2 ? T("read_file", { path: "a.txt" }) : "Done."), { files: { "a.txt": "abc" } });
     await ask(y, "go");

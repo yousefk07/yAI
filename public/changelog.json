@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.219",
+      "date": "2026-10-23",
+      "title": "No stand-in notes in your files",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "A shortened note is never written into a file",
+          "text": "To keep long builds light, yAI replaces the text of older file writes in the conversation with a note like “[157 lines, now in js/mesher.js: read it if you need them]”. In a real /crew build the model copied its own shortened call and wrote that note over the whole file. A write or edit whose text is one of these notes is now refused, and the model is told to read the file and write the real text."
+        },
+        {
+          "area": "Tests",
+          "title": "161 cases",
+          "text": "test/crew-team covers it."
+        }
+      ]
+    },
+    {
       "version": "1.0.218",
       "date": "2026-10-23",
       "title": "A way out of repeated steps",
