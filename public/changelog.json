@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.217",
+      "date": "2026-10-23",
+      "title": "Takeovers and fixers that stop, from a real /team run",
+      "items": [
+        {
+          "area": "Team",
+          "title": "A takeover is one agent, not two",
+          "text": "A job the watcher took over was started twice: once by its stage, once by the hand-over. One of the two processes was left behind, idle, for good. A takeover now waits only for its hand-over."
+        },
+        {
+          "area": "Team",
+          "title": "A fixer that stops is still re-checked",
+          "text": "In a real /team platformer run, a fixer that was stopped left game.js as the single word “placeholder”; the re-check was skipped because the fixer hadn't finished, and the team reported done with a page that threw on load. yAI now re-checks after any fixer that changed files, so a second fixer gets what broke."
+        },
+        {
+          "area": "Team",
+          "title": "Start screens drawn on a canvas",
+          "text": "yAI's page checks look for a Play or Start button in the page. A game that draws its start screen on a canvas has none, so the playtester “found no Play button” and failed a game that worked. With no button and a big canvas, the checks now click it and press Enter, as a player would."
+        },
+        {
+          "area": "Tests",
+          "title": "159 cases",
+          "text": "test/crew-team covers these too, including a check that no agent process is left running after a team ends."
+        }
+      ]
+    },
+    {
       "version": "1.0.216",
       "date": "2026-10-23",
       "title": "Loops in real /crew builds, stopped",

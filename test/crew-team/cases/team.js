@@ -79,6 +79,20 @@ suite(__filename, [
     assert.match(fx.text, /add has no test/);
     assert.ok(file("math.test.js"));
   } },
+  { name: "a fixer that breaks a file and then fails is still re-checked, and fixer 2 repairs it", ms: 150000, fn: async (ctl) => {
+    const test = "const t = require('node:test'), a = require('assert'), m = require('./math');\nt('add', () => a.strictEqual(m.add(2, 3), 5));\n";
+    const { y, srv, file } = await session(ctl, (r) => {
+      if (r.who === "lead") return PLAN;
+      if (r.who === "builder") return BUILD[builderOf(r)]?.[r.turn] ?? "Done.";
+      if (r.who === "team-qa") return [T("write_file", { path: "math.test.js", content: test }), T("run", { command: "node --test math.test.js" }), "sub has no test.\nVERDICT: PROBLEMS"][r.turn] ?? "VERDICT: PROBLEMS";
+      if (r.who === "team-fixer" && !/A first fixer already worked on this/.test(r.text)) return r.turn === 0 ? [T("read_file", { path: "math.js" })] [0] : r.turn === 1 ? T("write_file", { path: "math.js", content: "placeholder" }) : { status: 500, error: "the fixer's model went down" };
+      if (r.who === "team-fixer") return [T("read_file", { path: "math.js" }), T("write_file", { path: "math.js", content: "exports.add = (a, b) => a + b;\nexports.sub = (a, b) => a - b;\n" }), "Restored math.js.\nVERDICT: FIXED"][r.turn] ?? "VERDICT: FIXED";
+      return "Done.";
+    });
+    await runTeam(y, { on: ["qa", "fixer"], mode: "yolo", ms: 140000 });
+    assert.ok(srv.of("team-fixer").some((r) => /A first fixer already worked on this/.test(r.text)), "fixer 2 ran after the re-check");
+    assert.match(file("math.js"), /exports\.add/);
+  } },
   { name: "QA says OK: the fixer isn't needed", ms: 120000, fn: async (ctl) => {
     const { y, srv } = await session(ctl, (r) => (r.who === "lead" ? PLAN : r.who === "builder" ? BUILD[builderOf(r)]?.[r.turn] ?? "Done." : r.who === "team-qa" ? "All fits.\nVERDICT: OK" : "Done."));
     await runTeam(y, { on: ["qa", "fixer"] });
@@ -187,6 +201,8 @@ suite(__filename, [
     const tk = srv.of("takeover");
     assert.ok(tk.length, "the takeover");
     assert.strictEqual(tk[0].model, "deepseek-v4.1-flash");
+    await sleep(1500);
+    assert.strictEqual(srv.of("takeover").filter((r) => r.turn === 0).length, 1, "one takeover agent, not two");
     assert.match(tk[0].text, /Stop searching; write math\.js now/);
   } },
   { name: "the team's watcher can stop an agent that only re-checks finished work", ms: 120000, fn: async (ctl) => {
@@ -204,6 +220,28 @@ suite(__filename, [
     assert.ok(board.feed.some((f) => f.who === "watcher" && /stopped math/.test(f.what)));
     assert.strictEqual(board.stages[0].rows.find((r) => r.name === "math").st, "stopped");
   } },
+  { name: "a fixer taken over runs as one new agent, not two (the waiting row isn't started again)", ms: 150000, fn: async (ctl) => {
+    const why = "The add function returns a plus b and the sub function returns a minus b which should be correct for all integer inputs including negative numbers and zero in every case";
+    const { y, srv } = await session(ctl, async (r) => {
+      if (r.who === "lead") return PLAN;
+      if (r.who === "builder") return BUILD[builderOf(r)]?.[r.turn] ?? "Done.";
+      if (r.who === "team-qa") return "sub has no test.\nVERDICT: PROBLEMS";
+      if (r.who === "takeover") { await sleep(300); return [T("read_file", { path: "math.js" }), "Took over: nothing else to fix.\nVERDICT: FIXED"][r.turn] ?? "VERDICT: FIXED"; }
+      if (r.who === "team-fixer") return `${why} (${r.turn})\n${T("write_file", { path: `n${r.turn}.txt`, content: String(r.turn) })}`;
+      return "Done.";
+    });
+    await runTeam(y, { on: ["qa", "fixer"], mode: "yolo", ms: 140000 });
+    await sleep(1500);
+    assert.ok(srv.of("takeover").length, "the takeover");
+    assert.strictEqual(srv.of("takeover").filter((r) => r.turn === 0).length, 1, "one takeover agent, not two");
+    assert.strictEqual(srv.of("todo").length, 0, "no second to-do list for the takeover");
+    // and no agent process left behind once the team is over (a row started twice left one, idle, for good)
+    if (process.platform === "win32") {
+      await sleep(4000);
+      const n = Number(require("child_process").execSync(`powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter 'ParentProcessId=${y.child.pid}' | Where-Object { $_.CommandLine -match 'index.js' }).Count"`).toString().trim());
+      assert.strictEqual(n, 0, `${n} agent processes still running after the team`);
+    }
+  } },
   { name: "a builder that writes the same reasoning: a note at 2, a takeover at 4", ms: 150000, fn: async (ctl) => {
     const why = "The add function returns a plus b and the sub function returns a minus b which should be correct for all integer inputs including negative numbers and zero in every case";
     const { y, srv } = await session(ctl, (r) => {
@@ -218,5 +256,7 @@ suite(__filename, [
     const tk = srv.of("takeover");
     assert.ok(tk.length, "the takeover");
     assert.strictEqual(tk[0].model, "deepseek-v4.1-flash");
+    await sleep(1500);
+    assert.strictEqual(srv.of("takeover").filter((r) => r.turn === 0).length, 1, "one takeover agent, not two");
   } },
 ]);

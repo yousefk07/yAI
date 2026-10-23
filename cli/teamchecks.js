@@ -32,6 +32,21 @@ async function pastMenus(b, lines) {
 // does the page still answer? A page whose script never yields (an endless loop) doesn't, and waiting on it would
 // hang the check too
 const alive = (b, ms = 6000) => Promise.race([B.evaluate(b, "1").then(() => true, () => true), sleep(ms).then(() => false)]);
+// A start screen drawn on a canvas has no button to find (2026-10-23: a /team platformer's "Start" was drawn on its
+// canvas, so the playtester "found no Play button" and failed it, and the fixer was sent after a game that worked).
+// With no start button, a big canvas and little page text, the canvas is clicked a little below its middle (where
+// such buttons sit) and Enter is pressed, as a player would. → "" or what it did
+const CANVAS = String.raw`(() => { const c = [...document.querySelectorAll("canvas")].sort((a, z) => z.width * z.height - a.width * a.height)[0]; if (!c || (document.body.innerText || "").trim().length > 400) return null; const r = c.getBoundingClientRect(); return r.width * r.height >= innerWidth * innerHeight * 0.4 ? { x: r.left + r.width / 2, y: r.top + r.height * 0.6 } : null; })()`;
+async function startOnCanvas(b) {
+  const at = await Promise.race([B.evaluate(b, CANVAS).catch(() => null), sleep(4000).then(() => null)]);
+  if (!at) return "";
+  try {
+    for (const type of ["mousePressed", "mouseReleased"]) await b.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 }, 4000);
+    for (const type of ["keyDown", "keyUp"]) await b.send("Input.dispatchKeyEvent", { type, code: "Enter", key: "Enter", windowsVirtualKeyCode: 13 }, 4000);
+  } catch { return ""; }
+  return "the canvas (no start button in the page: clicked it and pressed Enter)";
+}
+const startIt = async (b) => (await Promise.race([B.evaluate(b, START).catch(() => ""), sleep(6000).then(() => "")])) || startOnCanvas(b);
 
 // Opens the page in a fresh browser at a size; collects console errors. Call close() when done.
 async function openPage(entry, { width = 1280, height = 720, mobile = false, beforeLoad = "" } = {}) {
@@ -81,7 +96,7 @@ async function mobile({ root, entry, task, X, signal }) {
   for (const [w, h, label, isMobile] of sizes) {
     const p = await openPage(entry, { width: w, height: h, mobile: isMobile });
     try {
-      await B.evaluate(p.b, START).catch(() => "");
+      await startIt(p.b);
       await sleep(1000);
       const m = await B.evaluate(p.b, `(() => {
         const W = innerWidth, H = innerHeight, de = document.documentElement;
@@ -110,7 +125,7 @@ async function performance({ root, entry }) {
   const p = await openPage(entry, { beforeLoad: "window.__lt=[];try{new PerformanceObserver(l=>{for(const e of l.getEntries())window.__lt.push(e.duration)}).observe({type:'longtask',buffered:true})}catch(e){}" });
   try {
     const load = await B.evaluate(p.b, `(() => { const n = performance.getEntriesByType("navigation")[0] || {}; const res = performance.getEntriesByType("resource"); return { dcl: Math.round(n.domContentLoadedEventEnd || 0), load: Math.round(n.loadEventEnd || 0), files: res.length + 1, bytes: res.reduce((s, r) => s + (r.encodedBodySize || r.transferSize || 0), 0) + (n.encodedBodySize || 0) }; })()`);
-    const pressed = await B.evaluate(p.b, START).catch(() => "");
+    const pressed = await startIt(p.b);
     await sleep(800);
     const fps = await B.evaluate(p.b, `new Promise((done) => { let n = 0, worst = 0, last = performance.now(); const t0 = last; const f = (t) => { n++; worst = Math.max(worst, t - last); last = t; if (t - t0 < 3000) requestAnimationFrame(f); else done({ fps: Math.round(n / ((t - t0) / 1000)), worst: Math.round(worst) }); }; requestAnimationFrame(f); })`);
     const heap = await B.evaluate(p.b, `performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null`).catch(() => null);
@@ -179,7 +194,7 @@ async function playtest({ root, entry, task, X, signal }) {
   const snap = async (label) => shots.push({ label, img: await B.screenshot(p.b, { quality: 55 }) });
   try {
     await snap("the page as it opens");
-    const pressed = await B.evaluate(p.b, START).catch(() => "");
+    const pressed = await startIt(p.b);
     await sleep(1200); await pastMenus(p.b, notes);
     notes.push(pressed ? `Pressed "${pressed}".` : "No Play/Start button found.");
     await sleep(600);
@@ -295,7 +310,7 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
   {
     at.step = "starting the page";
     await settle(p.b, 300, 1500);
-    const pressed = start ? await Promise.race([B.evaluate(p.b, START), sleep(6000).then(() => "")]).catch(() => "") : "";
+    const pressed = start ? await startIt(p.b) : "";
     if (start) lines.push(pressed ? `Pressed "${pressed}".` : "No start button to press.");
     await settle(p.b, pressed ? 600 : 200, Math.min(Math.max(Number(wait) || 2500, 500), 15000));
     if (start) { at.step = "getting past the menus"; await pastMenus(p.b, lines); }
@@ -355,7 +370,7 @@ async function pageEval({ entry, code, keys = "", wait = 1500 }) {
     const p = await keptPage(entry);
     out.drop = p.drop;
     await settle(p.b, 300, 1500);
-    const pressed = await within(B.evaluate(p.b, START), 5000, "");
+    const pressed = await within(startIt(p.b), 12000, "");
     await settle(p.b, pressed ? 600 : 200, 2500);
     const notes = [];
     await pastMenus(p.b, notes);

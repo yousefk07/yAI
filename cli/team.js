@@ -791,7 +791,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const steps = a.log.filter((x) => ["step", "result", "diff", "note", "you"].includes(x.k)).slice(-25).map((x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 120)}` : x.k === "result" ? `    → ${clip(row1(x.text), 100)}` : x.k === "diff" ? `- changed ${x.path}` : `- (${clip(row1(x.text || ""), 140)})`);
     const next = {
       name: a.name, task: a.task, files: a.files, role: a.role, crewLead: a.crewLead, helperOf: a.helperOf, crewName: a.crewName, round: a.round, phase: a.phase,
-      readOnly: a.readOnly, hasVerdict: a.hasVerdict, fixRound: a.fixRound, model: TAKEOVER_MODEL(), isTakeover: true, state: "waiting", step: "taking over", started: Date.now(),
+      readOnly: a.readOnly, hasVerdict: a.hasVerdict, fixRound: a.fixRound, model: TAKEOVER_MODEL(), isTakeover: true, state: "starting", step: "taking over", started: Date.now(), // "starting", not "waiting": a waiting row is started by the stage too, so a takeover ran as two agents, one of them left behind (2026-10-23)
       changed: new Set(a.changed), created: new Set(a.created), text: [], cost: 0, asks: [],
       handover: [
         "You are taking over this job from an agent that got stuck, so yAI's watcher stopped it. Its work so far is in the files (it changed: " + (a.changed.size ? [...a.changed].join(", ") : "nothing yet") + ").",
@@ -2072,7 +2072,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           else if (lp(n) === 3 && a.role === "fixer" && !a.fixRound && !agents.filter((x) => x.role && rnd(x) === rnd(a) && (x.phase || 1) < n).some(concern))
             Object.assign(a, { state: "skipped", step: agents.some((x) => x.role && (x.phase || 1) < 3) ? "nothing to fix" : "no checkers ran", ended: Date.now() });
           // the re-check only runs after a fixer that ran
-          else if (a.role === "recheck" && !agents.some((x) => x.role === "fixer" && rnd(x) === rnd(a) && (x.phase || 1) < a.phase && x.state === "done")) Object.assign(a, { state: "skipped", step: "nothing was fixed", ended: Date.now() });
+          // ...or one that changed files and then stopped or failed (2026-10-23: a stopped fixer left game.js as the one
+          // word "placeholder", nothing re-checked it, and the team "finished" with a page that threw on load)
+          else if (a.role === "recheck" && !agents.some((x) => x.role === "fixer" && rnd(x) === rnd(a) && (x.phase || 1) < a.phase && (x.state === "done" || x.changed?.size))) Object.assign(a, { state: "skipped", step: "nothing was fixed", ended: Date.now() });
           else if (a.role === "recheck") startRecheck(a, task, agents);
           else if (a.role === "judge") startJudge(a, task, agents);
           else if (a.role === "skeleton") startSkeleton(a, task, agents);
