@@ -283,7 +283,7 @@ module.exports = function create(d) {
     ];
   };
   const workersLines = (all) => all.filter((a) => !a.role).map((o) => `"${o.name}" did: ${clip(o.task, 300)}${o.changed?.size ? ` (files changed: ${[...o.changed].join(", ")})` : o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}${o.state && o.state !== "done" ? ` (it ${o.state === "stopped" ? "was stopped" : "failed"} before finishing)` : ""}.`);
-  const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining. For a web page or game, check_page opens it in a real browser, starts it, holds keys you name, and tells you about errors, freezes and what's on screen: use it instead of guessing (and instead of loading browser code in Node). Don't write node -e scripts or fake-DOM harnesses to run browser code: each answers one narrow question and invites another (2026-10-22: a fixer ran 20+ of them and never edited a file).";
+  const CHECKS = "You may run checks that don't change anything, and should when they help: a syntax check (node --check <file>, python -m py_compile <file>), the project's tests, or its linter. Run one command at a time, without chaining. For a web page or game, check_page opens it in a real browser, starts it, holds keys you name, and tells you about errors, freezes and what's on screen: use it instead of guessing (and instead of loading browser code in Node). It takes 10-25 s, so use it after a group of changes or a finished feature, not after every small edit; a builder's page is half-built until the others finish, so check your own part once it works and once at the end (with <look_for>). Don't write node -e scripts or fake-DOM harnesses to run browser code: each answers one narrow question and invites another (2026-10-22: a fixer ran 20+ of them and never edited a file).";
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Don't leave scratch or debug files (like _test.js or _smoke.js) behind; delete them before you finish.";
   // The lead's contract: the names every file shares, given word for word to every agent.
   let contract = "", contractFile = "";
@@ -727,7 +727,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // learned estimates and the summary lost them)
     a.costPrev = a.child !== undefined ? a.cost || 0 : 0; // a.cost already includes any earlier restarts
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(a.changed || []); a.created = new Set(a.created || []); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
-    a.watchedAt = 0; a.watchNotes = 0; a.watchStopped = false;
+    a.watchedAt = 0; a.watchNotes = 0; a.watchStopped = false; a.planSeen = 0;
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
@@ -753,7 +753,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
       // the agent took in your notes (after its step): they're marked read, in its view and the feed
       else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
-      else if (e.type === "progress") { a.plan = e.plan || a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
+      else if (e.type === "progress") { a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
@@ -1132,7 +1132,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       side: {
         n: agents.indexOf(a) + 1, name: a.name, where: `${cap(stageOf(a).toLowerCase())} stage · ${a.internal ? "built-in" : modelShort(a.model) || "—"}`, desc: a.task,
         stats: [[a.state === "waiting" ? "—" : secs((a.ended || Date.now()) - a.started), a.paused ? "paused" : a.state === "working" ? "running" : a.state], [tokensOf(a.tokens), "tokens"], [a.internal ? "free" : money(a.cost) || "$0.000", ENDED.includes(a.state) ? "in all" : "so far"]],
-        steps: (a.plan?.steps || []).map((l, i) => ({ l, st: i < a.plan.done || ENDED.includes(a.state) ? "done" : i === a.plan.done && a.state === "working" ? "work" : "next" })),
+        steps: (a.plan?.steps || []).map((l, i) => ({ l, st: i < a.plan.done || a.state === "done" ? "done" : i === a.plan.done && a.state === "working" ? "work" : "next" })),
         touch, waiting: later,
       },
       body: logLines(a, agents, tick).slice(3), width: screenW(), height: screenH(), tick,
@@ -1786,19 +1786,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     };
     // The watcher (2026-10-22, Yousef: "one agent active at all times probing what the active agents are doing, telling
     // them to stop or to change what they're doing"). Agents have no step limit and are never stopped for repeating
-    // themselves; instead, every 75 s a cheap model reads what each working agent did since it last looked, and sends
+    // themselves; instead, every 20 s (Yousef: 75 s was too slow) a cheap model reads what each working agent did since it last looked, and sends
     // it a note, or stops one that kept looping after a note. Off with "team": { "watcher": false } in ~/.yai/config.json.
     const WATCH_SYSTEM = [
       "You supervise a team of AI coding agents building one project together. About every minute you see what each working agent did lately: its tool steps, newest last.",
-      "Catch an agent wasting time or going wrong: re-reading the same files, running near-identical commands or test harnesses without editing anything, drifting from its job, editing files another agent owns, redoing work that is done, or chasing a problem that doesn't matter for the task. Tell it plainly what to do instead.",
+      "Catch an agent wasting time or going wrong: re-reading the same files, running near-identical commands or test harnesses without editing anything, calling check_page over and over after small edits (each takes 10-25 s), drifting from its job, editing files another agent owns, redoing work that is done, or chasing a problem that doesn't matter for the task. Tell it plainly what to do instead.",
       "Leave alone an agent that is making progress (reading what it needs, then editing; testing what it just changed). Most of the time the right answer is no action.",
-      "Reply with JSON only: {\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"stop\" ends it: only when it already had a note from you and is still looping, or its job is clearly done and it's only checking again. An empty list is fine.",
+      "Also say, for each agent that has a numbered plan, how many of its plan steps are finished judging by what it actually did (files read, changed, checked), not by what it said.",
+      "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"stop\" ends it: only when it already had a note from you and is still looping, or its job is clearly done and it's only checking again. An empty actions list is fine.",
     ].join("\n");
     let watching = false;
     const watch = async () => {
       if (watching || over || state.interrupted || api.cfg.team?.watcher === false) return;
       const busy = agents.filter((a) => a.state === "working" && !a.internal && a.log && !a.paused && a.send);
-      const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 4);
+      const fresh = busy.filter((a) => a.log.length >= (a.watchedAt || 0) + 2);
       if (!fresh.length) return;
       watching = true;
       const askedAt = Date.now();
@@ -1806,14 +1807,22 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         const show = (x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 140)}` : x.k === "result" ? `    → ${clip(row1(x.text), 110)}` : x.k === "diff" ? `- changed ${x.path}` : x.k === "you" ? `- (a note it got: ${clip(row1(x.text), 140)})` : `- (${x.k}: ${clip(row1(x.text || x.line), 120)})`;
         const lines = fresh.map((a) => [
           `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}`,
-          `Its job: ${clip(row1(a.task), 300)}`, "Recent steps:",
+          `Its job: ${clip(row1(a.task), 300)}`,
+          ...(a.plan?.steps?.length ? ["Its plan:", ...a.plan.steps.map((l, i) => `${i + 1}. ${clip(row1(l), 120)}`), `(it has marked ${a.plan.done} finished)`] : []),
+          "Recent steps:",
           ...a.log.filter((x) => ["step", "result", "diff", "note", "you", "error"].includes(x.k)).slice(-20).map(show),
         ].join("\n"));
         const model = ["deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
         const out = await X.oneShot({ model, system: WATCH_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The task: ${task}\n\n${lines.join("\n\n")}` }] });
         for (const a of fresh) a.watchedAt = a.log.length;
-        let acts = [];
-        try { acts = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]).actions || []; } catch {}
+        let acts = [], progress = [];
+        try { const j = JSON.parse((/\{[\s\S]*\}/.exec(out) || ["{}"])[0]); acts = j.actions || []; progress = j.progress || []; } catch {}
+        for (const p of progress) {
+          const a = busy.find((x) => x.name === p.agent), n = Math.floor(Number(p.done));
+          if (!a || !a.plan?.steps?.length || a.started > askedAt || !(n > a.plan.done)) continue;
+          a.planSeen = Math.min(n, a.plan.steps.length - (a.state === "working" ? 1 : 0)); // the last step ends with the agent
+          a.plan = { ...a.plan, done: Math.max(a.plan.done, a.planSeen) };
+        }
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
           if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
@@ -1831,7 +1840,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
       } catch {} finally { watching = false; }
     };
-    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else watch(); }, 75000);
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else watch(); }, 20000);
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {

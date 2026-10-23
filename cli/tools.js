@@ -386,7 +386,7 @@ const tools = {
     params: ["path", "keys", "look_for"],
     describe: "Open the web page (or game) in a real browser as it is right now, press its start button, and report: errors, a frozen page, the frame rate, the buttons and text on it, and a description of what's on screen. " +
       "<path> is the HTML page (default: the project's index.html). Optional <keys> to hold after it starts, e.g. KeyW:1500,Space,ArrowLeft:500 (a key code, then how long in ms). " +
-      "Optional <look_for>: what to check on screen, e.g. \"is the hand visible and does the block show cracks\". Use it after building or fixing something to see it work.",
+      "Optional <look_for>: what to check on screen, e.g. \"is the hand visible and does the block show cracks\". It takes 10-25 s: use it after a group of changes or a finished feature, not after each small edit.",
     readOnly: true,
     async run(ctx, a) {
       let page = String(a.path || "").trim();
@@ -400,17 +400,36 @@ const tools = {
       }
       const abs = resolve(ctx, page);
       if (!fs.existsSync(abs)) throw new ToolError(`${page} doesn't exist.`);
+      // 1. the page's files as they are now (any agent's edits count): unchanged since the last check, same keys, it
+      // isn't opened again
+      let newest = 0, count = 0;
+      const scan = (dir, depth) => { let list = []; try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; } for (const e of list) { const p = path.join(dir, e.name); if (e.isDirectory()) { if (depth < 3 && !/^(node_modules|\.git|yai-media|\.yai-old|\.yai-team|tests?)$/.test(e.name)) scan(p, depth + 1); } else if (/\.(html?|m?js|css|json|glsl|wgsl)$/i.test(e.name)) { count++; try { newest = Math.max(newest, fs.statSync(p).mtimeMs); } catch {} } } };
+      scan(path.dirname(abs), 0);
+      const stamp = `${abs}|${newest}|${count}|${String(a.keys || "")}`;
+      ctx.pageChecks = ctx.pageChecks || { n: 0, last: "" };
+      if (ctx.pageChecks.last === stamp) {
+        toolHeader("Check page", rel(ctx, abs));
+        toolResult("nothing changed · not run");
+        return "Nothing in the page's files has changed since your last check_page (with the same keys), so it wasn't opened again: its result is further up. Change something first, or carry on.";
+      }
+      // 3. a builder (its own files listed) gets the screen described on its first check, and when it asks with <look_for>;
+      // other checks still report errors, freezes and frame rate (fast, and they don't use the image model)
+      const builder = !!process.env.YAI_OWN_FILES;
+      const describe = !builder || ctx.pageChecks.n === 0 || String(a.look_for || "").trim() ? ctx.describeImage : null;
+      ctx.pageChecks.n++;
       toolHeader("Check page", rel(ctx, abs) + (a.keys ? ` · ${String(a.keys).slice(0, 40)}` : ""));
       spinner.start("opening it in a browser");
       let r;
       try {
-        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe: ctx.describeImage, saveTo: path.join(ctx.root, "yai-media", `check-page-${Date.now()}.jpg`) });
+        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe, saveTo: path.join(ctx.root, "yai-media", `check-page-${Date.now()}.jpg`) });
       } catch (err) {
         throw new ToolError(`Couldn't open it: ${err.message}`);
       } finally {
         spinner.stop();
       }
       toolResult(r.frozen ? "frozen" : /Errors in the browser/.test(r.lines.join("\n")) ? "errors" : "checked", { color: r.frozen ? c.red : undefined });
+      ctx.pageChecks.last = stamp;
+      if (ctx.describeImage && !describe) r.lines.push("(No screen description this time, to save time: give <look_for> on your final check to have the screen described.)");
       return r.lines.join("\n");
     },
   },

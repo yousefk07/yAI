@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.171",
+      "date": "2026-10-22",
+      "title": "Steps that match the work",
+      "items": [
+        {
+          "area": "Team",
+          "title": "The watcher ticks the steps",
+          "text": "Each agent's step list is updated from what it actually did, judged by the watcher, instead of waiting for the agent to say a step is done. Only an agent that finished well gets every step ticked; a failed or stopped one keeps what it really finished."
+        },
+        {
+          "area": "Team",
+          "title": "A closer watch",
+          "text": "The watcher looks every 20 s instead of 75 s."
+        },
+        {
+          "area": "Team",
+          "title": "Fewer page checks",
+          "text": "check_page isn't run again when nothing in the page's files changed; builders get the screen described on their first check and when they ask with look_for; agents are told to check after a group of changes, and the watcher looks out for over-checking."
+        }
+      ]
+    },
+    {
       "version": "1.0.170",
       "date": "2026-10-22",
       "title": "/team, reviewed end to end",
