@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.201",
+      "date": "2026-10-23",
+      "title": "No more empty replies on long files",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Long replies end in time",
+          "text": "A reply that was still going after 280 seconds was killed by the site's 5-minute limit, and with Ultra Flash's tool calls nothing at all reached yAI Code (\"the model sent back nothing\"). The site now ends it at 280 seconds and sends what's there, so yAI Code keeps the lines of the file written so far and asks the model to go on."
+        }
+      ]
+    },
+    {
       "version": "1.0.200",
       "date": "2026-10-23",
       "title": "Sturdier runs",
