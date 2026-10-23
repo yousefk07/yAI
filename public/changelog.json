@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.191",
+      "date": "2026-10-23",
+      "title": "Research without search",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "When web search is down",
+          "text": "If web search fails, the researcher writes RESEARCH.md from what it knows (and says so) instead of searching in circles; if it ends with no RESEARCH.md, the chat is told plainly."
+        }
+      ]
+    },
+    {
       "version": "1.0.190",
       "date": "2026-10-23",
       "title": "The chat starts after the research",

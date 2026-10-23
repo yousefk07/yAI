@@ -50,7 +50,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       "- the topic itself: what it is, how it works, its rules, mechanics and the real numbers behind them (speeds, sizes, timings, formulas);",
       "- how it is usually built: the techniques and algorithms people use for it, and the mistakes that commonly go wrong;",
       "- what a great version needs: what users or players expect, and what makes amateur versions feel unfinished.",
-      'Then write RESEARCH.md in three short parts: "## The topic" (key facts and numbers), "## How it\'s built" (the approach and the pitfalls), and "## Checklist" (15 to 40 numbered requirements, most important first, each one line with how to check it). Write only RESEARCH.md; no code. If a source refuses you (403), move on to another; don\'t retry it.',
+      'Then write RESEARCH.md in three short parts: "## The topic" (key facts and numbers), "## How it\'s built" (the approach and the pitfalls), and "## Checklist" (15 to 40 numbered requirements, most important first, each one line with how to check it). Write only RESEARCH.md; no code. If a source refuses you (403), move on to another; don\'t retry it. If web search itself fails or finds nothing twice, stop searching and write RESEARCH.md from what you already know, saying at the top that it is from memory.',
       "End with a short report: the 5 facts and the 5 requirements that matter most.",
     ],
     builder: (a) => [
@@ -122,6 +122,8 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
         // it stays open, idle, for a follow-up (reawaken); the crew closes it when it stops
         a.kept = a.state === "done" ? { child } : null;
         if (!a.kept) try { child.stdin.end(); } catch {}
+        // a researcher that ended without its notes: the chat is told so, plainly
+        if (a.role === "researcher" && !require("fs").existsSync(path.join(root, "RESEARCH.md"))) a.text.unshift("(It wrote no RESEARCH.md: its research got nowhere, most likely because web search failed. Work from what you know.)");
         a.onDone?.(); a.onDone = null;
         report(a.name, `(${a.state}${a.error ? `: ${row1(a.error)}` : ""}; files changed: ${a.changed.size ? [...a.changed].join(", ") : "none"})\n${(a.text.join("\n").trim() || "(no report)").slice(-3000)}`);
       }
