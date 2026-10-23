@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.187",
+      "date": "2026-10-23",
+      "title": "Research first",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "A researcher starts every /crew",
+          "text": "/crew now always begins with a researcher on Ultra Flash, shown under Background agents: it researches the topic (how it works, its real numbers, how it is usually built, the pitfalls, a checklist) and writes RESEARCH.md; the main chat starts once it is done, with its report and the notes to read."
+        }
+      ]
+    },
+    {
       "version": "1.0.186",
       "date": "2026-10-23",
       "title": "A calmer watcher",

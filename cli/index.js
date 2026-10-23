@@ -2973,8 +2973,14 @@ async function command(line) {
       if (!task) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> for up to 6 background agents at once). /crew off ends it."));
       state.crewTask = task;
       CREW.start();
+      // a researcher first, always (it shows under "Background agents"); its report opens the chat's first turn
+      ui.note(`${c.accent("◆")} ${c.ink("A researcher looks into the topic first")} ${c.dim("· on Ultra Flash · it writes RESEARCH.md")}`);
+      state.busy = true; // the panel shows while it works
+      spinner.start("the researcher is looking into the topic");
+      try { await CREW.research(); } finally { spinner.stop(); state.busy = false; }
+      if (state.interrupted || !state.crewActive) return print(c.dim("   Stopped."));
       ui.note(`${c.accent("◆")} ${c.ink("/crew: this chat works on it, and hands separate jobs to background agents")} ${c.dim("· they show under the plan · /crew off ends it")}`);
-      return runAgent(task);
+      return runAgent(`${task}\n\n(The researcher's notes are in RESEARCH.md, with the topic's facts, how it's usually built and a checklist: read them before you build.)`);
     }
     case "/connections":
       return CONN.connections();

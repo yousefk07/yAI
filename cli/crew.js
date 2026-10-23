@@ -41,6 +41,14 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // ---------- briefs ----------
   const RULES = "Don't commit, push or change git history, don't install packages, and don't start servers that keep running. Delete any scratch or debug files you make before you finish.";
   const ROLE = {
+    researcher: () => [
+      "Your job: research the topic before the main agent builds anything. Search the web (web_search, then web_fetch 3 to 6 of the best sources) for:",
+      "- the topic itself: what it is, how it works, its rules, mechanics and the real numbers behind them (speeds, sizes, timings, formulas);",
+      "- how it is usually built: the techniques and algorithms people use for it, and the mistakes that commonly go wrong;",
+      "- what a great version needs: what users or players expect, and what makes amateur versions feel unfinished.",
+      'Then write RESEARCH.md in three short parts: "## The topic" (key facts and numbers), "## How it\'s built" (the approach and the pitfalls), and "## Checklist" (15 to 40 numbered requirements, most important first, each one line with how to check it). Write only RESEARCH.md; no code. If a source refuses you (403), move on to another; don\'t retry it.',
+      "End with a short report: the 5 facts and the 5 requirements that matter most.",
+    ],
     builder: (a) => [
       "Your job, as the main agent described it:", a.task, "",
       a.files.length ? `Files you own (create and change only these; read anything else you need): ${a.files.join(", ")}.` : "Change only what your job needs.",
@@ -69,7 +77,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     const earlier = agents.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.kept);
     if (earlier && reawaken(earlier, spec.task)) return;
     if (working().length >= (state.crewMax || 4)) return report(name, `(not started: ${state.crewMax || 4} background agents are already working; do it yourself, or wait for one with crew_wait)`);
-    const role = ["qa", "tester"].includes(spec.role) ? spec.role : "builder";
+    const role = ["qa", "tester", "researcher"].includes(spec.role) ? spec.role : "builder";
     const model = spec.model === "lite" ? LITE() : FLASH();
     const a = { name, task: String(spec.task || "").trim(), files: (spec.files || []).map(String).filter((p) => p && !p.includes("..")), role, model, state: "starting", step: "starting", started: Date.now(), cost: 0, text: [], log: [], changed: new Set(), defied: 0 };
     agents.push(a);
@@ -108,6 +116,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
         // it stays open, idle, for a follow-up (reawaken); the crew closes it when it stops
         a.kept = a.state === "done" ? { child } : null;
         if (!a.kept) try { child.stdin.end(); } catch {}
+        a.onDone?.(); a.onDone = null;
         report(a.name, `(${a.state}${a.error ? `: ${row1(a.error)}` : ""}; files changed: ${a.changed.size ? [...a.changed].join(", ") : "none"})\n${(a.text.join("\n").trim() || "(no report)").slice(-3000)}`);
       }
     });
@@ -218,5 +227,19 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // the panel shows times that move
   function tick() { if (working().length) try { ui.screen?.draw?.(); } catch {} }
 
-  return { start, stop, commission, panelLines, count, working: () => working().length };
+  // the researcher /crew starts with: it shows in the panel, and the main chat starts once it's done (10 min at most)
+  function research() {
+    ctx.crew = ctx.crew || { open: new Set(), reports: [] };
+    ctx.crew.open.add("researcher");
+    commission({ name: "researcher", role: "researcher", model: "flash", task: "Research the task above.", files: ["RESEARCH.md"] });
+    const a = agents.find((x) => x.name === "researcher" && ["starting", "working"].includes(x.state));
+    if (!a) return Promise.resolve();
+    return new Promise((done) => {
+      const t = setTimeout(done, 600000);
+      a.onDone = () => { clearTimeout(t); done(); };
+      const iv = setInterval(() => { if (!state.crewActive || state.interrupted) { clearInterval(iv); clearTimeout(t); done(); } else if (!["starting", "working"].includes(a.state)) clearInterval(iv); }, 500);
+    });
+  }
+
+  return { start, stop, commission, research, panelLines, count, working: () => working().length };
 };
