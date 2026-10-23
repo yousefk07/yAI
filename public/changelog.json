@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.182",
+      "date": "2026-10-22",
+      "title": "Research the topic",
+      "items": [
+        {
+          "area": "Team",
+          "title": "The researcher learns the topic",
+          "text": "The researcher now researches the topic itself (how it works, its rules and real numbers, how it is usually built and what goes wrong) as well as what a great version needs; TEAM_SPEC.md has The topic, How it's built and the Checklist."
+        }
+      ]
+    },
+    {
       "version": "1.0.181",
       "date": "2026-10-22",
       "title": "Measure, don't guess",

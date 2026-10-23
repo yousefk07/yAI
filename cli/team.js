@@ -97,7 +97,7 @@ const serverish = (t) => String(t).replace(/\b(web ?audio|canvas|web ?gl|webgpu|
 const GAME = /\bgame\b|arcade|platformer|shooter|breakout|snake|tetris|pong|\bplayer\b/i;
 const ROLES = [
   // 2026-10-22: a single yAI Code session that searched the web for what Minecraft needs beat a team that only had the prompt
-  { key: "researcher", phase: 0.2, verdict: false, on: (t, n) => n >= 4, desc: "searches the web for what a great version needs and writes TEAM_SPEC.md, the checklist everyone works to" },
+  { key: "researcher", phase: 0.2, verdict: false, on: (t, n) => n >= 4, desc: "researches the topic (how it works, how it's built) and what a great version needs; writes TEAM_SPEC.md for everyone" },
   { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
   { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|looks? (good|great|nice|professional|clean)|beautiful|polish|pretty|modern|sleek|stylish|styling/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
@@ -338,7 +338,7 @@ module.exports = function create(d) {
   // TEAM_SPEC.md: the researcher's checklist, next to the contract; everyone after it is pointed at it
   const specFile = () => path.join(contractFile ? path.dirname(contractFile) : root, "TEAM_SPEC.md");
   const specAt = () => path.relative(root, specFile()).split(path.sep).join("/");
-  const specLines = () => (require("fs").existsSync(specFile()) ? ["", `The team's checklist (what a great version of this needs, researched on the web) is in ${specAt()}. Read the items that touch your work: they're how the result is judged.`] : []);
+  const specLines = () => (require("fs").existsSync(specFile()) ? ["", `${specAt()} has the team's research, from the web: the topic's key facts and numbers, how it's usually built and what goes wrong, and the checklist the result is judged by. Read the parts that touch your work before you start.`] : []);
   const CHAT = "Team chat: team_say tells the other agents something that affects them (a hook you added in a file they own, a shared name you renamed or need, a question about how a piece fits, or the answer to one); give a name in <to> to reach one agent. Their messages reach you after your steps. Use it a few times at most, never for routine progress.";
   // what was said on the chat before this agent started (the last 12 messages)
   const chatLines = () => (chatLog.length ? ["", "The team chat so far (newest last):", ...chatLog.slice(-12).map((m) => `- ${m.from}${m.to ? ` to ${m.to}` : ""}: ${m.text}`)] : []);
@@ -365,11 +365,15 @@ module.exports = function create(d) {
     const contractAt = contractFile ? path.relative(root, contractFile).split(path.sep).join("/") : "TEAM_CONTRACT.md";
     const body = {
       researcher: [
-        "Your job: search the web (web_search, then web_fetch 2 to 4 of the best sources) for what a great version of this needs: its core features and rules, what users or players expect, and what makes amateur copies feel wrong or unfinished.",
-        `Then write ${specAt()}: a numbered checklist of 15 to 40 requirements, most important first. Each item is one line: the requirement, then how to check it (\"Breaking a block shows crack stages: hold the left button on a block and watch\"). Mark the ones the user asked for with (asked). Keep what the user asked for exactly; add only what a great version clearly needs, not wishes.`,
+        // 2026-10-22 (Yousef): research the topic itself, not only what a great copy of it needs
+        "Your job: research the topic itself, then what a great version needs. Search the web (web_search, then web_fetch 3 to 6 of the best sources) for:",
+        "- the topic in general: what it is, how it works, its rules, mechanics and the real numbers behind them (speeds, sizes, timings, formulas), so the team builds the real thing rather than a guess;",
+        "- how it is usually built: the techniques and algorithms people use for it (for a game, how its world, rendering, physics or AI is normally done), and the mistakes that commonly go wrong;",
+        "- what a great version needs: what users or players expect, and what makes amateur versions feel wrong or unfinished.",
+        `Then write ${specAt()} in three short parts: "## The topic" (the key facts and numbers, a few lines each), "## How it's built" (the approach to take and the pitfalls to avoid), and "## Checklist": a numbered list of 15 to 40 requirements, most important first, each one line with how to check it ("Breaking a block shows crack stages: hold the left button on a block and watch"). Mark the ones the user asked for with (asked). Keep what the user asked for exactly; add only what a great version clearly needs, not wishes.`,
         `Write only ${specAt()}; don't write code.`,
         "", RULES,
-        "When you're done, end with a short report: the sources you used and the 5 requirements that matter most.",
+        "When you're done, end with a short report: the sources you used, the most useful facts about the topic, and the 5 requirements that matter most.",
       ],
       architect: [
         `Your job: before anyone builds, design exactly how the pieces fit and write it to ${contractAt}. If the team has a checklist (below), the design must make room for every item on it. Every builder gets that file word for word and must follow it, so be precise:`,
