@@ -646,6 +646,16 @@ function topLevel() {
 
 // What changes while yAI works (prompt caching, 2026-10-21): sent at the end of each request, not in the system prompt,
 // so the system prompt and the conversation before it stay the same from one request to the next.
+// (1) The attempt log (2026-10-22): one line per edit, page check and command result, kept by yAI, not the model. Old
+// steps are trimmed from the conversation to save money, and then an agent no longer knows it already tried something,
+// so it tries it again (a main builder changed and reverted the same line for minutes). The last 30 lines go at the
+// end of every request, where trimming never reaches.
+const attempts = [];
+function logAttempt(line) {
+  const t = new Date(); attempts.push(`${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ${line}`);
+  if (attempts.length > 60) attempts.splice(0, attempts.length - 60);
+}
+const attemptBlock = () => (attempts.length ? `\n<attempt_log note="what you already did this task, oldest first; check it before you try something again">\n${attempts.slice(-30).join("\n")}\n</attempt_log>` : "");
 function envContext() {
   const branch = gitBranch();
   const repo = branch ? `git branch: ${branch}` : nestedRepos().length ? `not a git repository; these folders in it are: ${nestedRepos().join(", ")} (run git there with git -C <folder> ...)` : "not a git repository";
@@ -745,6 +755,7 @@ ${toolDocs}${CONN.promptBlock({ readOnly: true })}${FOCUS.block()}
 - Read a file before editing it; copy <old> exactly, without the line numbers. Small edit_file changes; write_file for new files.
 - Write long files in parts of at most 60 lines (write_file, then write_file with <append>true</append>).
 - Check your work when you can (a syntax check such as node --check file.js, or the tests). Delete scratch files.
+- Before a fix, say in one line what you expect it to change. After checking, say whether it did. If it didn't, say what is different about your next attempt before you make it, and look at your <attempt_log> first: never make a change you already made and undid.
 - If a tool returns an error, fix the cause instead of repeating the call.
 - Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.
 - Start your first reply with a short plan of 3 to 5 steps in plain words, between <plan> and </plan>, one numbered step per line. When a whole step is finished, start your next reply with <done>N</done> (N = steps finished so far). yAI shows these as your progress.${projectNotes()}`;
@@ -1477,7 +1488,7 @@ async function callModel() {
       messages: state.messages,
       model: state.model,
       system: systemPrompt(),
-      context: envContext(),
+      context: envContext() + (TEAM_AGENT ? attemptBlock() : ""),
       tools: nativeTools(),
       toolFormat: toolFormat(),
       conversationId: state.conversationId,
@@ -2108,6 +2119,12 @@ async function runAgent(content) {
       if (state.plan?.steps.length && state.plan.done < state.plan.steps.length) {
         if (planAt !== state.plan.done) { planAt = state.plan.done; planSteps = 0; }
         if (++planSteps % 6 === 0) result.output += `\n(Your plan's step ${state.plan.done + 1} is "${state.plan.steps[state.plan.done]}". If it's finished, start your next reply with <done>${state.plan.done + 1}</done>, or a higher number if later steps are finished too.)`;
+      }
+      if (TEAM_AGENT && !String(result.output).startsWith("Error")) {
+        const arg = call.args || {};
+        if (["edit_file", "write_file"].includes(call.name)) logAttempt(`${call.name === "write_file" ? (arg.append ? "appended to" : "wrote") : "edited"} ${String(arg.path || "").trim()}${ctx.flip ? ` · BACK TO AN EARLIER VERSION (${ctx.flip.n}×)` : ""}${arg.old ? `: "${String(arg.old).replace(/\s+/g, " ").trim().slice(0, 50)}" → "${String(arg.new ?? "").replace(/\s+/g, " ").trim().slice(0, 50)}"` : ""}`);
+        else if (call.name === "check_page") logAttempt(`check_page${arg.keys ? ` (${String(arg.keys).slice(0, 30)})` : ""} → ${String(result.output).split("\n").filter((l) => /^(FROZEN|BLANK|SAME SCREEN|Compared with your last check|Errors in the browser|No errors)/.test(l)).map((l) => l.replace(/\s+/g, " ").slice(0, 110)).join(" · ") || "checked"}`);
+        else if (call.name === "run") logAttempt(`ran ${String(arg.command || "").replace(/\s+/g, " ").slice(0, 70)} → ${/\n\[(exit code [1-9]\d*|command [^\]]+)\]$/.test(String(result.output)) ? "FAILED" : "ok"}`);
       }
       // a flip-flop: this edit put a file back to a version it already had
       if (ctx.flip) {

@@ -452,7 +452,9 @@ module.exports = function create(d) {
       qa: [
         "Your job: the team's one quality check, done the way a careful senior engineer would, in three parts. Don't change the app's code: the fixer does that from your report.",
         "1. The pieces fit: " + INTEGRATION_ITEMS.join(" "),
-        "2. Bugs: wrong logic, missed edge cases (empty input, errors, nulls), and anything that would break for a real user. Start from yAI's map and the page check results (below), then read the code that matters, not every file whole.",
+        // 2026-10-22: QA reading only the lines the map pointed at missed bugs a plain chat found at once by reading the
+        // game and thinking it through as a player
+        "2. Bugs, found the way a player or user would hit them: read the core files whole (the main loop, input, the game or app logic, and whatever the request centres on, up to about 2,000 lines; this overrides the reading advice further down), then walk through a session in your head, from the first screen to game over and playing again: what breaks, freezes, does nothing, feels wrong, or doesn't match the request? Also wrong logic and missed edge cases (empty input, errors, nulls). Use the page check results (below) and check_page to confirm what you suspect.",
         "3. Tests: write a few focused tests ONLY in test files (tests/, test/, *.test.*) for the main behaviours the task asks for, using the project's runner or the language's built-in one (node --test) without installing anything, and run them. Logic that can't run outside a browser is checked with check_page instead.",
         "Before you report a problem, check it is real (read the line, or run the code path). Assume the app is wrong first; if you change a test because it was wrong, list it under \"Tests I changed\".",
         CHECKS, "", RULES,
@@ -532,9 +534,19 @@ module.exports = function create(d) {
     "You look at a screenshot of a web page or browser game a team of coding agents just built, after its start button was pressed. " +
     "Say in 2-4 sentences what is on screen. Then list anything that looks broken: a blank or black screen, an upside-down or mirrored view, " +
     "overlapping or cut-off UI, text that can't be read, or something the task asks for that isn't there. End with one line: LOOKS: OK or LOOKS: BROKEN.";
+  // The page to open: one the builders planned or made (a /crew builder plans none up front, 2026-10-22: every page
+  // check said "no page to open"), else the newest index.html in the project.
   function entryPage(all) {
-    const files = all.filter((a) => !a.role).flatMap((a) => a.files).filter((f) => /\.html?$/i.test(f));
-    return files.find((f) => /(^|\/)index\.html?$/i.test(f)) || files[0] || null;
+    const fs = require("fs");
+    const files = [...new Set(all.filter((a) => !a.role).flatMap((a) => [...(a.files || []), ...(a.created || []), ...(a.changed || [])]))].filter((f) => /\.html?$/i.test(f) && !/TEAM_REPORT/i.test(f));
+    const planned = files.find((f) => /(^|\/)index\.html?$/i.test(f)) || files[0];
+    if (planned) return planned;
+    const found = [];
+    const look = (dir, depth) => { let list = []; try { list = fs.readdirSync(path.join(root, dir), { withFileTypes: true }); } catch { return; } for (const e of list) { const p = dir ? `${dir}/${e.name}` : e.name; if (e.isFile() && /^index\.html?$/i.test(e.name)) found.push(p); else if (e.isDirectory() && depth < 2 && !/^(node_modules|\.git|yai-media|\.yai-old|\.yai-team|tests?)$/.test(e.name)) look(p, depth + 1); } };
+    look("", 0);
+    found.sort((x, y) => { try { return fs.statSync(path.join(root, y)).mtimeMs - fs.statSync(path.join(root, x)).mtimeMs; } catch { return 0; } });
+    // only a page made or changed during this run (started in a home folder, another project's page is nearby)
+    return found.find((p) => { try { return !!teamStarted && fs.statSync(path.join(root, p)).mtimeMs >= teamStarted - 60000; } catch { return false; } }) || null;
   }
   async function browserCheck(a, task, all, { signal } = {}) {
     const B = require("./browser");
@@ -1444,6 +1456,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   }
 
   async function team(arg, opts = {}) {
+    teamStarted = 0; // set when the run starts; until then entryPage only trusts planned pages
     if (/^log\b/i.test(arg.trim())) return showLog(arg.trim().slice(3));
     crewMode = !!opts.crew;
     if (crewMode) { const c2 = /^([1-8])\s+([\s\S]+)$/.exec(arg.trim()); crewMax = c2 ? Number(c2[1]) : 4; if (c2) arg = c2[2]; }
@@ -1664,12 +1677,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       } catch {}
     }
     // web work: yAI opens the page in a browser between the builders and the checkers
-    if (entryPage(agents)) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
+    if (entryPage(agents) || (crewMode && WEB.test(task))) agents.splice(agents.findIndex((a) => a.role) === -1 ? agents.length : agents.findIndex((a) => a.role), 0, { name: "browser", task: "yAI opens the page in a browser: console errors, failed loads, a blank screen, and what it looks like", files: [], role: "browser", phase: 1.5, readOnly: true, hasVerdict: true, internal: true });
     // the finish gate: yAI's re-check after the fixer (see startRecheck)
     if (agents.some((a) => a.role === "fixer")) agents.push({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", files: [], role: "recheck", phase: 3.2, readOnly: true, internal: true, hasVerdict: true });
     // the skeleton check (2026-10-22): the architect's skeleton must load and run before builders fill it in
     if (agents.some((a) => a.role === "architect") && entryPage(agents)) agents.push({ name: "skeleton check", task: "yAI opens the architect's skeleton page: it must load and run, with no errors, before the builders start", files: [], role: "skeleton", phase: 0.8, readOnly: true, internal: true, hasVerdict: true });
-    if (plannedRounds > 1 && entryPage(agents)) agents.push({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", files: [], role: "judge", phase: 3.8, readOnly: true, internal: true, hasVerdict: true });
+    if (plannedRounds > 1 && (entryPage(agents) || (crewMode && WEB.test(task)))) agents.push({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", files: [], role: "judge", phase: 3.8, readOnly: true, internal: true, hasVerdict: true });
     // the board lists them in the order they run (2026-10-22: the architect, which runs first, was listed 9th)
     agents.sort((x, y) => (x.phase || 1) - (y.phase || 1));
     const layout = layoutLines(agents);

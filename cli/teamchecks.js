@@ -323,7 +323,8 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
     if (!img) { lines.push("The screenshot timed out: the page stopped drawing."); return { frozen: true, lines }; }
     if (saveTo) { try { require("fs").mkdirSync(path.dirname(saveTo), { recursive: true }); require("fs").writeFileSync(saveTo, img); lines.push(`Screenshot saved: ${saveTo}`); } catch {} }
     // a single-colour screen compresses to almost nothing (the Doom run's black frames were 5.5 KB at 1280×720)
-    const blank = img.length < 7000;
+    // ...and has no text or buttons on it (a white page with one line of text compresses as small: 2026-10-22)
+    const blank = img.length < 7000 && !info?.text && !info?.buttons?.length;
     if (blank) lines.push("BLANK: the screen is a single colour: the page draws nothing yet (or only a background).");
     const same = !blank && typeof seenBefore === "function" ? seenBefore(img) : "";
     if (same) lines.push(same);

@@ -1,6 +1,38 @@
 {
   "releases": [
     {
+      "version": "1.0.180",
+      "date": "2026-10-22",
+      "title": "Agents that remember what they tried",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "An attempt log",
+          "text": "Every edit, page check and command result is one line in a log yAI keeps; the last 30 lines go with every request of a team agent, where trimming never reaches, so it can see it already tried something."
+        },
+        {
+          "area": "Agent",
+          "title": "Checks that compare",
+          "text": "check_page starts with what changed since the agent's last check: the screen changed or not, new or fixed errors, the frame rate. A white page with text is no longer called blank."
+        },
+        {
+          "area": "Agent",
+          "title": "Expected result first",
+          "text": "Team agents say what a fix should change before making it, whether it did after checking, and what is different before trying again."
+        },
+        {
+          "area": "Crew",
+          "title": "The page is checked",
+          "text": "/crew found no page to open, so the browser check, playtest and performance check never ran: the page is now found from what the builder made, and the browser check and judge are always added for a web task."
+        },
+        {
+          "area": "Team",
+          "title": "QA reads like a player",
+          "text": "QA reads the core files whole and walks through a session as a player would, instead of only the lines the project map points at."
+        }
+      ]
+    },
+    {
       "version": "1.0.179",
       "date": "2026-10-22",
       "title": "No more flip-flopping",

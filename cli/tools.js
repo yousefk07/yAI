@@ -493,6 +493,25 @@ const tools = {
       }
       toolResult(r.frozen ? "frozen" : r.blank ? "blank screen" : /^SAME SCREEN/m.test(r.lines.join("\n")) ? "same screen as last time" : /Errors in the browser/.test(r.lines.join("\n")) ? "errors" : "checked", { color: r.frozen ? c.red : undefined });
       ctx.pageChecks.last = stamp; ctx.pageChecks.mine = mine; ctx.pageChecks.at = Date.now();
+      // (2) compared with this agent's last check, so "did my change do anything?" has a plain answer (2026-10-22)
+      {
+        const all = r.lines.join("\n");
+        const errs = new Set((all.match(/^- (Uncaught|console\.error).*$/gm) || []).map((x) => x.slice(2, 120)));
+        const fps = Number((/about (\d+) fps/.exec(all) || [])[1]) || 0;
+        const now = { errs, fps, hash: ctx.pageChecks.hash, frozen: !!r.frozen, blank: !!r.blank };
+        const was = ctx.pageChecks.prev;
+        if (was) {
+          const added = [...errs].filter((x) => !was.errs.has(x)), gone = [...was.errs].filter((x) => !errs.has(x));
+          const parts = [
+            now.frozen ? "the page froze" : now.blank ? "the screen is blank" : now.hash && now.hash === was.hash ? "the screen looks exactly the same" : "the screen changed",
+            added.length ? `${added.length} new error${added.length === 1 ? "" : "s"}` : "", gone.length ? `${gone.length} error${gone.length === 1 ? "" : "s"} gone` : "",
+            !added.length && !gone.length ? (errs.size ? `the same ${errs.size} error${errs.size === 1 ? "" : "s"} as before` : "no errors, as before") : "",
+            was.fps && fps && Math.abs(fps - was.fps) >= 10 ? `frame rate ${was.fps} → ${fps} fps` : "",
+          ].filter(Boolean);
+          r.lines.unshift(`Compared with your last check: ${parts.join("; ")}.`);
+        }
+        ctx.pageChecks.prev = now;
+      }
       if (ctx.describeImage && !describe) r.lines.push("(No screen description this time, to save time: give <look_for> on your final check to have the screen described.)");
       return r.lines.join("\n");
     },
