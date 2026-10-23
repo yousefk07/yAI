@@ -101,8 +101,11 @@ const ROLES = [
   { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
   { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|look|beautiful|polish|pretty|modern|sleek|styl/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
-  { key: "integration", phase: 2, readOnly: true, on: true, desc: "checks the pieces fit together (imports, routes, data shapes)" },
-  { key: "tester", phase: 2, on: true, desc: "writes and runs tests for the new work (test files only)" },
+  // one careful QA agent by default (2026-10-22): integration, tester and reviewer each read the whole project and found
+  // the same problems; they stay available on their own (e for everything, or tick them)
+  { key: "qa", phase: 2, on: true, desc: "one careful check of everything: the pieces fit, bugs, and tests for the main behaviours" },
+  { key: "integration", phase: 2, readOnly: true, on: false, desc: "checks the pieces fit together (imports, routes, data shapes)" },
+  { key: "tester", phase: 2, on: false, desc: "writes and runs tests for the new work (test files only)" },
   { key: "reviewer", phase: 2, readOnly: true, on: false, desc: "reviews the code for bugs, edge cases and messy code" },
   { key: "security", phase: 2, readOnly: true, on: (task) => /server|api|login|auth|password|token|form|upload|database|sql|payment|cookie|session/i.test(serverish(task)), desc: "looks for security holes (injection, auth, secrets, unsafe input)" },
   { key: "docs", phase: 2, on: false, verdict: false, desc: "updates the README and docs for what changed" },
@@ -190,7 +193,7 @@ module.exports = function create(d) {
       // feature ownership (2026-10-22): the files it creates are its own; it hooks into others' files with small exact edits
       "", me.files.length ? `Files you create (they're yours): ${me.files.join(", ")}. Your feature may also need small hooks in files other agents create (a call in the main loop, a tag in the page): make those with edit_file, a few lines each, and leave the rest of their code alone. Never write_file over a file you didn't create.` : "Keep your changes to the files your feature needs; in files other agents create, only small edit_file hooks.",
       ...(layoutLines(all).length ? ["", "The project layout, planned before anyone started (the folders already exist; create your files at exactly these paths and don't add other folders or rename anything):", ...layoutLines(all)] : []),
-      ...contractLines(), ...notesLines(), ...specLines(), ...chatLines(), "", CHAT,
+      ...contractFor(me), ...notesLines(), ...specLines(), ...chatLines(), "", CHAT,
       ...(all.some((x) => x.role === "skeleton" && BAD.test(x.verdict || "")) ? ["", "yAI opened the architect's skeleton and it doesn't run yet:", ...all.find((x) => x.role === "skeleton").text, "Whoever owns the file with the problem fixes it first."] : []),
       // the architect's skeletons (2026-10-22): every file starts with the shared names, so the pieces fit from the start
       ...(roles.includes("architect") ? ["", "The architect already started your files as skeletons: the shared names with empty bodies. Read them first, keep every name, signature, id and script tag exactly as they are, and fill them in. Don't rename or remove anything a skeleton has; add your own private helpers freely."] : []),
@@ -288,6 +291,27 @@ module.exports = function create(d) {
   // The lead's contract: the names every file shares, given word for word to every agent.
   let contract = "", contractFile = "";
   const contractLines = () => (contract ? ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\":", contract] : []);
+  // A builder's part of a long contract: the sections that name its files or feature, plus the ones every file needs
+  // (shared names, load order, the main loop). Short contracts, and the roles that see the whole project, get it all.
+  const CONTRACT_WHOLE = 6000;
+  const contractFor = (me) => {
+    if (!contract || contract.length <= CONTRACT_WHOLE || !contractFile) return contractLines();
+    let text;
+    try { text = require("fs").readFileSync(contractFile, "utf8"); } catch { return contractLines(); }
+    const lines = text.split(/\r?\n/);
+    // sections at the top two heading levels, with their line numbers in the file
+    const parts = [];
+    lines.forEach((l, i) => { if (/^#{1,3}\s/.test(l) || !parts.length) parts.push({ head: l.replace(/^#+\s*/, "").trim() || "(start)", from: i + 1, to: i + 1, body: [] }); const p = parts[parts.length - 1]; p.body.push(l); p.to = i + 1; });
+    const words = [...(me.files || []).map((p) => path.basename(p).replace(/\.\w+$/, "")), ...String(me.name || "").split(/\s+/)].map((w) => w.toLowerCase()).filter((w) => w.length >= 3);
+    const always = /shared|global|namespace|load order|startup|start-up|boot|main loop|game loop|state|event|overview|conventions|naming/i;
+    const mine = (p, i) => i === 0 || always.test(p.head) || words.some((w) => p.body.join("\n").toLowerCase().includes(w));
+    const keep = parts.filter(mine), rest = parts.filter((p, i) => !mine(p, i));
+    if (!rest.length) return contractLines();
+    const at = path.relative(root, contractFile).split(path.sep).join("/");
+    return ["", "The team's CONTRACT: the exact names shared between files. Use these names exactly, never another spelling; if you truly need a name that isn't here, say so in your report under \"For the others\". These are the parts that concern your feature:",
+      keep.map((p) => p.body.join("\n")).join("\n").trim(),
+      "", `The other parts are in ${at}; read one only if your feature touches it: ${rest.map((p) => `${p.head} (lines ${p.from}-${p.to})`).join("; ")}.`];
+  };
   // TEAM_SPEC.md: the researcher's checklist, next to the contract; everyone after it is pointed at it
   const specFile = () => path.join(contractFile ? path.dirname(contractFile) : root, "TEAM_SPEC.md");
   const specAt = () => path.relative(root, specFile()).split(path.sep).join("/");
@@ -402,6 +426,16 @@ module.exports = function create(d) {
         "Write for someone new to the project: short, plain and accurate. Read the code to check what you write is true.", "", RULES,
         "When you're done, end with a short report: which docs you changed and what you added.",
       ],
+      qa: [
+        "Your job: the team's one quality check, done the way a careful senior engineer would, in three parts. Don't change the app's code: the fixer does that from your report.",
+        "1. The pieces fit: " + INTEGRATION_ITEMS.join(" "),
+        "2. Bugs: wrong logic, missed edge cases (empty input, errors, nulls), and anything that would break for a real user. Start from yAI's map and the page check results (below), then read the code that matters, not every file whole.",
+        "3. Tests: write a few focused tests ONLY in test files (tests/, test/, *.test.*) for the main behaviours the task asks for, using the project's runner or the language's built-in one (node --test) without installing anything, and run them. Logic that can't run outside a browser is checked with check_page instead.",
+        "Before you report a problem, check it is real (read the line, or run the code path). Assume the app is wrong first; if you change a test because it was wrong, list it under \"Tests I changed\".",
+        CHECKS, "", RULES,
+        "When you're done, end with a short report: every real problem worst first, each with its file, line, what's wrong and how to fix it, then the test command and its result. Mark small style points as nits.",
+        verdictRule("OK", "PROBLEMS") + " Answer PROBLEMS only for things that should be fixed before this ships.",
+      ],
       integration: [
         "Your job is NOT to build a piece. You check that all the agents' work fits together properly, as an admin would:",
         ...INTEGRATION_ITEMS,
@@ -411,13 +445,30 @@ module.exports = function create(d) {
         verdictRule("OK", "PROBLEMS"),
       ],
     }[a.role];
-    return [head, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...notesLines(), ...(a.role !== "researcher" ? specLines() : []), ...chatLines(), "", CHAT, ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || lp(a.phase) === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
+    // a later round's checkers start from what this round changed (the rest was checked before)
+    const roundFiles = rnd(a) > 1 ? [...new Set(all.filter((x) => !x.role && rnd(x) === rnd(a)).flatMap((x) => [...(x.changed || [])]))] : [];
+    const focus = rnd(a) > 1 ? ["", roundFiles.length ? `This is round ${rnd(a)}: the earlier rounds were checked already. This round changed: ${roundFiles.join(", ")}. Check those files and the code that uses them closely; for the rest, only make sure nothing broke.` : `This is round ${rnd(a)}: the earlier rounds were checked already; check what this round's agents changed (their reports below) and that nothing else broke.`] : [];
+    return [head, ...focus, "", ...(a.role === "architect" ? all.filter((x) => !x.role).map((o) => `"${o.name}" will build: ${clip(o.task, 400)}${o.files.length ? ` (its files: ${o.files.join(", ")})` : ""}`) : workersLines(all)), ...contractLines(), ...notesLines(), ...(a.role !== "researcher" ? specLines() : []), ...chatLines(), "", CHAT, ...(a.role === "architect" && layoutLines(all).length ? ["", "The planned layout:", ...layoutLines(all)] : []), ...handoffLines(all, a.role === "merger" ? "integration" : a.role), ...browserLines(all), ...(a.role === "spec" || lp(a.phase) === 2 ? internalLines(all) : []), ...(WIDE_ROLES.has(a.role) ? mapLines(all) : []), "", ...body].join("\n").replace(/(When you're done, end with a short report:[^\n]*)/, `$1\n${REPORT_STYLE}`);
   }
 
   // A checker that finished without the VERDICT line it owes.
   const silent = (x) => x.role && x.role !== "fixer" && x.hasVerdict && x.state === "done" && !x.verdict;
   // Something the fixer should look at: a bad verdict, a checker that failed, or one that never said.
   const concern = (x) => x.role && x.role !== "fixer" && (BAD.test(x.verdict || "") || x.state === "failed" || silent(x));
+
+  // The reports that found something, merged into one to-do list before the fixer starts (2026-10-22: the fixer read
+  // three reports describing the same bug three ways). One cheap request; without it the fixer works from the reports.
+  const TODO_SYSTEM = "You turn a software team's check reports into one to-do list for the engineer who fixes them. Merge duplicates (the same problem reported by several checks is one item), keep only real problems, and order them worst first (broken or crashing, then wrong behaviour, then the rest). One numbered line each: file:line if known, what's wrong, how to fix it. Then, if any, a short \"For the user\" list of questions and nits. Plain text only, no preamble.";
+  async function fixerTodo(a, all, task) {
+    const found = all.filter((x) => concern(x) && rnd(x) === rnd(a));
+    const reports = found.map((x) => `## ${x.role}${x.verdict ? ` (VERDICT: ${x.verdict})` : ""}\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-4000)}`).join("\n\n");
+    if (found.length < 2 && reports.length < 2500) return; // one short report is its own list
+    const model = ["deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
+    try {
+      const out = await Promise.race([X.oneShot({ model, system: TODO_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The task: ${clip(String(task || ""), 600)}\n\n${reports}` }] }), new Promise((r) => setTimeout(() => r(""), 60000))]);
+      if (String(out || "").trim().length > 40) { a.todo = String(out).trim(); say("fixer", "has one to-do list from the reports", "acc", clip(row1(a.todo), 200)); }
+    } catch {}
+  }
 
   // The fixer (phase 3) gets the reports that found something, and fixes those problems.
   function fixerBrief(task, all, me = {}) {
@@ -428,8 +479,10 @@ module.exports = function create(d) {
       ...(me.fixRound === 2 ? ["A first fixer already worked on this. yAI then re-checked the result itself (the tests, the page, and playing it), and it still fails. Fix exactly what the re-check below found; that is the whole job.", ""] : []),
       ...workersLines(all), "",
       ...contractLines(), ...notesLines(), ...specLines(), ...chatLines(), "", CHAT, ...handoffLines(all, "fixer"), ...browserLines(all), ...mapLines(all), "",
+      ...(me.todo ? ["Your to-do list, merged from every check's report (duplicates combined, worst first). Work through it in order; the full reports follow for detail.", me.todo, ""] : []),
       "After them, these checkers found problems. Their reports:", "",
-      ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(-3000)}`), "",
+      // with a to-do list, each report is shorter: the list already has what matters
+      ...found.map((x) => `## ${x.role} (${x.verdict ? "VERDICT: " + x.verdict : silent(x) ? "it gave no verdict, so treat its report with suspicion and re-run its checks yourself" : x.state})\n${(x.text.join("\n").trim() || x.error || "(no report)").slice(me.todo ? -1500 : -3000)}`), "",
       "Your job: fix those problems, in any file, with the smallest changes that do it properly. Skip nits and anything that is really a question for the user (list those instead). Then re-run the checks or tests that failed to show they pass now.",
       "Don't break what works: after your edits, run the project's existing tests (the tester's, under tests/ or test/), and check that every behaviour the task asks for still works, not only the ones you touched. When you change how something is controlled (input, keys, the mouse, touch), check EVERY control again, because fixing one often breaks another.",
       // 2026-10-22 (the habit tracker): a fixer made the store return copies where the contract promised the live list,
@@ -710,7 +763,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // (2026-10-22: a merger on a Minecraft clone, ~2,400 lines over 5 files, kept losing the first files while reading
   // the last, re-read them until the repeat guard stopped it, and never edited). 80k leaves room in a 128k window for
   // the system prompt and the reply; builders keep 48k, which is cheaper and enough for their own files.
-  const WIDE_ROLES = new Set(["merger", "integration", "reviewer", "fixer", "spec"]);
+  const WIDE_ROLES = new Set(["merger", "integration", "reviewer", "fixer", "spec", "qa"]);
   function relayChat(a, all, text, to) {
     const m = { at: Date.now(), from: a.name, to: to || "", text };
     chatLog.push(m);
@@ -728,6 +781,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     a.costPrev = a.child !== undefined ? a.cost || 0 : 0; // a.cost already includes any earlier restarts
     a.state = "starting"; a.started = Date.now(); a.step = "starting"; a.changed = new Set(a.changed || []); a.created = new Set(a.created || []); a.text = []; a.cost = 0; a.asks = []; a.flag = "";
     a.watchedAt = 0; a.watchNotes = 0; a.watchStopped = false; a.planSeen = 0;
+    // what it spent its time on (the efficiency report), kept across restarts
+    if (a.child !== undefined) { a.restarts = (a.restarts || 0) + 1; a.usagePrev = addUsage(a.usagePrev, a.usage); a.usage = null; }
+    a.eff = a.eff || { read: 0, edit: 0, run: 0, check: 0, search: 0, other: 0, refused: 0 };
     a.log = [{ k: "brief", text: a.task }];
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
@@ -753,15 +809,16 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
       // the agent took in your notes (after its step): they're marked read, in its view and the feed
       else if (e.type === "note-read") { for (const x of a.log) if (x.k === "you" && !x.read) x.read = true; say(a.name, "read your note", "acc"); }
-      else if (e.type === "progress") { a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
+      else if (e.type === "progress") { if (e.usage) a.usage = e.usage; a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
-      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
+      else if (e.type === "step") { const k = effKind(e.verb); if (a.eff) a.eff[k]++; a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
       else if (e.type === "diff" && e.path) { a.lastMove = Date.now(); a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
       else if (e.type === "text-start") { a.text = []; log({ k: "gap" }); }
       else if (e.type === "text") { a.text.push(e.line); a.lastMove = Date.now(); log({ k: "text", line: e.line }); }
       else if (e.type === "note" && e.text) {
         log({ k: "note", text: e.text });
+        if (a.eff && /not run|not read again|asked for the lines it needs/.test(e.text)) a.eff.refused++;
         if (/kept repeating steps|kept checking without changing/.test(e.text)) a.flag = "stuck · stopped";
         else if (/^paused after \d+ steps/.test(e.text)) a.flag = "hit the step limit";
       }
@@ -840,6 +897,23 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   // One row of the view: a multi-line command (node -e "…" over several lines) or note must not break the row, or the
   // rows below are drawn over each other (2026-10-22).
   const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
+  // the efficiency report's helpers: a step's kind, and token counts added up
+  const effKind = (verb) => /^read/i.test(verb) ? "read" : /^(edit|write|update|create|append)/i.test(verb) ? "edit" : /^run/i.test(verb) ? "run" : /check page/i.test(verb) ? "check" : /^(search|find|list|grep|glob)/i.test(verb) ? "search" : "other";
+  const addUsage = (x, y) => (!x ? (y ? { ...y } : null) : !y ? x : { new: x.new + y.new, cached: x.cached + y.cached, out: x.out + y.out, real: (x.real || 0) + (y.real || 0), steps: (x.steps || 0) + (y.steps || 0) });
+  const usageOf = (a) => addUsage(a.usagePrev, a.usage);
+  // one agent's line in the efficiency report, and what looks wasteful about it
+  const effOf = (a) => {
+    const e = a.eff || {}, u = usageOf(a), mins = ((a.ended || Date.now()) - (a.started || Date.now())) / 60000;
+    const steps = (e.read || 0) + (e.edit || 0) + (e.run || 0) + (e.check || 0) + (e.search || 0) + (e.other || 0);
+    const warn = [];
+    if ((e.check || 0) >= 8) warn.push(`${e.check} page checks`);
+    if ((e.refused || 0) >= 5) warn.push(`${e.refused} repeats refused`);
+    if (!a.readOnly && !a.internal && a.role !== "spec" && mins > 3 && !(a.changed?.size)) warn.push("changed no file");
+    if ((a.restarts || 0) > 0) warn.push(`restarted ${a.restarts}×`);
+    if ((a.watchTotal || 0) >= 3) warn.push(`${a.watchTotal} watcher notes`);
+    if (u && u.new + u.cached > 50000 && u.cached / (u.new + u.cached) < 0.5) warn.push("cache mostly missed");
+    return { steps, mins, u, warn, e };
+  };
   // One line of what an agent says, drawn (2026-10-22, Yousef: "make it look nicer"): headings and **Labels** in bold with room
   // above them, • bullets whose wrapped lines stay under their text, files in code colour, the VERDICT as a pill.
   // Returns { lines, head } (head: set it off with a blank line).
@@ -1208,6 +1282,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       score, requirements, recheck,
       agents: agents.map((a) => ({ n: agents.indexOf(a) + 1, name: a.name, stage: cap(stageOf(a).toLowerCase()), model: a.internal ? "built-in" : modelShort(a.model) || "", time: a.state === "waiting" || !ran(a) ? "" : secs((a.ended || Date.now()) - a.started), cost: !ran(a) ? "" : a.internal ? "free" : a.cost ? money(a.cost) : "free", st: stOf(a), summary: actOf(a, agents) })),
       feed: feed.map((x) => ({ t: clock(x.at - teamStarted), who: x.who, tone: x.tone, what: x.what, quote: x.quote })),
+      efficiency: agents.filter((a) => !a.internal && ran(a) && a.eff).map((a) => {
+        const f = effOf(a);
+        return { name: a.name, time: secs(f.mins * 60000), cost: money(a.cost) || "", steps: f.steps, read: f.e.read, edit: f.e.edit, run: f.e.run, check: f.e.check, refused: f.e.refused, notes: a.watchTotal || 0, restarts: a.restarts || 0,
+          tokens: f.u ? tokensOf(f.u.new + f.u.cached + f.u.out) : "", cached: f.u && f.u.new + f.u.cached ? `${Math.round((100 * f.u.cached) / (f.u.new + f.u.cached))}%` : "", warn: f.warn.join(" · ") };
+      }),
       shots: shots.slice(0, 12), files, recording: recording && { cols: 140, dict: recording.dict, frames: recording.frames },
     });
     const file = path.join(dir, "TEAM_REPORT.html");
@@ -1279,7 +1358,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     try { const u = (await api.hub("usage"))?.today?.ultra; if (u && u.limitUsd != null) left = Math.max(0, u.limitUsd - (u.spentUsd || 0)); } catch {}
     state.teamStopReason = "";
     // 2. You pick the team: the lead's builders, the checkers after them, and the fixer. The picks are remembered.
-    const saved = api.cfg.team?.roles || {};
+    const saved = { ...(api.cfg.team?.roles || {}) };
+    // picks saved before QA existed: the three checks it replaces follow the new defaults once (2026-10-22)
+    if (!("qa" in saved)) { delete saved.integration; delete saved.tester; delete saved.reviewer; }
     const roles = ROLES.map((r) => ({ ...r, on: r.key in saved ? !!saved[r.key] : typeof r.on === "function" ? r.on(task, agents.length) : r.on }));
     print("");
     ui.note(`${c.accent("◆")} ${c.ink(agents.length === 1 ? "The lead kept it as one part" : `The lead split it into ${agents.length} parts`)} ${c.dim(`· with ${d.modelLabel()}; pick who joins them`)}`);
@@ -1293,7 +1374,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // a tester gave no verdict), Ultra for the architect's one big design job. Each list is tried in order. They
     // replaced the picks saved before they existed once (suggestedV); after that your picks are remembered as before.
     const CHEAP = ["glm-4.7-flash", "deepseek-v4.1-flash"], MID = ["deepseek-v4.1-flash", "deepseek-v4-pro"], TOP = ["deepseek-v4-pro", "deepseek-v4.1-flash"];
-    const SUGGESTED = { researcher: MID, architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
+    const SUGGESTED = { qa: MID, researcher: MID, architect: TOP, builders: CHEAP, designer: CHEAP, docs: CHEAP, api: CHEAP, setup: CHEAP, merger: MID, integration: MID, tester: MID, reviewer: MID, security: MID, fixer: MID, spec: MID };
     const savedModels = api.cfg.team?.suggestedV === 1 ? api.cfg.team?.models || {} : {};
     const modelFor = (key) => [savedModels[key], ...(SUGGESTED[key] || []), state.model, models[0]?.id].find((id) => models.some((m) => m.id === id));
     const group = (label, test) => { const list = roles.filter((r) => test(r.phase)); return list.length ? [{ kind: "head", label }, ...list.map((r) => ({ label: r.key, desc: r.desc, on: r.on, role: r, model: r.internal ? undefined : modelFor(r.key) }))] : []; };
@@ -1313,7 +1394,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const items = rows.filter((r) => r.kind !== "head");
     // a role's typical run: [requests, prompt in thousands of tokens, output in thousands, minutes], from real runs
     // (2026-10-22: the desktop OS team made ~15 requests an agent, 93% of each prompt cached, ~4k tokens out)
-    const PROFILE = { researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
+    const PROFILE = { qa: [22, 40, 4, 3], researcher: [10, 15, 4, 1.5], architect: [8, 14, 8, 2], builder: [14, 16, 4, 1], merger: [16, 35, 2, 2], designer: [10, 18, 2, 1], integration: [12, 35, 1.5, 1.5], tester: [20, 25, 4, 2], reviewer: [12, 35, 1.5, 1.5], security: [12, 35, 1.5, 1.5], docs: [8, 18, 2, 1], api: [12, 25, 2, 1.5], setup: [10, 25, 1.5, 1], fixer: [18, 40, 3, 2], spec: [10, 35, 1.5, 1] };
     const estOf = (r) => {
       if (r.role?.internal) return { usd: 0, min: 0.5 };
       // what this role really took on this model in earlier runs, when there are any (learned at the end of a run)
@@ -1332,12 +1413,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // role's default), Everything
     const defOn = (r) => { const R = ROLES.find((x) => x.key === r.role.key); return !!(typeof R.on === "function" ? R.on(task, agents.length) : R.on); };
     const PRESETS = [
-      { key: "q", label: "Quick", on: (r) => ["tester", "fixer"].includes(r.role.key) || (r.role.key === "merger" && agents.length >= 3) || (!!r.role.internal && defOn(r)) },
+      { key: "q", label: "Quick", on: (r) => ["qa", "fixer"].includes(r.role.key) || (r.role.key === "merger" && agents.length >= 3) || (!!r.role.internal && defOn(r)) },
       { key: "r", label: "Recommended", on: defOn },
       { key: "e", label: "Everything", on: () => true },
       // quality first, for a run you'll show (2026-10-22): every check that proves it works, Ultra where judgement
       // decides the result, Ultra Flash everywhere else (Lite drifted on whole-project roles)
-      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["researcher", "architect", "merger", "tester", "reviewer", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
+      { key: "s", label: "Showcase", on: (r) => defOn(r) || ["researcher", "architect", "merger", "qa", "fixer", "spec"].includes(r.role.key), models: (r) => (r.role && ["architect", "spec"].includes(r.role.key) ? TOP : MID) },
     ];
     const pickModel = (list) => list.find((id) => models.some((m) => m.id === id));
     let rounds = 1; // build → judge → improve, up to this many times (+ and − in the picker; Showcase sets 3)
@@ -1624,7 +1705,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       'concrete, naming the files and the shared names involved","files":["files this agent may rewrite or create, relative to the project root, each file under at most one agent"]}]}. ' +
       "An agent may also make small edit_file hooks in other files. If nothing important is left, return {\"summary\":\"done\",\"agents\":[]}. No tool calls.";
     const fresh = (o) => ({ files: [], changed: new Set(), created: new Set(), text: [], cost: 0, asks: [], state: "waiting", started: Date.now(), ...o, step: WAIT_STEP[lp(o.phase)] || "later" });
-    const roundKeys = new Set(["tester", "reviewer", "designer", "security", "fixer", "spec", "mobile", "performance", "accessibility", "playtester"]);
+    const roundKeys = new Set(["qa", "tester", "reviewer", "designer", "security", "fixer", "spec", "mobile", "performance", "accessibility", "playtester"]);
     const roundCost = () => agents.reduce((x, a) => x + (a.cost || 0), 0);
     const lastRound = () => Math.max(...agents.map(rnd));
     const roundDone = (r) => {
@@ -1704,7 +1785,12 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       }));
       if (added.length) {
         const like = (key) => agents.find((a) => a.role === key && rnd(a) === 1);
-        const members = agents.filter((a) => rnd(a) === 1 && a.role && roundKeys.has(a.role) && !a.fixRound).map((m) => fresh({ name: m.name, task: m.task, role: m.role, round: r + 1, phase: base + lp(m.phase), readOnly: m.readOnly, internal: m.internal, hasVerdict: m.hasVerdict, model: m.model }));
+        const asked = said.join(" ").toLowerCase();
+        const again = (m) => ["qa", "fixer", "spec"].includes(m.role) || m.internal
+          || (m.role === "designer" && /design|look|colou?r|style|pretty|ugly|font|layout/.test(asked))
+          || (m.role === "security" && /secur|login|password|auth|xss|inject/.test(asked))
+          || (!agents.some((x) => x.role === "qa" && rnd(x) === 1) && ["tester", "reviewer"].includes(m.role)); // no QA: the old checks stay
+        const members = agents.filter((a) => rnd(a) === 1 && a.role && roundKeys.has(a.role) && !a.fixRound && again(a)).map((m) => fresh({ name: m.name, task: m.task, role: m.role, round: r + 1, phase: base + lp(m.phase), readOnly: m.readOnly, internal: m.internal, hasVerdict: m.hasVerdict, model: m.model }));
         if (like("browser")) members.push(fresh({ name: "browser", task: like("browser").task, role: "browser", round: r + 1, phase: base + 1.5, readOnly: true, hasVerdict: true, internal: true }));
         if (members.some((m) => m.role === "fixer")) members.push(fresh({ name: "re-check", task: "yAI re-runs the tests and the page, and plays it, after the fixer", role: "recheck", round: r + 1, phase: base + 3.2, readOnly: true, internal: true, hasVerdict: true }));
         members.push(fresh({ name: "judge", task: "yAI plays it and a model that can see compares it with the request", role: "judge", round: r + 1, phase: base + 3.8, readOnly: true, internal: true, hasVerdict: true }));
@@ -1731,6 +1817,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // Integration costs a whole agent (2026-10-22: ~$0.20 a run). The reviewer takes it on when both run; and when the
     // page opened cleanly and every built-in check passed, the pieces visibly fit, so it isn't needed.
     const integrationNotNeeded = (a) => {
+      if (agents.some((x) => x.role === "qa" && x.state === "waiting" && rnd(x) === rnd(a))) return (a.merged = true, a.step = "done by QA");
       if (agents.some((x) => x.role === "reviewer" && x.state === "waiting")) return (a.merged = true, a.step = "done by the reviewer");
       const page = agents.filter((x) => x.internal && rnd(x) === rnd(a) && (x.phase || 1) < a.phase);
       if (page.some((x) => x.role === "browser") && page.every((x) => x.state === "done" && x.verdict && !BAD.test(x.verdict))) return (a.step = "the page checks all passed");
@@ -1778,8 +1865,17 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
           else if (a.role === "browser") startBrowser(a, task, agents);
           else if (a.internal) startInternal(a, task, agents);
           else {
-            if (a.role === "fixer") { const n = agents.filter(concern).length; say("fixer", `started · ${n} report${n === 1 ? "" : "s"} to fix`, "acc"); }
-            startAgent(a, task, agents);
+            if (a.role === "fixer" && !a.fixRound) {
+              const n = agents.filter((x) => concern(x) && rnd(x) === rnd(a)).length;
+              say("fixer", `started · ${n} report${n === 1 ? "" : "s"} to fix`, "acc");
+              // first, the reports become one to-do list (cheap; the fixer then starts from it)
+              Object.assign(a, { state: "working", step: "merging the reports into one to-do list", lastMove: Date.now() });
+              fixerTodo(a, agents, task).finally(() => {
+                if (a.state !== "working") return; // skipped meanwhile
+                if (state.interrupted) { Object.assign(a, { state: "stopped", ended: Date.now() }); return d.wake(); }
+                startAgent(a, task, agents);
+              });
+            } else startAgent(a, task, agents);
           }
         }
       }
@@ -1832,7 +1928,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
             say("watcher", `stopped ${a.name}`, "warn", msg);
             a.send({ type: "stop" });
           } else {
-            a.watchNotes = (a.watchNotes || 0) + 1;
+            a.watchNotes = (a.watchNotes || 0) + 1; a.watchTotal = (a.watchTotal || 0) + 1;
             a.send({ type: "note", text: `From the team's watcher, who sees what every agent is doing: ${msg}` });
             a.log.push({ k: "you", text: `(the watcher) ${msg}` });
             say("watcher", `→ ${a.name}`, "acc", msg);
@@ -1840,7 +1936,24 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
       } catch {} finally { watching = false; }
     };
-    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else watch(); }, 20000);
+    // The slowest agent holds up its whole stage (2026-10-22: one builder at 12 min while the others were done in 4).
+    // Once the others in its stage and round have finished and it has run half again as long as the slowest of them
+    // (and 3 min past their end), it's told once that the team is waiting: finish the essentials, note what's left.
+    const straggle = () => {
+      for (const a of agents) {
+        if (a.state !== "working" || a.internal || !a.send || a.wrapSaid) continue;
+        const peers = agents.filter((x) => x !== a && !x.internal && rnd(x) === rnd(a) && lp(x.phase) === lp(a.phase));
+        if (!peers.length || !peers.every((x) => x.state === "done")) continue;
+        const slowest = Math.max(...peers.map((x) => (x.ended || 0) - (x.started || 0))), lastEnd = Math.max(...peers.map((x) => x.ended || 0));
+        if (Date.now() - a.started < slowest * 1.5 || Date.now() - lastEnd < 180000) continue;
+        a.wrapSaid = true;
+        const msg = `The rest of the team has finished this stage and is waiting for you (for ${secs(Date.now() - lastEnd)}). Finish the essentials of your part in the next few steps, write down anything left undone in your report under "For the others", and end with your report.`;
+        a.send({ type: "note", text: `From yAI: ${msg}` });
+        a.log.push({ k: "you", text: `(yAI) ${msg}` });
+        say("yAI", `the team is waiting on ${a.name} · asked it to wrap up`, "warn");
+      }
+    };
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); watch(); } }, 20000);
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {
@@ -1975,6 +2088,14 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ...(fixerA?.recheck || []).filter((r) => r.code !== 0).map((r) => `${clip(r.cmd, 40)} still fails: ${row1(r.tail.slice(-1)[0] || "")}`),
     ];
     for (const t of attention) print(`   ${c.yellow("!")} ${c.ink(clip(t, ui.width() - 6))}`);
+    // where the time went (the full table is in TEAM_REPORT.html): the cache rate, and the agents that look wasteful
+    {
+      const worked = agents.filter((a) => !a.internal && ran(a) && a.eff);
+      const all = worked.map(usageOf).filter(Boolean).reduce((x, u) => addUsage(x, u), null);
+      const waste = worked.map((a) => ({ a, f: effOf(a) })).filter((x) => x.f.warn.length).sort((x, y) => y.f.mins - x.f.mins).slice(0, 3);
+      if (all && all.new + all.cached) print(`   ${c.dim("Efficiency")}  ${c.ink(`${Math.round((100 * all.cached) / (all.new + all.cached))}% of prompt tokens cached`)}${c.dim(` · ${tokensOf(all.new)} new, ${tokensOf(all.cached)} cached, ${tokensOf(all.out)} written`)}`);
+      for (const { a, f } of waste) print(`   ${c.yellow("·")} ${c.ink(a.name)} ${c.dim(`${secs(f.mins * 60000)}, ${f.steps} steps: ${f.warn.join(", ")}`)}`);
+    }
     // What each role really cost and took, per model, so the next estimate is this user's own average instead of a
     // guess (2026-10-22: the picker's numbers were always off). Only agents that finished count; the newest run weighs
     // a third.

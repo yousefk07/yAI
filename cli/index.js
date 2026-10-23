@@ -717,7 +717,7 @@ const toolAllowed = (name) => (TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.ha
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
   if (!TEAM_AGENT && !state.stdio) return; // a team agent, or the VS Code panel (its plan card)
-  ui.event({ type: "progress", plan: state.plan ? { steps: state.plan.steps, done: state.plan.done } : null, cost: state.cost.session, tokens: state.teamTokens || 0, fallbacks: state.fallbacks || 0 });
+  ui.event({ type: "progress", plan: state.plan ? { steps: state.plan.steps, done: state.plan.done } : null, cost: state.cost.session, tokens: state.teamTokens || 0, usage: state.teamUsage || null, fallbacks: state.fallbacks || 0 });
 }
 function teamPrompt(shell, toolDocs) {
   return `You are one agent in a yAI Code team, working in a project folder on your own part of a bigger task.
@@ -1534,6 +1534,12 @@ async function callModel() {
     }
     state.lastPromptTokens = promptTokens;
     state.teamTokens = (state.teamTokens || 0) + Math.round(promptTokens) + (usage?.out ?? seen); // for the /team board
+    // new vs cached, for the /team efficiency report (the real counts when the final event came, else estimated)
+    const inT = usage?.in ?? Math.round(promptTokens), cachedT = usage?.cached ?? (usage ? 0 : Math.min(state.lastPromptTokensPrev || 0, Math.round(promptTokens)));
+    state.teamUsage = state.teamUsage || { new: 0, cached: 0, out: 0, real: 0, steps: 0 };
+    state.teamUsage.new += Math.max(0, inT - cachedT); state.teamUsage.cached += cachedT; state.teamUsage.out += usage?.out ?? seen;
+    state.teamUsage.steps++; if (usage?.in != null) state.teamUsage.real++;
+    state.lastPromptTokensPrev = Math.round(promptTokens);
     seen = 0;
   } catch (err) {
     if (!state.interrupted) {

@@ -87,10 +87,24 @@ async function models() {
 }
 
 // Streams Server-Sent Events (`data: {json}` lines) to onEvent.
+// When onEvent returns false (a tool call is complete) reading goes on for a moment, for the final event only: it has the
+// real token counts and cost (2026-10-22: stopping at once left most /team steps' cost estimated, and cached tokens
+// unknown). With native tool calls the reply ends at the call, so it comes almost at once.
+const TAIL_MS = 1200;
 async function readEvents(res, onEvent) {
   const decoder = new TextDecoder();
-  let buf = "";
-  for await (const chunk of res.body) {
+  let buf = "", tailUntil = 0;
+  const it = res.body[Symbol.asyncIterator]();
+  for (;;) {
+    let step;
+    if (tailUntil) {
+      const left = tailUntil - Date.now();
+      if (left <= 0) { it.return?.().catch?.(() => {}); return; }
+      step = await Promise.race([it.next(), new Promise((r) => setTimeout(() => r(null), left))]);
+      if (!step) { it.return?.().catch?.(() => {}); return; }
+    } else step = await it.next();
+    if (step.done) return;
+    const chunk = step.value;
     buf += decoder.decode(chunk, { stream: true });
     let i;
     while ((i = buf.indexOf("\n")) !== -1) {
@@ -103,7 +117,8 @@ async function readEvents(res, onEvent) {
       } catch {
         continue;
       }
-      if (onEvent(ev) === false) return;
+      if (tailUntil) { if (ev.done) { onEvent(ev); it.return?.().catch?.(() => {}); return; } continue; }
+      if (onEvent(ev) === false) tailUntil = Date.now() + TAIL_MS;
     }
   }
 }

@@ -1,6 +1,48 @@
 {
   "releases": [
     {
+      "version": "1.0.172",
+      "date": "2026-10-22",
+      "title": "A leaner team",
+      "items": [
+        {
+          "area": "Team",
+          "title": "Where the time went",
+          "text": "TEAM_REPORT.html has a table of each agent's steps (reads, edits, commands, page checks), refused repeats, watcher notes, restarts, tokens and the share cached, with what looks wasteful; the end summary shows the cache rate and the worst three."
+        },
+        {
+          "area": "Team",
+          "title": "One QA agent",
+          "text": "A single QA check (the pieces fit, bugs, focused tests) replaces integration, tester and reviewer by default; they stay available on their own."
+        },
+        {
+          "area": "Team",
+          "title": "One to-do list for the fixer",
+          "text": "The reports that found something are merged into one list, duplicates combined and worst first, before the fixer starts."
+        },
+        {
+          "area": "Team",
+          "title": "No waiting on one agent",
+          "text": "When the rest of a stage is done and one agent runs well past them, it's told the team is waiting and to wrap up."
+        },
+        {
+          "area": "Team",
+          "title": "Later rounds check what changed",
+          "text": "Round 2 and later bring back QA, the fixer, the spec score and the free checks, told which files the round changed; the narrower checks only when you ask for them."
+        },
+        {
+          "area": "Team",
+          "title": "Smaller briefs",
+          "text": "With a long contract, each builder gets the parts that concern its feature and a list of where the rest is."
+        },
+        {
+          "area": "Agent",
+          "title": "Real costs",
+          "text": "After a tool call yAI reads on for a moment to get the real token counts and cost, instead of estimating them."
+        }
+      ]
+    },
+    {
       "version": "1.0.171",
       "date": "2026-10-22",
       "title": "Steps that match the work",
