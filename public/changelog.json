@@ -1,6 +1,43 @@
 {
   "releases": [
     {
+      "version": "1.0.208",
+      "date": "2026-10-23",
+      "title": "/crew, steadier",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Replies that loop are stopped",
+          "text": "A reply stuck repeating itself is stopped once it's past 60,000 characters and its last part is mostly repeats, both in yAI Code and on the site (where tool calls are written). /crew's main chat had written 300,000 characters of block names into one helper's job, for 5 minutes. The model is told what happened and to make patterned data with code instead."
+        },
+        {
+          "area": "Crew",
+          "title": "Memory stays free",
+          "text": "A cut-off reply is no longer kept whole in the conversation, where every later step re-sent it (one filled 76% of the memory in two steps): only its start is kept, with a note."
+        },
+        {
+          "area": "Crew",
+          "title": "Briefs, not data",
+          "text": "A helper's job over 8,000 characters is sent back with \"say what to make, not the data itself\", instead of being cut at 6,000 characters without a word. While a tool call is being written, its progress shows instead of \"thinking\"."
+        },
+        {
+          "area": "Crew",
+          "title": "A tidy plan",
+          "text": "Plan steps are asked for in 10 words or fewer and take at most two rows in the side panel, ending with … when longer, so the background agents and the crew log stay on screen."
+        },
+        {
+          "area": "Search",
+          "title": "Searches that keep working",
+          "text": "The site had a 150-a-day limit on web searches, which /crew and /team used up by midday; after that yAI Code fell back to DuckDuckGo from your computer, which asked for a captcha, and the error blamed a missing key. Admins now have no search limit (like images and videos), and when the site does refuse, its reason is what you see."
+        },
+        {
+          "area": "Screen",
+          "title": "Nothing in your typing area",
+          "text": "Warnings printed from inside yAI Code (a failed search engine) were written where the cursor was, which is the input box. In the full screen they now go to ~/.yai/yai.log."
+        }
+      ]
+    },
+    {
       "version": "1.0.207",
       "date": "2026-10-23",
       "title": "Eyes for text-only models",

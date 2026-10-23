@@ -168,6 +168,9 @@ ctx.webSearch = async (q) => {
     return (await api.search(q)).results || [];
   } catch (err) {
     if (err.auth) throw new Error("Not signed in. Run /login.");
+    // the site said no (today's searches are used up): that's the reason to give, not this machine's DuckDuckGo
+    // captcha (2026-10-23: "the tavily api key is there idk why its complaining")
+    if (/used today's|web searches/i.test(err.message)) throw err;
     return require("../lib/search").search(q);
   }
 };
@@ -795,7 +798,7 @@ ${toolDocs}${CONN.promptBlock({ readOnly: true })}${FOCUS.block()}
 - Before a fix, say in one line what you expect it to change. After checking, say whether it did. If it didn't, say what is different about your next attempt before you make it, and look at your <attempt_log> first: never make a change you already made and undid.
 - If a tool returns an error, fix the cause instead of repeating the call.
 - Be brief: at most one short sentence before a tool call. End with a short report, without a tool call.
-- Start your first reply with a short plan of 3 to 5 steps in plain words, between <plan> and </plan>, one numbered step per line. When a whole step is finished, start your next reply with <done>N</done> (N = steps finished so far). yAI shows these as your progress.${projectNotes()}`;
+- Start your first reply with a short plan of 3 to 5 steps in plain words, between <plan> and </plan>, one numbered step per line, each step at most 10 words (it shows in a narrow side panel). When a whole step is finished, start your next reply with <done>N</done> (N = steps finished so far). yAI shows these as your progress.${projectNotes()}`;
 }
 
 // The tools as an OpenAI-style list, for hosts that call tools natively (DeepSeek's API, 2026-10-22). Every argument is
@@ -1530,6 +1533,12 @@ async function callModel() {
   };
 
   let seen = 0;
+  // A reply stuck repeating itself is stopped (2026-10-23: /crew's main chat wrote 300,000 characters of
+  // "oak_leaves_1829, spruce_leaves_1829, …" into one commission, for 5 minutes, and it filled 76% of the memory).
+  // Over 60,000 characters, the last 20,000 are compressed every 8,000 more: a loop shrinks to under 15% of its size,
+  // prose and code to 35-50%. (Long rows of data shrink as much: they belong in code that makes them, so it's told so.)
+  let loopAt = 0;
+  state.looped = null;
   const local = new AbortController();
   const outer = state.abort;
   const onOuter = () => local.abort();
@@ -1576,6 +1585,11 @@ async function callModel() {
           if (cut < width / 2) break;
           emit(lineBuf.slice(0, cut));
           lineBuf = lineBuf.slice(cut + 1);
+        }
+        if (text.length > 60000 && text.length - loopAt > 8000) {
+          loopAt = text.length;
+          const tail = text.slice(-20000);
+          if (require("zlib").deflateRawSync(Buffer.from(tail)).length < tail.length * 0.15) { state.looped = { chars: text.length, sample: tail.slice(-300) }; return false; }
         }
         if (text.includes("<|close|>tools")) return false; // Kimi K3's tool call is complete
         // DeepSeek's tool call is complete (it may close its own markup with </tool>, or yAI's with its own closer)
@@ -2072,7 +2086,8 @@ async function runAgent(content) {
         break;
       }
       emptyRetried = false; // a reply came: the next empty one gets its own quiet retry
-      const call = parseToolCall(text);
+      // a reply stopped for repeating itself counts as cut off, with or without a tool call in it
+      const call = state.looped && !parseToolCall(text)?.cutOff ? { name: parseToolCall(text)?.name || "reply", cutOff: true } : parseToolCall(text);
       if ((TEAM_AGENT || state.crewActive) && awaitingAck) {
         awaitingAck = false;
         if (!/^\W*following the watcher/i.test(text.trim())) ui.event({ type: "directive-ignored" });
@@ -2120,9 +2135,13 @@ async function runAgent(content) {
         // stopped without finishing the step (a short one). They need different advice. Two in a row
         // and yAI stops, so a model stuck on the same mistake can't loop.
         const long = text.length > 6000;
+        // stuck repeating itself (stopped here or by the site, see callModel): nothing of it is kept, and it's told why
+        const tail = text.slice(-20000);
+        const looped = state.looped || (text.length > 60000 && require("zlib").deflateRawSync(Buffer.from(tail)).length < tail.length * 0.15 ? { chars: text.length, sample: tail.slice(-300) } : null);
+        state.looped = null;
         // a long write_file cut off mid-file: the complete lines it had are saved and it goes on from the last one. A
         // file that exists is only added to when the call said append (a cut-off call may have lost that tag).
-        const part = long && call.partial;
+        const part = long && !looped && call.partial;
         const partAbs = part ? path.resolve(root, part.path) : "";
         if (part && (part.append || !fs.existsSync(partAbs)) && !((TEAM_AGENT || state.crewActive) && blockedBy({ name: "write_file", args: { path: part.path } }))) {
           const saved = await execTool({ name: "write_file", args: { path: part.path, content: part.content, append: part.append ? "true" : "" } });
@@ -2135,6 +2154,13 @@ async function runAgent(content) {
             call.args = { path: part.path, append: part.append ? "true" : "" }; // for the attempt log below
             result = { output: `${String(saved.output).split("\nCheck:")[0]}\nYour reply hit its length limit partway through ${part.path}, so yAI saved the ${part.lines} complete lines it had${part.append ? ", added to the end of the file" : ""}. The last saved line is:\n${last}\nGo on from the line after it: write_file with path ${part.path}, append set to true, and the rest of the file. Don't write the saved part again.` };
           }
+        }
+        // the cut-off reply isn't kept whole in the conversation: every later step would re-send it (76% of the memory)
+        if (!result && text.length > 8000) state.messages[state.messages.length - 1].content = text.slice(0, 3000).replace(/<tool\b[\s\S]*$/, "").trim() + `\n(${looped ? "I started repeating myself" : `my ${call.name} call was cut off`} after ${text.length.toLocaleString("en")} characters; yAI removed the rest)`;
+        if (!result && looped) {
+          cutOffs = 0;
+          ui.note(`${c.yellow("!")} ${c.dim(`that reply started repeating itself (${looped.chars.toLocaleString("en")} characters) · stopped · asking yAI to do it differently`)}`);
+          result = { output: `Error: your ${call.name} call was stopped because your reply started repeating the same thing over and over (${looped.chars.toLocaleString("en")} characters; it ended with: "${looped.sample.replace(/\s+/g, " ").slice(-160)}"). Nothing was done. Don't list things one by one: for data with a pattern (block variants, ids, levels), write code that makes it in a loop; for a ${call.name === "commission" ? "helper's job, describe what it should make and the format in a few paragraphs, and let it write the data" : "long file, write it in parts of at most 400 lines"}.` };
         }
         if (!result) {
           if (++cutOffs >= 2) {
@@ -2507,7 +2533,7 @@ async function usageCommand() {
     row("yAI Ultra", `$${t.ultra.spentUsd.toFixed(2)} of $${t.ultra.limitUsd}`, t.ultra.spentUsd, t.ultra.limitUsd, `$${Math.max(0, t.ultra.limitUsd - t.ultra.spentUsd).toFixed(2)} left`),
     row("Images", t.images.limit ? `${t.images.used} of ${t.images.limit}` : String(t.images.used), t.images.used, t.images.limit),
     row("Videos", t.videos.limit ? `${t.videos.used} of ${t.videos.limit}` : String(t.videos.used), t.videos.used, t.videos.limit),
-    row("Web searches", `${t.searches.used} of ${t.searches.limit}`, t.searches.used, t.searches.limit),
+    row("Web searches", t.searches.limit ? `${t.searches.used} of ${t.searches.limit}` : String(t.searches.used), t.searches.used, t.searches.limit),
     "",
     ` ${c.faint("Last 30 days")}  ${c.ink(num(msgs(month)))} ${c.dim("messages")}  ${c.ink(short((month.tokensIn || 0) + (month.tokensOut || 0)))} ${c.dim("tokens")}  ${c.ink(num(month.images))} ${c.dim("images")}  ${c.ink(num(month.searches))} ${c.dim("searches")}  ${c.ink(`$${((month.ultraMicros || 0) / 1e6).toFixed(2)}`)} ${c.dim("on Ultra")}`,
   ];
@@ -3633,6 +3659,11 @@ async function main() {
   if (!process.env.YAI_CLASSIC) {
     SCREEN.enter();
     syncMute();
+    // console output from inside (lib/search.js warns about failed engines) would be written wherever the cursor is,
+    // which is the input box (2026-10-23: a web search's errors showed up as if typed): it goes to ~/.yai/yai.log
+    const logFile = path.join(api.DIR, "yai.log");
+    const toLog = (...xs) => { try { fs.appendFileSync(logFile, `${new Date().toISOString()} ${xs.map((x) => (typeof x === "string" ? x : require("util").inspect(x))).join(" ")}\n`); } catch {} };
+    console.log = console.info = console.warn = console.error = console.debug = toLog;
   }
   // The start screen (v2): a greeting, what yAI saw in the project, four numbered starters, and the last conversation.
   const here = recentSessions(6).find((r) => r.here);
@@ -3691,7 +3722,7 @@ async function main() {
 main().catch((err) => {
   spinner.stop();
   SCREEN.exit(); // back to the normal screen first, so the error stays readable
-  console.error(c.red(err.message));
+  process.stderr.write(c.red(err.message) + "\n"); // not console.error: in the full screen that goes to the log
   ui.resetTerminal();
   process.exit(1);
 });

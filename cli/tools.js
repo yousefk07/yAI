@@ -407,6 +407,9 @@ const tools = {
       const name = String(a.name || "").replace(/\s+/g, " ").trim().slice(0, 30);
       const task = String(a.task || "").trim();
       if (!name || task.length < 20) throw new ToolError("Give the helper a <name> and a <task> with everything it needs to do the job alone.");
+      // a task is a brief, not the work itself (2026-10-23: 300,000 characters of block names in one <task>); it used to be
+      // cut at 6,000 characters without a word, so the helper got half a brief
+      if (task.length > 8000) throw new ToolError(`That <task> is ${task.length.toLocaleString("en")} characters: a brief is at most about 1,000 words. Say what to make, the names and interface other code uses, the format, and how to check it; don't list the data itself (the helper writes it, in code that makes it where there's a pattern).`);
       const files = String(a.files || "").split(/[\n,]+/).map((f) => f.trim().replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean).slice(0, 20);
       ctx.crew = ctx.crew || { open: new Set(), reports: [] };
       if (ctx.crew.open.has(name)) throw new ToolError(`A helper called "${name}" is still working. Give the new one another name.`);
@@ -415,8 +418,8 @@ const tools = {
       const model = /^\s*lite\b/i.test(String(a.model || "")) ? "lite" : "flash";
       const role = /^\s*(qa|tester)\b/i.exec(String(a.role || ""))?.[1].toLowerCase() || "builder";
       // in a /crew chat the session itself starts it; a /team main builder's board does
-      if (ctx.onCommission) ctx.onCommission({ name, task: task.slice(0, 6000), files, model, role });
-      else require("./ui").event({ type: "commission", name, task: task.slice(0, 6000), files, model, role });
+      if (ctx.onCommission) ctx.onCommission({ name, task, files, model, role });
+      else require("./ui").event({ type: "commission", name, task, files, model, role });
       toolResult(`helper started · ${model === "lite" ? "Lite" : "Ultra Flash"}`);
       return `Helper "${name}" is on it${files.length ? ` (it owns ${files.join(", ")})` : ""}. Carry on with your own work: its report reaches you after one of your later steps, or call crew_wait when you need it.`;
     },

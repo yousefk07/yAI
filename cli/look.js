@@ -61,7 +61,10 @@ module.exports = function create({ ui }) {
     plan.steps.forEach((t, i) => {
       const st = i < done ? "done" : i === done ? "now" : "todo";
       const mark = st === "done" ? c.chip(c.faint(` ${i + 1} `)) : st === "now" ? c.soft(c.bold(c.accent(` ${i + 1} `))) : c.faint(` ${i + 1} `);
-      const words = wrap(t, w - 5);
+      // at most two rows a step, the second ending in … when there's more, so a long plan doesn't push the rest of the
+      // panel (the background agents, the crew log) off the screen (2026-10-23)
+      let words = wrap(t, w - 5);
+      if (words.length > 2) words = [words[0], ui.clip(words.slice(1).join(" "), w - 5)];
       words.forEach((l, k) => out.push(`${k ? "    " : mark + " "}${st === "now" ? c.bold(c.ink(l)) : st === "done" ? c.faint(l) : c.dim(l)}`));
     });
     out.push("", c.line("─".repeat(w)));

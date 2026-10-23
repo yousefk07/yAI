@@ -163,7 +163,7 @@
             <td class="num">${usd(u.today.ultra.spentUsd)}<span class="meter${share >= 0.8 ? " hot" : ""}"><i style="width:${Math.min(100, share * 100)}%"></i></span></td>
             <td class="num">${usd((u.last30.ultraMicros || 0) / 1e6)}</td>
             <td class="num">${u.today.images.used}${u.today.images.limit != null ? ` / ${u.today.images.limit}` : ""}</td>
-            <td class="num">${u.today.searches.used} / ${u.today.searches.limit}</td>
+            <td class="num">${u.today.searches.used}${u.today.searches.limit != null ? ` / ${u.today.searches.limit}` : ""}</td>
             <td>${u.blocked ? '<span class="tag paused">Paused</span> ' : ""}${u.flagged ? `<span class="tag flag">⚑ ${u.flags.length}</span> ` : ""}${Object.keys(u.overrides || {}).length ? '<span class="tag custom">Custom limits</span>' : ""}${!u.blocked && !u.flagged && !Object.keys(u.overrides || {}).length ? '<span style="color:var(--muted)">OK</span>' : ""}</td></tr>`;
         }).join("") || `<tr><td colspan="${COLS.length}" style="color:var(--muted)">Nobody here.</td></tr>`) + "</tbody>";
     }
