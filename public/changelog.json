@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.206",
+      "date": "2026-10-23",
+      "title": "No step limit",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "No more \"paused after 50 steps\"",
+          "text": "yAI no longer stops a request after 50 steps to ask you to say continue: it keeps working until the job is done. A run that loops is still stopped by the guards against repeated steps, and in /crew and /team by the watcher."
+        }
+      ]
+    },
+    {
       "version": "1.0.205",
       "date": "2026-10-23",
       "title": "/debate and /hunt",

@@ -40,7 +40,6 @@ const VERSION = (() => {
   return require("../package.json").version || "1.0.0";
 })();
 const MODES = ["default", "acceptEdits", "yolo", "plan"];
-const MAX_STEPS = Number(process.env.YAI_MAX_STEPS) || 50; // tool calls per request before yAI stops to check in (/team raises it for agents that write)
 // Steps that only look at things: the same one again with nothing changed gives the same answer, so it isn't run
 // twice (2026-10-22: a /team builder re-read the same three parts of a file 43 times and wrote nothing, at 20x the cost).
 const LOOK_STEPS = new Set(["read_file", "list_files", "search", "find_files", "run"]);
@@ -2026,7 +2025,7 @@ async function runAgent(content) {
       spinner.stop();
       if (plan) pushUser(plan);
     }
-    for (let step = 0; step < MAX_STEPS; step++) {
+    for (let step = 0; ; step++) { // no step limit (2026-10-23, Yousef: "remove the paused after 50 steps thing"): the repeat guards and the watcher stop a loop
       // paused from the /team board: wait here, between steps, until it's resumed or stopped
       while (state.paused && !state.interrupted) await new Promise((r) => setTimeout(r, 250));
       if (state.interrupted) { print(c.yellow("   ■ stopped")); return; }
@@ -2315,10 +2314,6 @@ async function runAgent(content) {
       if (repeats >= 6 && !TEAM_AGENT) {
         ui.note(`${c.yellow("!")} ${c.ink("yAI kept repeating steps it had already done, so it was stopped.")} ${c.dim(TEAM_AGENT ? "Its report is what it found so far." : "Try a bigger model (/model) or say what to do next.")}`);
         break;
-      }
-      if (step === MAX_STEPS - 1) {
-        if (state.stdio) ui.note(`paused after ${MAX_STEPS} steps`);
-        else print(c.yellow(`   ‖ paused after ${MAX_STEPS} steps · say "continue" to keep going`));
       }
     }
     const secs = Math.round((Date.now() - started) / 1000);

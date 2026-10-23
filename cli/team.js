@@ -945,7 +945,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const log = (entry) => { a.log.push(entry); if (a.log.length > 3000) a.log.splice(1, 500); };
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
-      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_MAX_STEPS: "100000", // no step limit: the watcher redirects or stops an agent that wanders (2026-10-22, Yousef)
+      cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", // no step limit: the watcher redirects or stops an agent that wanders (2026-10-22, Yousef)
       YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) || a.crewLead ? "80000" : "48000", ...(a.crewLead && { YAI_CREW_LEAD: "1" }), ...(!a.role && !a.crewLead && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
