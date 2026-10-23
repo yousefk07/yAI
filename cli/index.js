@@ -544,7 +544,7 @@ async function askForm(questions) {
 // ---------- /help: the commands, grouped, in columns ----------
 const HELP_GROUPS = [
   ["Session", [["/clear", "start a new conversation"], ["/resume", "pick an earlier conversation"], ["/compact", "summarise (/compact <focus>)"], ["/undo", "revert yAI's last edit"], ["/share", "publish at an unlisted link"]]],
-  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/team", "agents split the work"], ["/crew", "one builder + helpers"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
+  ["Model", [["/model", "switch model"], ["/duo", "plan + review with 2 models"], ["/team", "agents split the work"], ["/crew", "one builder + helpers"], ["/debate", "two sides argue, a judge decides"], ["/hunt", "reproduce, trace and fix a bug"], ["/bench", "run the coding benchmark"], ["/status", "account, model and usage"], ["/usage", "today's limits, last 30 days"]]],
   ["Project", [["/init", "write YAI.md"], ["/fix", "run the tests, fix them"], ["/review", "review your changes"], ["/commit", "write a commit and commit"]]],
   ["Look & make", [["/clone", "rebuild a page from a screenshot"], ["/look", "design review of a page"], ["/showcase", "record a demo video"], ["/image", "make an image"], ["/video", "make a video"]]],
   ["Modes & tools", [["/mode", "ask · auto-edit · plan"], ["/plan", "read-only planning"], ["/tutor", "hints, not answers"], ["/web", "search the web, cite sources"], ["/mcp", "MCP servers and tools"], ["/tasks", "background commands"], ["/remote", "take tasks from your phone"]]],
@@ -1524,7 +1524,7 @@ async function callModel() {
     const { usage, cost, fallback } = await api.chat({
       messages: state.messages,
       model: state.model,
-      system: systemPrompt() + (state.crewActive ? CREW_PROMPT() : ""),
+      system: systemPrompt() + (state.crewActive && !state.crewQuiet ? CREW_PROMPT() : ""),
       context: envContext() + (TEAM_AGENT || state.crewActive ? attemptBlock() : ""),
       tools: nativeTools(),
       toolFormat: toolFormat(),
@@ -2248,7 +2248,7 @@ async function runAgent(content) {
       }
       // /crew: a main chat that does everything itself is reminded to hand parts out, after 3 and 12 of its steps
       // (2026-10-23, Yousef: "crew doesnt use background agents at all like it needs to use it more")
-      if (state.crewActive && !TEAM_AGENT) {
+      if (state.crewActive && !state.crewQuiet && !TEAM_AGENT) {
         crewOwnSteps++;
         if ((crewOwnSteps === 3 || crewOwnSteps === 12) && !CREW.commissioned()) result.output += `\n(You're in /crew and haven't commissioned any background agents yet. Hand the separate parts of this project to them now with the commission tool (2 to ${state.crewMax || 4} agents, each with its interface and the files it owns), then go on with the core yourself.)`;
       }
@@ -2600,6 +2600,8 @@ const HELP = [
   ["/pr [note]", "Push this branch and open a GitHub pull request written from the diff"],
   ["/issues", "Pick an open GitHub issue of this repo and let yAI work on it"],
   ["/deploy [prod]", "Deploy this folder with the Vercel CLI (a preview, or production) and print the link"],
+  ["/debate <question>", "Two agents argue a design question and reply to each other; a judge decides and writes DEBATE.md"],
+  ["/hunt <bug>", "Reproduce a bug with a failing test, find its cause, fix it; done once the test passes"],
   ["/duo", "Two models: yAI Q3.8 Max (or another hosted model) plans and reviews, the coder writes"],
   ["/tutor", "Learning mode: hints and explanations, no finished solutions"],
   ["/share", "Publish this conversation at an unlisted link"],
@@ -2612,7 +2614,7 @@ const HELP = [
   ["/config url <url>", "Point yai at a different yAI site"],
   ["/exit", "Quit (or Ctrl+C twice)"],
 ];
-const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/crew", "/connections", "/pr", "/issues", "/deploy", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
+const COMMAND_NAMES = ["/help", "/model", "/mode", "/plan", "/undo", "/resume", "/clone", "/remote", "/theme", "/clear", "/compact", "/init", "/status", "/usage", "/paste", "/fix", "/review", "/commit", "/look", "/showcase", "/duo", "/team", "/crew", "/debate", "/hunt", "/connections", "/pr", "/issues", "/deploy", "/tutor", "/share", "/bench", "/web", "/mcp", "/tasks", "/image", "/video", "/login", "/logout", "/config", "/exit"];
 // The suggestions while a /command is typed (v2): a plain title, and a line saying what it does or what's on now.
 function COMMAND_INFO() {
   const pct = contextPercent();
@@ -2632,6 +2634,8 @@ function COMMAND_INFO() {
     "/fix": ["Make the tests pass", "run them and fix what fails"],
     "/team": ["Split the work between agents", "2 to 4 work at the same time"],
     "/crew": ["One builder with helpers", "it hands out side jobs as it goes"],
+    "/debate": ["Settle a design question", "two sides argue, a judge decides"],
+    "/hunt": ["Hunt down a bug", "a failing test first, then the cause, then the fix"],
     "/deploy": ["Deploy this folder", "a Vercel preview link (or /deploy prod)"],
     "/pr": ["Open a pull request", "push the branch, I write the description"],
     "/issues": ["Work on a GitHub issue", "pick one of this repo's open issues"],
@@ -3056,6 +3060,7 @@ async function command(line) {
       const task = (m ? m[2] : arg).trim();
       if (!task) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> for up to 6 background agents at once). /crew off ends it."));
       state.crewTask = task;
+      state.crewQuiet = false; // after /debate or /hunt, the crew is a full /crew again
       // a stop from an earlier request mustn't end this one (2026-10-23: /crew said "Stopped." at once and its
       // researcher worked on for 10 minutes with no one waiting)
       state.interrupted = false;
@@ -3069,6 +3074,40 @@ async function command(line) {
       if (state.interrupted || !state.crewActive) return print(c.dim("   Stopped."));
       ui.note(`${c.accent("◆")} ${c.ink("/crew: this chat works on it, and hands separate jobs to background agents")} ${c.dim("· they show under the plan · /crew off ends it")}`);
       return runAgent(fs.existsSync(path.join(root, "RESEARCH.md")) ? `${task}\n\n(The researcher's notes are in RESEARCH.md, with the topic's facts, how it's usually built and a checklist: read them before you build.)` : task);
+    }
+    case "/debate":
+    case "/hunt": {
+      // /debate <question> and /hunt <bug>: fixed crews in rounds, shown under Background agents (cli/crew.js)
+      const hunt = cmd === "/hunt";
+      const q = arg.trim();
+      if (!q) return print(c.yellow(hunt ? "   Usage: /hunt <the bug: what happens, and what should happen instead>" : "   Usage: /debate <a question with more than one good answer, e.g. should the saves go in localStorage or IndexedDB?>"));
+      state.interrupted = false;
+      if (state.crewActive && CREW.working()) return print(c.yellow("   /crew's background agents are still working: wait for them, or press Esc to stop them first."));
+      CREW.stop();
+      CREW.start();
+      state.crewQuiet = true; // its agents stay in the panel, but the chat isn't asked to commission more
+      ui.note(`${c.accent("◆")} ${c.ink(hunt ? "/hunt: a reproducer writes a failing test, a tracer finds the cause, a fixer fixes it" : "/debate: side A (Ultra) and side B (Ultra Flash) answer, then reply to each other; a judge (Ultra) decides")} ${c.dim(hunt ? "· it's done when the test passes · commands they run ask you first" : "· they read the code, they don't change it")}`);
+      state.busy = true;
+      state.abort = new AbortController(); // Esc stops it, like any request
+      spinner.start(hunt ? "reproducing the bug" : "both sides are working out their answers");
+      let out = null;
+      try { out = await CREW[hunt ? "hunt" : "debate"](q, (t) => spinner.text(t)); } finally { spinner.stop(); state.busy = false; state.abort = null; }
+      if (!out || state.interrupted) { CREW.stopAll(); return print(c.dim("   Stopped.")); }
+      print("");
+      const write = ui.markdownWriter();
+      if (hunt) {
+        const verdict = out.fixed === true ? "Fixed: the reproduction passes now." : out.fixed === false ? "Not fixed: the reproduction still fails." : "No reproduction command came back, so yAI couldn't check the fix.";
+        for (const line of [`**${verdict}**`, ...(out.cmd ? [`Reproduction: \`${out.cmd}\``] : []), "", "**The cause**", ...out.cause.split("\n"), "", "**The fix**", ...out.fix.split("\n")]) write(line);
+        state.pendingContext.push(`(/hunt just ran on: ${q}\n${verdict}${out.cmd ? ` Reproduction: ${out.cmd}` : ""}\nThe cause, as the tracer found it:\n${out.cause.slice(0, 3000)}\nThe fix:\n${out.fix.slice(0, 3000)})`);
+      } else {
+        for (const line of out.decision.split("\n")) write(line);
+        write("");
+        write("*The whole debate is in DEBATE.md.*");
+        state.pendingContext.push(`(/debate just settled: ${q}\nThe judge's decision:\n${out.decision.slice(0, 4000)}\nThe whole debate is in DEBATE.md.)`);
+      }
+      write.end();
+      ui.note(`${c.accent("◆")} ${c.dim("the agents stay under Background agents: click one to read what it did · /crew off clears them")}`);
+      return;
     }
     case "/connections":
       return CONN.connections();

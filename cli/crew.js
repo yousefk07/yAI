@@ -42,6 +42,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   }
   function stop() {
     state.crewActive = false;
+    state.crewQuiet = false;
     if (viewing) close();
     try { ui.screen?.onClick?.(null); } catch {}
     clearInterval(watchTimer); watchTimer = null; clearInterval(tickTimer); tickTimer = null;
@@ -129,7 +130,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       cwd: root, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, YAI_TEAM_AGENT: "1", YAI_CREW_AGENT: "1", YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_COLUMNS: "1000", YAI_MAX_STEPS: "100000", YAI_TRIM_TOKENS: a.role === "builder" ? "48000" : "80000",
-        ...(a.role === "builder" && a.files.length && { YAI_OWN_FILES: JSON.stringify(a.files) }), ...(a.role !== "builder" && { YAI_SAFE_CHECKS: "1" }) },
+        ...(a.role === "builder" && a.files.length && { YAI_OWN_FILES: JSON.stringify(a.files) }), ...(a.role !== "builder" && { YAI_SAFE_CHECKS: "1" }), ...(a.mode === "plan" && { YAI_REPORT_ONLY: "1" }) }, // read-only: no "go ahead with this plan?" at the end
     });
     a.child = child;
     a.send = (o) => { try { child.stdin.write(JSON.stringify(o) + "\n"); } catch {} };

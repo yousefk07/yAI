@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.205",
+      "date": "2026-10-23",
+      "title": "/debate and /hunt",
+      "items": [
+        {
+          "area": "Agents",
+          "title": "/debate <question>",
+          "text": "Two background agents settle a question with more than one good answer. Side A (yAI Ultra) gives the answer it thinks best, side B (Ultra Flash) the strongest different one; both read the project's code but change nothing. Each then reads the other's argument and replies, and a judge on Ultra decides: the decision, why, what the other side got right, the risks and the next steps. It's shown in the chat, the whole debate goes in DEBATE.md, and your next message carries the decision."
+        },
+        {
+          "area": "Agents",
+          "title": "/hunt <bug>",
+          "text": "A bug-hunting crew: a reproducer writes the smallest test that fails because of the bug, a tracer finds the root cause (reading the code and the git history, changing nothing), and a fixer makes the fix. yAI runs the test itself before and after: the fix only counts once it passes, and if it doesn't, the fixer gets one more go with the failing output. Commands the agents want to run ask you first, as in /crew."
+        }
+      ]
+    },
+    {
       "version": "1.0.204",
       "date": "2026-10-23",
       "title": "Background agents can ask you",
