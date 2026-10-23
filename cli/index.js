@@ -20,6 +20,7 @@ const api = require("./api");
 const ui = require("./ui");
 const T = require("./tools");
 const checkFile = require("./filecheck"); // a syntax check of each file yAI writes
+const LOOPS = require("../lib/loops"); // is a reply stuck repeating itself?
 const { c, print, spinner } = ui;
 const LOOK = require("./look")({ ui }); // the v2 look: status pill, key bar, plan card, approvals, summaries
 // The full-window app (cli/screen.js): header, conversation, plan panel, input box and key bar, like the design.
@@ -1536,9 +1537,8 @@ async function callModel() {
 
   let seen = 0;
   // A reply stuck repeating itself is stopped (2026-10-23: /crew's main chat wrote 300,000 characters of
-  // "oak_leaves_1829, spruce_leaves_1829, …" into one commission, for 5 minutes, and it filled 76% of the memory).
-  // Over 60,000 characters, the last 20,000 are compressed every 8,000 more: a loop shrinks to under 15% of its size,
-  // prose and code to 35-50%. (Long rows of data shrink as much: they belong in code that makes them, so it's told so.)
+  // "oak_leaves_1829, …" into one commission, for 5 minutes; another wrote the same 15 recipe lines 50 times into a
+  // file). Checked every 4,000 characters past 10,000 (lib/loops.js).
   let loopAt = 0;
   state.looped = null;
   const local = new AbortController();
@@ -1588,10 +1588,10 @@ async function callModel() {
           emit(lineBuf.slice(0, cut));
           lineBuf = lineBuf.slice(cut + 1);
         }
-        if (text.length > 60000 && text.length - loopAt > 8000) {
+        if (text.length > 10000 && text.length - loopAt > 4000) {
           loopAt = text.length;
-          const tail = text.slice(-20000);
-          if (require("zlib").deflateRawSync(Buffer.from(tail)).length < tail.length * 0.15) { state.looped = { chars: text.length, sample: tail.slice(-300) }; return false; }
+          const loop = LOOPS.looping(text);
+          if (loop) { state.looped = { chars: text.length, why: loop.why, sample: loop.sample }; return false; }
         }
         if (text.includes("<|close|>tools")) return false; // Kimi K3's tool call is complete
         // DeepSeek's tool call is complete (it may close its own markup with </tool>, or yAI's with its own closer)
@@ -1883,7 +1883,7 @@ async function execTool(call) {
       ui.note(`${c.green("✓")} ${c.dim(plan.created ? "created · 1 new file" : "applied · 1 file changed")}`);
       // checked at once (cli/filecheck.js): a syntax error goes back in this step's result
       const broken = checkFile(plan.abs);
-      if (broken) ui.note(`${c.yellow("!")} ${c.ink(`${relPath(plan.abs)} doesn't parse`)} ${c.dim(`· ${broken}`)}`);
+      if (broken) ui.note(`${c.yellow("!")} ${c.ink(`${relPath(plan.abs)} has a problem`)} ${c.dim(`· ${broken}`)}`);
       const parts = call.name === "write_file" && String(call.args.append).trim() === "true";
       return { output: `${plan.created ? "Created" : "Updated"} ${relPath(plan.abs)}.` + (broken ? `\nCheck: ${relPath(plan.abs)} now has an error: ${broken}. ${parts ? "If you're still writing it in parts, finish it; otherwise fix" : "Fix"} this before you go on.` : "") };
     }
@@ -2139,8 +2139,8 @@ async function runAgent(content) {
         // and yAI stops, so a model stuck on the same mistake can't loop.
         const long = text.length > 6000;
         // stuck repeating itself (stopped here or by the site, see callModel): nothing of it is kept, and it's told why
-        const tail = text.slice(-20000);
-        const looped = state.looped || (text.length > 60000 && require("zlib").deflateRawSync(Buffer.from(tail)).length < tail.length * 0.15 ? { chars: text.length, sample: tail.slice(-300) } : null);
+        const loop = state.looped ? null : LOOPS.looping(text);
+        const looped = state.looped || (loop ? { chars: text.length, why: loop.why, sample: loop.sample } : null);
         state.looped = null;
         // a long write_file cut off mid-file: the complete lines it had are saved and it goes on from the last one. A
         // file that exists is only added to when the call said append (a cut-off call may have lost that tag).
@@ -2163,7 +2163,7 @@ async function runAgent(content) {
         if (!result && looped) {
           cutOffs = 0;
           ui.note(`${c.yellow("!")} ${c.dim(`that reply started repeating itself (${looped.chars.toLocaleString("en")} characters) · stopped · asking yAI to do it differently`)}`);
-          result = { output: `Error: your ${call.name} call was stopped because your reply started repeating the same thing over and over (${looped.chars.toLocaleString("en")} characters; it ended with: "${looped.sample.replace(/\s+/g, " ").slice(-160)}"). Nothing was done. Don't list things one by one: for data with a pattern (block variants, ids, levels), write code that makes it in a loop; for a ${call.name === "commission" ? "helper's job, describe what it should make and the format in a few paragraphs, and let it write the data" : "long file, write it in parts of at most 400 lines"}.` };
+          result = { output: `Error: your ${call.name} call was stopped because your reply started repeating ${looped.why || "the same thing over and over"} (${looped.chars.toLocaleString("en")} characters; it was writing: "${String(looped.sample).replace(/\s+/g, " ").slice(-160)}"). Nothing was done. Don't list things one by one: for data with a pattern (block variants, ids, levels), write code that makes it in a loop; for a ${call.name === "commission" ? "helper's job, describe what it should make and the format in a few paragraphs, and let it write the data" : "long file, write it in parts of at most 400 lines"}.` };
         }
         if (!result) {
           if (++cutOffs >= 2) {

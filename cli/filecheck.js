@@ -53,9 +53,13 @@ function checkHtml(text) {
 
 module.exports = function checkFile(abs) {
   const ext = path.extname(abs).toLowerCase();
-  if (![".js", ".mjs", ".cjs", ".json", ".html", ".htm"].includes(ext)) return "";
   let text;
   try { if (fs.statSync(abs).size > 3_000_000) return ""; text = fs.readFileSync(abs, "utf8"); } catch { return ""; }
+  // written in a loop (any kind of file): the same lines again and again (2026-10-23: a recipe file with 741 copies of
+  // 15 lines, which the model then spent its steps grepping)
+  const rep = require("../lib/loops").fileRepeats(text);
+  if (rep) return `${rep.copies} lines are copies of other lines (\`${clip(rep.line, 80)}\` alone appears ${rep.times} times): it was written in a loop. Remove the copies (rewrite the file, or the part after where it started repeating)`;
+  if (![".js", ".mjs", ".cjs", ".json", ".html", ".htm"].includes(ext)) return "";
   try {
     if (ext === ".json") return checkJson(abs, text);
     if (ext === ".html" || ext === ".htm") return checkHtml(text);

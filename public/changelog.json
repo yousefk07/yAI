@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.210",
+      "date": "2026-10-23",
+      "title": "Loops caught sooner",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Repeating lines stop a reply",
+          "text": "A reply is now also stopped when its last 120 lines are mostly copies of lines it already wrote, checked from 10,000 characters on (a /crew run had written the same 15 recipe lines 50 times into a 59,000-character file, under the old 60,000-character threshold, then spent its steps grepping it)."
+        },
+        {
+          "area": "Agent",
+          "title": "Files written in a loop are flagged",
+          "text": "Every file yAI writes is checked for lines copied over and over (over 50 copies and 30% of the file); the step's result says how many and which line, so the model rewrites it instead of building on it."
+        }
+      ]
+    },
+    {
       "version": "1.0.209",
       "date": "2026-10-23",
       "title": "Pages that refuse, and research that never ends",
