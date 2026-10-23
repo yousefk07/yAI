@@ -190,7 +190,7 @@ module.exports = function create(d) {
       `You are the main builder of this project: you own all of it, the design, the code and the result. The task: ${task}`,
       ...(rnd(me) > 1 ? ["", `This is round ${rnd(me)}: the app already exists. Improve it as described below; read what you need first, keep what works, and check it as you go.`, "", `What to improve:\n${me.task}`] : []),
       "", "Build it yourself, step by step, as a strong engineer would: get a first version running early, look at it with check_page, then improve it feature by feature, checking as you go. Keep the core yourself: the main loop, the rendering, and how the pieces connect.",
-      `You can hand separate, well-defined jobs to helpers with the commission tool, when you like (with <model>lite</model> for a simple, mechanical job, which is cheaper; flash, the default, for one that needs thought): level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, or research. Give each one everything it needs in <task> (what to make, the exact names and interface, the data format) and list the files it owns. Helpers work at the same time as you (at most ${crewMax} at once); their reports reach you after your steps. Don't commission what you could do in a few steps yourself, and don't sit idle while they work.`,
+      `You can hand separate, well-defined jobs to helpers with the commission tool, when you like (with <model>lite</model> for a simple, mechanical job, which is cheaper; flash, the default, for one that needs thought): level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, or research. Give each one everything it needs in <task> (what to make, the exact names and interface, the data format) and list the files it owns. Helpers work at the same time as you (at most ${crewMax} at once); their reports reach you after your steps. Helpers make the build faster and better, so use them: early on, decide which parts can be done apart from you, and for a project like this plan on about 2 to 5 helpers, commissioned in your first few steps so they work while you build the core (more only if the work really splits). Don't commission what takes you a few steps, or the core, and don't sit idle while they work.`,
       "Before you finish: call crew_wait, fit in your helpers' work, check the whole thing with check_page, and end with a short report.",
       ...notesLines(), ...specLines(), ...chatLines(), "", CHECKS, "", RULES, "", REPORT_STYLE,
     ].join("\n");
@@ -2051,6 +2051,19 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     // The slowest agent holds up its whole stage (2026-10-22: one builder at 12 min while the others were done in 4).
     // Once the others in its stage and round have finished and it has run half again as long as the slowest of them
     // (and 3 min past their end), it's told once that the team is waiting: finish the essentials, note what's left.
+    // /crew: a main builder 4 min in with no helper yet is reminded once that it can hand parts off
+    const crewNudge = () => {
+      if (!crewMode) return;
+      for (const a of agents) {
+        if (!a.crewLead || a.state !== "working" || !a.send || a.helperNudged || a.awaitingCrew) continue;
+        if (Date.now() - a.started < 240000 || agents.some((x) => x.helperOf === a.name && rnd(x) === rnd(a))) continue;
+        a.helperNudged = true;
+        const msg = "You have been building for 4 minutes without a helper. Look at what's left: parts that can be done apart from you (level or map data, sprites or textures, sound, a self-contained module, tests) are faster as helpers working while you go on. Commission 2 or 3 now if the work allows; if it really doesn't, carry on.";
+        a.send({ type: "note", text: `From yAI: ${msg}` });
+        a.log.push({ k: "you", text: `(yAI) ${msg}` });
+        say("yAI", `reminded ${a.name} it can commission helpers`, "acc");
+      }
+    };
     const straggle = () => {
       for (const a of agents) {
         if (a.state !== "working" || a.internal || !a.send || a.wrapSaid) continue;
@@ -2088,7 +2101,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         for (const a of agents.filter((x) => !x.role && x.state === "working" && x.send)) { a.send({ type: "chat", from: "yAI's progress check", text, to: false }); a.log.push({ k: "chat", from: "yAI's progress check", text }); }
       } catch {} finally { progressBusy = false; }
     };
-    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); watch(); progress(); } }, 20000);
+    const watchTimer = setInterval(() => { if (over) clearInterval(watchTimer); else { straggle(); crewNudge(); watch(); progress(); } }, 20000);
     try {
       await new Promise((resolve) => {
         const timer = setInterval(() => {

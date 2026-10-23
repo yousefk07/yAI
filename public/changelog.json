@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.178",
+      "date": "2026-10-22",
+      "title": "More helpers",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "The builder plans its helpers",
+          "text": "The main builder is asked to plan about 2 to 5 helpers early, so they work while it builds the core, and is reminded once if it has gone 4 minutes without one. The cap of 4 at once stays."
+        }
+      ]
+    },
+    {
       "version": "1.0.177",
       "date": "2026-10-22",
       "title": "Lite or Ultra Flash helpers",
