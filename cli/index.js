@@ -418,7 +418,7 @@ async function sharpenTask(task, kind) {
   spinner.start("turning your message into a full brief");
   let out = "";
   try {
-    out = await X.oneShot({ model, system: SHARPEN_SYSTEM, signal: state.abort.signal, messages: [{ role: "user", content: `The project folder ${files.length ? `has: ${files.join(", ")}` : "is empty: this is a new project"}.\n\nThe user's message (for /${kind}):\n${task}` }] });
+    out = await X.oneShot({ model, system: SHARPEN_SYSTEM, think: "high", signal: state.abort.signal, messages: [{ role: "user", content: `The project folder ${files.length ? `has: ${files.join(", ")}` : "is empty: this is a new project"}.\n\nThe user's message (for /${kind}):\n${task}` }] });
   } catch {}
   const stopped = state.abort.signal.aborted || state.interrupted;
   spinner.stop();
@@ -1570,6 +1570,25 @@ async function ensureWarm() {
 }
 
 // One model reply, streamed to the screen. Stops as soon as a tool call is complete.
+// Thinking for the agent loop (2026-10-23, Yousef: "turn thinking on for crew and team"): /crew's own chat, and a
+// /team agent started with YAI_THINK (the fixers: cli/team.js), at "low" effort, where the loops were. Builders and
+// /crew's background agents do mechanical work and run without it. Each step's reasoning is kept on its message,
+// because DeepSeek needs it back with every later step when tools are on (lib/handlers.js bodyFor); past the last 6
+// steps it's cut short (keepReasoning) so it doesn't fill the memory. Off with "thinking": false in config.json.
+function thinkFor(model) {
+  if (api.cfg.thinking === false || state.thinkOff || !/^deepseek/i.test(model)) return undefined;
+  if (TEAM_AGENT) return ["low", "high", "max"].includes(process.env.YAI_THINK) ? process.env.YAI_THINK : undefined;
+  return state.crewActive ? "low" : undefined;
+}
+function keepReasoning() {
+  let n = 0;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const m = state.messages[i];
+    if (m.role !== "assistant" || typeof m.reasoning !== "string") continue;
+    if (++n > 6 && m.reasoning.length > 400) m.reasoning = m.reasoning.slice(0, 300).trimEnd() + " …";
+  }
+}
+
 async function callModel() {
   spinner.start(state.warmed.has(state.model) ? undefined : `Starting ${modelLabel()}`);
   if (!state.warmed.has(state.model)) {
@@ -1651,10 +1670,17 @@ async function callModel() {
     const model = fix?.model || state.model;
     const price = state.models.find((m) => m.id === model)?.price; // US$ per million tokens (yAI Ultra)
     const promptTokens = usedChars() / 3.6;
-    const { usage, cost, fallback } = await api.chat({
+    const think = thinkFor(model);
+    state.lastReasoning = "";
+    const { usage, cost, fallback, thinkingOff } = await api.chat({
       messages: state.messages,
       model,
       ...(fix && { temperature: 1 }),
+      think,
+      onReasoning: (piece) => {
+        state.lastReasoning += piece;
+        if (!seen) spinner.text("thinking");
+      },
       system: systemPrompt() + (state.crewActive && !state.crewQuiet ? CREW_PROMPT() : ""),
       context: envContext() + (TEAM_AGENT || state.crewActive ? attemptBlock() : ""),
       tools: nativeTools(),
@@ -1709,6 +1735,10 @@ async function callModel() {
     });
     state.usage.out += usage?.out ?? seen; // a reply cut at a tool call has no final usage event
     if (fallback) state.fallbacks = (state.fallbacks || 0) + 1; // replies from the fallback model (the /team board shows them)
+    if (thinkingOff && !state.thinkOff) {
+      state.thinkOff = true;
+      ui.note(c.dim("· DeepSeek refused thinking for this chat (an earlier step's reasoning was missing) · it goes on without it"));
+    }
     if (cost) {
       state.cost.session += cost.usd;
       if (cost.todayUsd != null) state.cost.todayUsd = cost.todayUsd;
@@ -2188,7 +2218,7 @@ async function runAgent(content) {
       teamProgress();
       spinner.stop();
       if (state.interrupted) {
-        if (text.trim()) state.messages.push({ role: "assistant", content: text });
+        if (text.trim()) state.messages.push({ role: "assistant", content: text, ...(state.lastReasoning && { reasoning: state.lastReasoning }) });
         print(c.yellow("   ■ stopped") + c.dim(" · what should yAI do instead?"));
         return;
       }
@@ -2231,7 +2261,8 @@ async function runAgent(content) {
       // "Following the watcher: …" is dropped from the history: a model copies its own earlier replies, and in /crew
       // (2026-10-23) 4 instructions became ~100 replies in a row opening "Following the watcher: I'll stop re-pressing
       // Singleplayer…", still steering by advice long out of date
-      state.messages.push({ role: "assistant", content: String(call && call.raw ? call.raw : text).replace(/^\W*following the watcher:[^\n]*\n*/i, "") || "(working)" });
+      state.messages.push({ role: "assistant", content: String(call && call.raw ? call.raw : text).replace(/^\W*following the watcher:[^\n]*\n*/i, "") || "(working)", ...(state.lastReasoning && { reasoning: state.lastReasoning }) });
+      if (state.lastReasoning) keepReasoning();
       // words cut short by a dropped connection aren't the answer: it goes on from where they stopped
       if (!call && state.dropped) {
         ui.note(c.dim("· the connection dropped partway through the reply · asking yAI to go on"));

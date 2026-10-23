@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "1.0.223",
+      "date": "2026-10-23",
+      "title": "Thinking for /crew and /team",
+      "items": [
+        {
+          "area": "Crew & Team",
+          "title": "The planning calls think hard",
+          "text": "The calls that shape a whole run now think first, at high effort, on DeepSeek: the brief, the lead’s split, the architect’s questions, the fixer’s to-do list and the next round’s plan."
+        },
+        {
+          "area": "Crew & Team",
+          "title": "The chat and the fixers think too",
+          "text": "/crew’s main chat and /team’s fixers think before each step, at low effort, which is where the loops happened. Builders and /crew’s background agents do mechanical work and still don’t. DeepSeek needs each earlier step’s reasoning sent back with tools on, so yAI keeps it, shortens it past the last 6 steps, and if DeepSeek ever refuses, that chat goes on without thinking instead of failing. Turn it all off with \"thinking\": false in ~/.yai/config.json."
+        },
+        {
+          "area": "Team",
+          "title": "The designer turns on for style words again",
+          "text": "A broken pattern meant “looks good”, “stylish” or “styling” in a request never switched the designer on by itself."
+        },
+        {
+          "area": "Tests",
+          "title": "174 cases",
+          "text": "test/crew-team covers what each host is sent with thinking on and off, the reasoning sent back, the shortening, and the fallback."
+        }
+      ]
+    },
+    {
       "version": "1.0.222",
       "date": "2026-10-23",
       "title": "/crew and /team start from a full brief",

@@ -100,7 +100,7 @@ const ROLES = [
   { key: "researcher", phase: 0.2, verdict: false, on: (t, n) => n >= 4, desc: "researches the topic (how it works, how it's built) and what a great version needs; writes TEAM_SPEC.md for everyone" },
   { key: "architect", phase: 0.5, verdict: false, on: (t, n) => n >= 4, desc: "designs how the pieces fit before anyone builds: a detailed TEAM_CONTRACT.md and a skeleton of every file" },
   { key: "merger", phase: 1.2, verdict: false, on: (t, n) => n >= 3, desc: "joins the builders' pieces and fixes mismatches between them" },
-  { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|looks? (good|great|nice|professional|clean)|beautiful|polish|pretty|modern|sleek|stylish|styling/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
+  { key: "designer", phase: 1.3, verdict: false, on: (t) => /design|\blooks? (good|great|nice|professional|clean)|beautiful|polish|pretty|modern|sleek|\bstylish|\bstyling/i.test(t), desc: "polishes how it looks (CSS only): spacing, type, colours, states" },
   // one careful QA agent by default (2026-10-22): integration, tester and reviewer each read the whole project and found
   // the same problems; they stay available on their own (e for everything, or tick them)
   { key: "qa", phase: 2, on: true, desc: "one careful check of everything: the pieces fit, bugs, and tests for the main behaviours" },
@@ -498,7 +498,7 @@ module.exports = function create(d) {
     if (found.length < 2 && reports.length < 2500) return; // one short report is its own list
     const model = ["deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
     try {
-      const out = await Promise.race([X.oneShot({ model, system: TODO_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The task: ${clip(String(task || ""), 600)}\n\n${reports}` }] }), new Promise((r) => setTimeout(() => r(""), 60000))]);
+      const out = await Promise.race([X.oneShot({ model, system: TODO_SYSTEM, think: "high", signal: state.abort?.signal, messages: [{ role: "user", content: `The task: ${clip(String(task || ""), 600)}\n\n${reports}` }] }), new Promise((r) => setTimeout(() => r(""), 180000))]);
       if (String(out || "").trim().length > 40) { a.todo = String(out).trim(); say("fixer", "has one to-do list from the reports", "acc", clip(row1(a.todo), 200)); }
     } catch {}
   }
@@ -950,7 +950,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       // agents that write get 100 steps (2026-10-22: the fixer ran out at 50 mid-fix); repeats are stopped long before
       cwd: root, env: { ...process.env, YAI_MCP_READONLY: "1", YAI_THEME: "dark", // no step limit: the watcher redirects or stops an agent that wanders (2026-10-22, Yousef)
-      YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) || a.crewLead ? "80000" : "48000", ...(a.crewLead && { YAI_CREW_LEAD: "1" }), ...(!a.role && !a.crewLead && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      YAI_TEAM_AGENT: "1", YAI_COLUMNS: "1000", ...((a.role === "fixer" || a.crewLead) && api.cfg.thinking !== false && { YAI_THINK: "low" }), // the fixers think first (index.js thinkFor)
+YAI_TRIM_TOKENS: WIDE_ROLES.has(a.role) || a.crewLead ? "80000" : "48000", ...(a.crewLead && { YAI_CREW_LEAD: "1" }), ...(!a.role && !a.crewLead && { YAI_OWN_FILES: JSON.stringify(a.files || []) }), ...(a.readOnly ? { YAI_REPORT_ONLY: "1" } : a.role && { YAI_SAFE_CHECKS: "1" }) }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     a.child = child;
     a.send = (obj) => { try { child.stdin.write(JSON.stringify(obj) + "\n"); } catch {} };
@@ -1557,7 +1558,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     else try {
       const ask = async (messages) => {
         for (let i = 0; ; i++) {
-          try { return await X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, signal, messages })); }
+          try { return await X.busy("splitting the work", (signal) => X.oneShot({ model: lead, system: LEAD_SYSTEM, think: "high", signal, messages })); }
           catch (err) { if (state.interrupted || i + 1 >= leads.length) throw err; lead = leads[i + 1]; }
         }
       };
@@ -2000,7 +2001,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       ].join("\n");
       let plan = null, list = [];
       try {
-        const text = await X.oneShot({ model: lead, system: ROUND_SYSTEM, messages: [{ role: "user", content: prompt }], signal: state.abort?.signal });
+        const text = await X.oneShot({ model: lead, system: ROUND_SYSTEM, think: "high", messages: [{ role: "user", content: prompt }], signal: state.abort?.signal });
         plan = planJson(text);
         list = (Array.isArray(plan.agents) ? plan.agents : []).slice(0, 6).filter((x) => x && x.task);
       } catch (err) { planner.error = err.message; }
@@ -2076,8 +2077,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         const fs = require("fs");
         const spec = fs.existsSync(specFile()) ? fs.readFileSync(specFile(), "utf8").slice(0, 14000) : "";
         const out = await Promise.race([
-          X.oneShot({ model: a.model || state.model, system: DIRECTION_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The request: ${task}\n\n${spec ? `The researcher's findings (TEAM_SPEC.md):\n${spec}` : "(No research was done for this one.)"}` }] }),
-          new Promise((r) => setTimeout(() => r(""), 120000)),
+          X.oneShot({ model: a.model || state.model, system: DIRECTION_SYSTEM, think: "high", signal: state.abort?.signal, messages: [{ role: "user", content: `The request: ${task}\n\n${spec ? `The researcher's findings (TEAM_SPEC.md):\n${spec}` : "(No research was done for this one.)"}` }] }),
+          new Promise((r) => setTimeout(() => r(""), 240000)),
         ]);
         qs = (JSON.parse((/\{[\s\S]*\}/.exec(out || "") || ["{}"])[0]).questions || [])
           .map((q) => ({ q: String(q?.q || "").trim(), why: String(q?.why || "").trim(), options: (Array.isArray(q?.options) ? q.options : []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4) }))

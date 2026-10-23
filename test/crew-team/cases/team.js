@@ -79,6 +79,26 @@ suite(__filename, [
     assert.match(fx.text, /add has no test/);
     assert.ok(file("math.test.js"));
   } },
+  { name: "thinking: the split and the to-do think hard, the fixer thinks low and gets its reasoning back; builders and QA don't", ms: 150000, fn: async (ctl) => {
+    const { y, srv } = await session(ctl, (r) => {
+      if (r.who === "lead") return PLAN;
+      if (r.who === "builder") return BUILD[builderOf(r)]?.[r.turn] ?? "Done.";
+      if (r.who === "team-qa") return "add is missing a test.\n" + "- math.js: a detail worth checking in the report.\n".repeat(60) + "VERDICT: PROBLEMS"; // long: one short report skips the to-do
+      if (r.who === "todo") return "1. Add a test for add in math.test.js and run it: node math.test.js prints ok.";
+      if (r.who === "team-fixer") return [{ reasoning: "F0: a test file for add is the fix.", text: T("write_file", { path: "math.test.js", content: "console.log('ok');\n" }) }, { reasoning: "F1: run it.", text: T("run", { command: "node math.test.js" }) }, "Added it.\nVERDICT: FIXED"][r.turn] ?? "VERDICT: FIXED";
+      return "Done.";
+    });
+    await runTeam(y, { on: ["qa", "fixer"], mode: "yolo", ms: 140000 });
+    assert.strictEqual(srv.of("lead")[0].body.think, "high");
+    assert.ok(srv.of("todo").length && srv.of("todo").every((r) => r.body.think === "high"), "the fixer's to-do list");
+    const fx = srv.of("team-fixer");
+    assert.ok(fx.length >= 3, "the fixer ran its steps");
+    assert.ok(fx.every((r) => r.body.think === "low"));
+    assert.strictEqual(fx[1].messages.find((m) => m.role === "assistant").reasoning, "F0: a test file for add is the fix.");
+    assert.deepStrictEqual(fx[2].messages.filter((m) => m.role === "assistant").map((m) => m.reasoning), ["F0: a test file for add is the fix.", "F1: run it."]);
+    assert.ok(srv.of("builder").every((r) => r.body.think === undefined), "builders don't think");
+    assert.ok(srv.of("team-qa").every((r) => r.body.think === undefined));
+  } },
   { name: "a fixer that breaks a file and then fails is still re-checked, and fixer 2 repairs it", ms: 150000, fn: async (ctl) => {
     const test = "const t = require('node:test'), a = require('assert'), m = require('./math');\nt('add', () => a.strictEqual(m.add(2, 3), 5));\n";
     const { y, srv, file } = await session(ctl, (r) => {

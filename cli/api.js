@@ -158,8 +158,9 @@ async function chat(opts) {
   let got = false;
   const onText = (piece) => { got = true; return opts.onText(piece); };
   const onTokens = (n) => { got = true; return opts.onTokens?.(n); }; // thinking tokens count: a retry would bill them twice
+  const onReasoning = (piece) => { got = true; return opts.onReasoning?.(piece); };
   for (let attempt = 0; ; attempt++) {
-    try { return await chatOnce({ ...opts, onText, onTokens }); }
+    try { return await chatOnce({ ...opts, onText, onTokens, onReasoning }); }
     catch (err) {
       const net = isNetError(err);
       if (got || attempt >= 3 || opts.signal?.aborted || err.auth || !net) throw err;
@@ -169,7 +170,9 @@ async function chat(opts) {
     }
   }
 }
-async function chatOnce({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus, tools, toolFormat, temperature }) {
+// think: "low" | "high" | "max" asks DeepSeek to think first (lib/handlers.js bodyFor); its reasoning arrives through
+// onReasoning, and thinkingOff in the result says DeepSeek refused it for this chat
+async function chatOnce({ messages, model, system, context, conversationId, signal, onText, onTokens, onStatus, onReasoning, tools, toolFormat, temperature, think }) {
   // YAI_DEBUG_DIR=<folder>: keep each request (model, system prompt, messages) as JSON, to replay a model's odd reply.
   if (process.env.YAI_DEBUG_DIR) {
     try {
@@ -197,15 +200,17 @@ async function chatOnce({ messages, model, system, context, conversationId, sign
       signal: ctl.signal,
       // tools/toolFormat: for a host with native tool calling (DeepSeek's API), the site swaps the text format for the
       // tool list; other hosts ignore them
-      body: { agent: true, system, context, messages, model, temperature: temperature ?? 0.3, conversationId, ...(tools && { tools, toolFormat }) },
+      body: { agent: true, system, context, messages, model, temperature: temperature ?? 0.3, conversationId, ...(tools && { tools, toolFormat }), ...(think && { think }) },
     });
   } catch (err) { throw quiet ? wentQuiet() : err; }
   if (res.status === 401) throw Object.assign(new Error("Your session expired. Run /login."), { auth: true });
   if (!res.ok) throw new Error(await errorOf(res));
-  let usage, error, cost, fallback;
+  let usage, error, cost, fallback, thinkingOff = false;
   try {
   await readEvents(res, (ev) => {
     if (ev.fallback) fallback = ev.fallback; // answered by the model's fallback (yAI Lite busy → DeepSeek Flash)
+    if (ev.thinkingOff) thinkingOff = true;
+    if (ev.r && onReasoning) onReasoning(ev.r);
     if (ev.status && onStatus) onStatus(ev.status);
     if (ev.t) onTokens(ev.t);
     if (ev.error) error = ev.error;
@@ -216,7 +221,7 @@ async function chatOnce({ messages, model, system, context, conversationId, sign
   }, touch);
   } catch (err) { throw quiet ? wentQuiet() : err; }
   if (error) throw new Error(error);
-  return { usage, cost, fallback };
+  return { usage, cost, fallback, thinkingOff };
   } finally { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); }
 }
 

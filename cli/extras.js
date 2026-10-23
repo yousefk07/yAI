@@ -87,14 +87,17 @@ module.exports = function create(d) {
   // /duo's partner: yAI Q3.8 Max, else another hosted model (per token, no GPU to wake).
   const partnerModel = () => state.models.find((m) => m.id !== state.model && m.id === "qwen3.8-max") || state.models.find((m) => m.id !== state.model && m.price);
 
-  // One request to a model with no tools (planning, reviewing, describing, commit messages).
-  async function oneShot({ model, system, messages, signal }) {
+  // One request to a model with no tools (planning, reviewing, describing, commit messages). think: "high" for the
+  // calls that plan a whole /crew or /team run (the brief, the split, the architect's questions, the fixer's to-do,
+  // the next round): DeepSeek thinks first (2026-10-23). With no tools its reasoning needn't go back, so it's dropped.
+  // Off with "thinking": false in ~/.yai/config.json.
+  async function oneShot({ model, system, messages, signal, think }) {
     if (!state.warmed.has(model)) {
       await api.warmup(model, { signal, onProgress: (t) => spinner.text(t) });
       state.warmed.add(model);
     }
     let text = "";
-    await api.chat({ model, system, messages, conversationId: state.conversationId, signal, onTokens: (n) => spinner.tokens(n), onStatus: (s) => spinner.text(s), onText: (p) => void (text += p) });
+    await api.chat({ model, system, messages, conversationId: state.conversationId, signal, think: api.cfg.thinking === false ? undefined : think, onTokens: (n) => spinner.tokens(n), onStatus: (s) => spinner.text(s), onText: (p) => void (text += p) });
     return text.replace(/<tool[\s\S]*$/, "").trim();
   }
 

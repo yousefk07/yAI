@@ -19,6 +19,39 @@ const briefRun = async (ctl, choice) => {
 };
 
 suite(__filename, [
+  { name: "thinking: /crew's chat thinks low and gets each step's reasoning back; its background agents don't think", ms: 90000, fn: async (ctl) => {
+    const main = [
+      { reasoning: "R0: hand out the levels, then write the page.", text: "<plan>\n1. Levels\n2. Page\n</plan>\n" + T("commission", { name: "levels", model: "lite", task: helperTask, files: "js/levels.js" }) },
+      { reasoning: "R1: the page next.", text: T("write_file", { path: "index.html", content: "<!doctype html>" }) },
+      T("crew_wait", { minutes: "1" }),
+      "Done.",
+    ];
+    const { y, srv } = await session(ctl, (r) => (r.who === "researcher" ? research(r) : r.who === "helper" ? [T("write_file", { path: "js/levels.js", content: "window.LEVELS=[];" }), "Made it."][r.turn] ?? "Done." : r.who === "main" ? main[r.turn] ?? "Done." : "Done."));
+    await command(y, "/crew build a tiny level viewer page", { mode: "acceptEdits", ms: 80000 });
+    const mains = srv.of("main");
+    assert.ok(mains.length >= 3 && mains.every((r) => r.body.think === "low"));
+    assert.deepStrictEqual(mains[2].messages.filter((m) => m.role === "assistant").map((m) => m.reasoning), ["R0: hand out the levels, then write the page.", "R1: the page next."]);
+    assert.ok(srv.of("researcher").every((r) => r.body.think === undefined) && srv.of("helper").length && srv.of("helper").every((r) => r.body.think === undefined), "background agents don't think");
+  } },
+  { name: "thinking: past the last 6 steps the reasoning is cut short; when the site drops thinking, the chat stops asking", ms: 90000, fn: async (ctl) => {
+    const long = (k) => `Step ${k}: ` + "weighing the options carefully. ".repeat(40);
+    const { y, srv } = await session(ctl, (r) => {
+      if (r.who === "researcher") return research(r);
+      if (r.who !== "main") return "Done.";
+      if (r.turn < 9) return { reasoning: long(r.turn), text: (r.turn ? "" : "<plan>\n1. Files\n</plan>\n") + T("write_file", { path: `f${r.turn}.txt`, content: `file ${r.turn}` }) };
+      if (r.turn === 9) return { thinkingOff: true, text: T("write_file", { path: "g.txt", content: "g" }) };
+      return "Done.";
+    });
+    await command(y, "/crew write the files", { mode: "acceptEdits", ms: 80000 });
+    const mains = srv.of("main");
+    const kept = mains[9].messages.filter((m) => m.role === "assistant").map((m) => m.reasoning || "");
+    assert.strictEqual(kept.length, 9);
+    assert.ok(kept.slice(0, 3).every((x) => x.length < 400 && x.startsWith("Step ") && x.endsWith("…")), "older reasoning cut short, never empty");
+    assert.ok(kept.slice(-6).every((x, i) => x === long(3 + i)), "the last 6 whole");
+    assert.strictEqual(mains[9].body.think, "low");
+    assert.ok(mains.slice(10).length && mains.slice(10).every((r) => r.body.think === undefined), "no thinking asked for after the site dropped it");
+    assert.ok(y.notes().some((n) => /refused thinking for this chat/.test(n)));
+  } },
   { name: "the brief: written from a short message, shown, and used by the researcher and the chat", ms: 60000, fn: async (ctl) => {
     const { srv, q } = await briefRun(ctl, 0);
     assert.ok(srv.log.findIndex((r) => r.who === "sharpen") < srv.log.findIndex((r) => r.who === "researcher"), "the brief comes first");

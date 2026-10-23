@@ -86,6 +86,8 @@ function whoOf(b) {
 //   { sseError }                            a stream that sends { error }
 //   { drop: n, text }                       sends n characters, then closes without done
 //   { hang: true }                          never answers (until the client gives up)
+//   { reasoning, text }                     sends the reasoning first (as the site forwards DeepSeek's), then the text
+//   { thinkingOff: true, text }             says the site dropped thinking for this chat
 //   { stall: ms, text }                     waits ms before the first byte
 // req: { body, who, turn, all, model, system, messages, n }
 async function fakeServer(handler, { models = MODELS, defaultModel = "deepseek-v4.1-flash" } = {}) {
@@ -118,6 +120,8 @@ async function fakeServer(handler, { models = MODELS, defaultModel = "deepseek-v
     res.on("close", () => { closed = true; });
     const send = (o) => { if (!res.destroyed && !closed) res.write(`data: ${JSON.stringify(o)}\n\n`); };
     if (out.sseError) { send({ error: out.sseError }); return res.end(); }
+    if (out.thinkingOff) send({ thinkingOff: true });
+    if (out.reasoning) for (let i = 0; i < out.reasoning.length; i += 50) send({ r: out.reasoning.slice(i, i + 50) });
     const text = String(out.text ?? "");
     const upto = out.drop != null ? Math.min(out.drop, text.length) : text.length;
     const step = out.chunk || 4000;
