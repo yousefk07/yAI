@@ -2,7 +2,7 @@
   "name": "yai-code",
   "displayName": "yAI Code",
   "description": "yAI Code in a VS Code side panel: ask it to change your project, and approve each edit as a diff.",
-  "version": "1.0.192",
+  "version": "1.0.193",
   "publisher": "yousefk07",
   "license": "UNLICENSED",
   "repository": {

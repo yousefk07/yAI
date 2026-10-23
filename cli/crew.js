@@ -284,5 +284,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     });
   }
 
-  return { start, stop, commission, research, panelLines, viewLines, clickRow, close, count, working: () => working().length };
+  return { start, stop, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length };
 };

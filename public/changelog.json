@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.193",
+      "date": "2026-10-23",
+      "title": "Clear keys in the agent view",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Esc goes back",
+          "text": "While you watch a background agent, the key bar says esc back to the chat (it never pauses anything); a failed web search or fetch shows its query or address instead of (nothing given)."
+        }
+      ]
+    },
+    {
       "version": "1.0.192",
       "date": "2026-10-23",
       "title": "A failed tool is just an error",

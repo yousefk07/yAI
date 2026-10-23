@@ -947,7 +947,8 @@ SCREEN.parts.input = () => {
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  const keys = list ? LOOK.KEYS.commands : state.checklistOpen ? state.checklistKeys || [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  // watching a /crew background agent: Esc goes back to the chat (it doesn't pause anything)
+  const keys = state.crewActive && CREW.viewing() ? [["esc", "back to the chat"], ["wheel", "scroll"]] : list ? LOOK.KEYS.commands : state.checklistOpen ? state.checklistKeys || [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
@@ -1854,7 +1855,7 @@ async function execTool(call) {
     // search that failed with "DuckDuckGo: HTTP 403…" was thrown on, and ended a /crew researcher after 7 s).
     if (err.name === "AbortError" || state.interrupted) throw err;
     const shown = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Update", write_file: "Write", run: "Bash" };
-    ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || "(nothing given)");
+    ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || call.args.query || call.args.url || "(nothing given)");
     ui.toolResult(err.message, { color: c.red, quiet: true });
     return { output: `Error: ${err.message}` };
   }
