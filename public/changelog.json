@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.177",
+      "date": "2026-10-22",
+      "title": "Lite or Ultra Flash helpers",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "The builder picks each helper's model",
+          "text": "commission takes <model>lite</model> for a simple, mechanical job (free) or flash, the default, for one that needs thought. The board shows which."
+        }
+      ]
+    },
+    {
       "version": "1.0.176",
       "date": "2026-10-22",
       "title": "check_page in 3-4 s",

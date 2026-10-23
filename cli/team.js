@@ -190,7 +190,7 @@ module.exports = function create(d) {
       `You are the main builder of this project: you own all of it, the design, the code and the result. The task: ${task}`,
       ...(rnd(me) > 1 ? ["", `This is round ${rnd(me)}: the app already exists. Improve it as described below; read what you need first, keep what works, and check it as you go.`, "", `What to improve:\n${me.task}`] : []),
       "", "Build it yourself, step by step, as a strong engineer would: get a first version running early, look at it with check_page, then improve it feature by feature, checking as you go. Keep the core yourself: the main loop, the rendering, and how the pieces connect.",
-      `You can hand separate, well-defined jobs to helpers with the commission tool, when you like: level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, or research. Give each one everything it needs in <task> (what to make, the exact names and interface, the data format) and list the files it owns. Helpers work at the same time as you (at most ${crewMax} at once); their reports reach you after your steps. Don't commission what you could do in a few steps yourself, and don't sit idle while they work.`,
+      `You can hand separate, well-defined jobs to helpers with the commission tool, when you like (with <model>lite</model> for a simple, mechanical job, which is cheaper; flash, the default, for one that needs thought): level or map data in a format you define, sound effects, sprite or texture drawing functions, a self-contained module behind an interface you specify, tests, or research. Give each one everything it needs in <task> (what to make, the exact names and interface, the data format) and list the files it owns. Helpers work at the same time as you (at most ${crewMax} at once); their reports reach you after your steps. Don't commission what you could do in a few steps yourself, and don't sit idle while they work.`,
       "Before you finish: call crew_wait, fit in your helpers' work, check the whole thing with check_page, and end with a short report.",
       ...notesLines(), ...specLines(), ...chatLines(), "", CHECKS, "", RULES, "", REPORT_STYLE,
     ].join("\n");
@@ -718,11 +718,11 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       return;
     }
     const files = (Array.isArray(e.files) ? e.files : []).map((p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "")).filter((p) => p && !p.includes(".."));
-    const h = { name: clip(`helper · ${name}`, 28), crewName: name, task: String(e.task || "").trim(), files, helperOf: lead.name, round: lead.round, phase: lead.phase, model: crewHelperModel || lead.model, readOnly: false, hasVerdict: false, state: "waiting", step: "starting", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] };
+    const h = { name: clip(`helper · ${name}`, 28), crewName: name, task: String(e.task || "").trim(), files, helperOf: lead.name, round: lead.round, phase: lead.phase, model: (e.model === "lite" && state.models.find((m) => m.id === "glm-4.7-flash")?.id) || crewHelperModel || lead.model, readOnly: false, hasVerdict: false, state: "waiting", step: "starting", started: Date.now(), changed: new Set(), created: new Set(), text: [], cost: 0, asks: [] };
     // on the board, under the main builder and its other helpers
     const after = Math.max(...all.map((x, i) => (x === lead || x.helperOf === lead.name ? i : -1)));
     all.splice(after + 1, 0, h);
-    say(lead.name, `commissioned ${h.name}`, "acc", clip(row1(h.task), 220));
+    say(lead.name, `commissioned ${h.name} · ${modelShort(h.model) || "?"}`, "acc", clip(row1(h.task), 220));
     startAgent(h, task, all);
     d.wake();
   }
