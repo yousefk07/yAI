@@ -171,7 +171,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   }
   function open(a) {
     if (!a) return;
-    if (!viewing) { prevHook = state.keyHook; state.keyHook = (s, key) => { if (key?.name === "escape") { close(); return true; } return prevHook ? prevHook(s, key) : false; }; }
+    if (!viewing) { prevHook = state.keyHook; state.keyHook = (s, key) => { if (key?.name === "left") { close(); return true; } /* ← back: Esc stops the chat (2026-10-23) */ return prevHook ? prevHook(s, key) : false; }; }
     viewing = a;
     try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
   }
@@ -184,7 +184,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     if (!viewing) return null;
     const a = viewing;
     const head = `${c.bold(c.ink(a.name))}${a.role !== "builder" ? c.faint(` · ${a.role}`) : ""} ${c.faint(`· ${label(a.model)} · ${a.state} · ${secs((a.ended || Date.now()) - a.started)}${a.cost ? ` · ${money(a.cost)}` : ""}`)}`;
-    return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), c.faint("Esc to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
+    return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), c.faint("← to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
   }
   // a click on a row of the panel: the background agent whose name is on it
   function clickRow(text) {

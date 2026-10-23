@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.194",
+      "date": "2026-10-23",
+      "title": "← leaves the agent view",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "The left arrow goes back",
+          "text": "In a background agent's view, ← goes back to the chat; Esc kept stopping the chat."
+        }
+      ]
+    },
+    {
       "version": "1.0.193",
       "date": "2026-10-23",
       "title": "Clear keys in the agent view",

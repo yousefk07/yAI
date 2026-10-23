@@ -947,8 +947,8 @@ SCREEN.parts.input = () => {
 };
 SCREEN.parts.keys = (cols) => {
   const list = suggestions();
-  // watching a /crew background agent: Esc goes back to the chat (it doesn't pause anything)
-  const keys = state.crewActive && CREW.viewing() ? [["esc", "back to the chat"], ["wheel", "scroll"]] : list ? LOOK.KEYS.commands : state.checklistOpen ? state.checklistKeys || [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
+  // watching a /crew background agent: ← goes back to the chat (Esc still stops the chat)
+  const keys = state.crewActive && CREW.viewing() ? [["←", "back to the chat"], ["wheel", "scroll"]] : list ? LOOK.KEYS.commands : state.checklistOpen ? state.checklistKeys || [["↑↓", "move"], ["space", "toggle"], ["←→", "model"], ["enter", "start"], ["esc", "cancel"]] : state.formOpen ? [["←→", "question"], ["↑↓", "choose"], ["enter", "select"], ["esc", "cancel"]] : state.teamKeys && !state.selecting ? state.teamKeys() : state.selecting && state.busy ? LOOK.KEYS.waiting : state.busy ? LOOK.KEYS.working : LOOK.KEYS[state.phase] || LOOK.KEYS.ready;
   const mode = state.mode === "default" ? c.faint(MODE_WORDS.default) : c.accent(MODE_WORDS[state.mode]);
   return LOOK.keysRow(keys, { mode, model: modelLabel(), memory: contextPercent() }, cols);
 };
