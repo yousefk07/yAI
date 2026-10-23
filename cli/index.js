@@ -1042,6 +1042,7 @@ function drawBelow() {
 
 function setMode(mode, { announce = true } = {}) {
   state.mode = mode;
+  CREW.syncMode(); // /crew's background agents follow it
   if (announce && (!state.busy || SCREEN.on)) drawBelow();
 }
 
@@ -2393,6 +2394,12 @@ async function runAgent(content) {
     syncMute();
     saveSession();
   }
+  // /crew: the chat stopped while background agents work on (or wait for an answer): said plainly, so nothing sits
+  // unseen (2026-10-23: three agents waited 24 minutes on a question after the chat had finished)
+  if (state.crewActive && !TEAM_AGENT && CREW.working()) {
+    const waiting = CREW.waiting();
+    ui.note(`${c.accent("◆")} ${c.ink(`${CREW.working()} background agent${CREW.working() === 1 ? " is" : "s are"} still working`)} ${c.dim(waiting.length ? `· ${waiting.join(", ")} ${waiting.length === 1 ? "is" : "are"} waiting for your answer: click under Background agents, then y or n` : "· their reports come with your next message")}`);
+  }
   // (a read-only checker in /team only reports; it has no plan to carry out)
   if (planReady && !process.env.YAI_REPORT_ONLY) await approvePlan();
 }
@@ -3062,6 +3069,7 @@ async function command(line) {
     case "/mode": {
       const want = { default: "default", ask: "default", accept: "acceptEdits", edits: "acceptEdits", auto: "acceptEdits", "auto-edit": "acceptEdits", yolo: "yolo", all: "yolo", everything: "yolo", plan: "plan" }[arg.toLowerCase()];
       state.mode = want || MODES[(MODES.indexOf(state.mode) + 1) % MODES.length];
+      CREW.syncMode();
       return print(c.dim(`   mode: ${{ default: "ask · asks before edits and commands", acceptEdits: "auto-edit · applies edits without asking", yolo: "yolo · auto-accepts edits, commands and deletions", plan: "plan · read-only" }[state.mode]}`));
     }
     case "/clear":
@@ -3567,7 +3575,7 @@ async function stdioMode() {
       for (const r of picks.values()) r(null);
       picks.clear();
       answers.clear();
-    } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; send({ type: "done", stats: state.lastStats || "", ...info() }); }
+    } else if (msg.type === "mode" && MODES.includes(msg.mode)) { state.mode = msg.mode; if (!state.busy) send({ type: "done", stats: state.lastStats || "", ...info() }); } // mid-run (/crew follows the chat's mode) it isn't a "done"
     else if (msg.type === "model" && state.models.some((m) => m.id === msg.id)) { state.model = msg.id; prewarm(); send({ type: "done", stats: state.lastStats || "", ...info() }); }
     else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
     // from the /team board: a note read with the agent's next step result, and pause / resume between steps

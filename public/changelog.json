@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.211",
+      "date": "2026-10-23",
+      "title": "Background agents follow your mode",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Auto-accept means auto-accept",
+          "text": "Background agents now work in the mode you chose for the chat: with auto-accept everything, their commands run without asking, as the chat's do (three agents had waited 24 minutes on \"Run this command?\"). Switching modes mid-run reaches the agents too, and a question already waiting is answered when you switch to auto-accept everything. Read-only agents (/debate, the /hunt tracer) stay read-only."
+        },
+        {
+          "area": "Crew",
+          "title": "Nobody left waiting unseen",
+          "text": "When the chat finishes while background agents are still working, it says so, and names any that are waiting for your answer."
+        }
+      ]
+    },
+    {
       "version": "1.0.210",
       "date": "2026-10-23",
       "title": "Loops caught sooner",

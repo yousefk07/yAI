@@ -137,7 +137,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       if (a.child !== child) return;
       let e; try { e = JSON.parse(line); } catch { return; }
-      if (e.type === "ready") { a.send({ type: "mode", mode: a.mode || "acceptEdits" }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
+      if (e.type === "ready") { a.send({ type: "mode", mode: agentMode(a) }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
       else if (e.type === "busy") { a.state = "working"; a.lastMove = Date.now(); }
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.log.push(`- ${e.verb} ${clip(String(e.arg || ""), 120)}`); seen(a, "", `${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(String(e.arg || ""))}`); }
       else if (e.type === "step-result") { a.log.push(`    → ${clip(row1(e.summary || e.text), 100)}`); seen(a, `   ${c.faint("└")} ${c.dim(clip(row1(e.summary || e.text), 160))}`); }
@@ -232,6 +232,16 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     }
     viewing = a;
     try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
+  }
+  // An agent works in the mode the user chose for the chat: with "auto-accept everything" (yolo) its commands run without
+  // asking, as the chat's do; otherwise edits are applied and commands ask (2026-10-23: the user had chosen auto-accept
+  // everything, and three agents sat 24 minutes on "Run this command?"). Read-only agents stay read-only.
+  const agentMode = (a) => a.mode || (state.mode === "yolo" ? "yolo" : "acceptEdits");
+  function syncMode() {
+    for (const a of working()) if (!a.mode) {
+      a.send({ type: "mode", mode: agentMode(a) });
+      if (state.mode === "yolo" && a.ask) answer(a, true); // a question already waiting is what the user just allowed
+    }
   }
   // the user's answer to an agent's question: the first option is yes, the last is no
   function answer(a, yes) {
@@ -500,5 +510,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return again;
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, asking: () => !!(viewing && viewing.ask), snapshot, restore, debate, hunt };
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, syncMode, waiting: () => agents.filter((a) => a.ask).map((a) => a.name), asking: () => !!(viewing && viewing.ask), snapshot, restore, debate, hunt };
 };
