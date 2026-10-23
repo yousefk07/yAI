@@ -98,6 +98,37 @@ suite(__filename, [
     await runTeam(y, { on: ["qa", "fixer"] });
     assert.strictEqual(srv.of("team-fixer").length, 0);
   } },
+  { name: "the architect asks you about the direction first; your answers reach it and the builders", ms: 150000, fn: async (ctl) => {
+    const QS = JSON.stringify({ questions: [
+      { q: "Should the CLI print just the number or a sentence?", why: "Changes the output.", options: ["Just the number", "A full sentence"] },
+      { q: "Support decimals?", options: ["Yes", "Integers only"] },
+      { q: "Add a help flag?", options: ["Yes", "No"] },
+    ] });
+    let dirAt = -1, archAt = -1;
+    const { y, srv, dir } = await session(ctl, (r) => {
+      if (r.who === "lead") return PLAN;
+      if (r.who === "direction") { dirAt = r.n; return QS; }
+      if (r.who === "team-architect") { if (archAt < 0) archAt = r.n; return "Designed it."; }
+      if (r.who === "builder") return BUILD[builderOf(r)]?.[r.turn] ?? "Done.";
+      return "Done.";
+    });
+    const asked = [];
+    await runTeam(y, { on: ["architect"], after: async () => {
+      for (const choice of [1, 2, -1]) { // a sentence; "You decide"; Esc skips the rest
+        const q = await y.waitFor((e) => e.type === "ask" && /The architect asks/.test(e.title || "") && !asked.includes(e.id), 60000, "an architect question");
+        asked.push(q.id);
+        y.send({ type: "answer", id: q.id, choice });
+      }
+    } });
+    assert.ok(dirAt >= 0 && archAt > dirAt, `questions (${dirAt}) before the architect (${archAt})`);
+    assert.strictEqual(asked.length, 3);
+    const md = fs.readFileSync(path.join(dir, "TEAM_DIRECTION.md"), "utf8");
+    assert.match(md, /print just the number or a sentence\? → A full sentence/);
+    assert.match(md, /Support decimals\? → \(left to the team\)/);
+    assert.doesNotMatch(md, /help flag/);
+    assert.match(srv.of("team-architect")[0].text, /answers to the architect's questions[\s\S]*A full sentence/);
+    assert.ok(srv.of("builder").some((r) => /A full sentence/.test(r.text)), "the builders get the answers too");
+  } },
   { name: "a builder's question goes to the panel; No means the command doesn't run", ms: 120000, fn: async (ctl) => {
     const { y, srv, dir } = await session(ctl, (r) => {
       if (r.who === "lead") return PLAN;

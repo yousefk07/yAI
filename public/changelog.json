@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.221",
+      "date": "2026-10-23",
+      "title": "The architect asks you first",
+      "items": [
+        {
+          "area": "Team",
+          "title": "10 to 15 questions about the direction",
+          "text": "When the architect is on, it now asks you 10 to 15 questions before it designs anything. They come from your request and the researcher’s findings, and cover what to include, the look and feel, controls, difficulty and what matters most. Each one has 2 to 4 answers to pick from, plus “You decide”; Esc skips the rest. Your answers go into TEAM_DIRECTION.md and into every agent’s brief, and where they differ from the research, they win. It works in the terminal and in the VS Code panel."
+        },
+        {
+          "area": "Tests",
+          "title": "163 cases",
+          "text": "test/crew-team covers the questions too."
+        }
+      ]
+    },
+    {
       "version": "1.0.220",
       "date": "2026-10-23",
       "title": "No more stops in the middle of real work",

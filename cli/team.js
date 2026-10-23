@@ -1271,6 +1271,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   const stageOf = (a) => STAGES.find((s) => s.has(lp(a.phase)))?.name || "BUILD";
   // the live feed (newest first): hand-offs, problems found, agents finishing or stuck, your notes
   let feed = [], teamStarted = 0, teamNotes = [];
+  let teamDirection = []; // your answers to the architect's questions, for every agent's brief (see askDirection)
   // rounds (2026-10-22): how many were asked for, each round's spec score, and whether the next is being planned
   let plannedRounds = 1, roundScores = {}, planningRound = false, planFolder = "", costCap = Infinity;
   // between rounds: { round, until, go } while the board waits for you to play it and say what to change
@@ -1500,7 +1501,20 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
   }
 
   // what the user said while the team worked, for the agents that start later
-  const notesLines = () => (teamNotes.length ? ["", "Notes from the user while the team worked (follow them):", ...teamNotes.map((n) => `- ${n}`)] : []);
+  const notesLines = () => [
+    ...(teamDirection.length ? ["", "The user's answers to the architect's questions about the direction, before the design (follow them; where they differ from the research, they win):", ...teamDirection.map((n) => `- ${n}`)] : []),
+    ...(teamNotes.length ? ["", "Notes from the user while the team worked (follow them):", ...teamNotes.map((n) => `- ${n}`)] : []),
+  ];
+  // The architect's questions (2026-10-23, Yousef: "as a part of architects role, ask the user 10-15 questions abt the
+  // direction of their request based on the research"): written from the task and TEAM_SPEC.md, asked one by one with
+  // answer choices before the architect designs anything.
+  const DIRECTION_SYSTEM = [
+    "You are the architect of a team of AI agents about to build what the user asked for. Before you design anything, you ask the user 10 to 15 questions about the direction of the request, so the team builds what they actually want.",
+    "Ask where the request leaves real room: scope and must-have features, style and look, feel and difficulty, platform and controls, content and amount, what matters most, what to leave out. Base the questions on the research: the choices, trade-offs and options it found.",
+    "Don't ask what the request already answers, or technical choices the team should make itself (files, libraries, code structure) unless they change what the user gets.",
+    "Each question is short (at most 15 words), with 2 to 4 concrete answers (at most 8 words each), the likeliest first; \"why\" is optional, at most 15 words, plain words a non-programmer understands.",
+    "Reply with JSON only: {\"questions\":[{\"q\":\"…\",\"why\":\"…\",\"options\":[\"…\",\"…\"]}]}",
+  ].join("\n");
 
   let lastTeam = null; // the last team's agents, for /team log
   function showLog(arg) {
@@ -1762,7 +1776,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     let viewing = null; // the agent you're watching, or null for the board
     d.wake = () => wake();
     let sel = 0; // the agent picked on the board with ↑↓
-    feed = []; teamNotes = []; teamStarted = Date.now(); roundScores = {}; planningRound = false; chatLog = [];
+    feed = []; teamNotes = []; teamDirection = []; teamStarted = Date.now(); roundScores = {}; planningRound = false; chatLog = [];
     recording = { start: Date.now(), last: 0, lastKey: "", dict: [], index: new Map(), frames: [] };
     const draw = () => {
       // once the team is done the board belongs to the conversation; an agent's process ending later (it calls wake)
@@ -2050,6 +2064,51 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       } catch { return false; }
       return (a.step = "the pieces already fit");
     };
+    // the architect's questions about the direction (see DIRECTION_SYSTEM), once, before it starts. Not without a way
+    // to answer: select() with no terminal and no panel answers its first option at once.
+    let direction = process.stdout.isTTY || state.askHook ? "" : "done";
+    const askDirection = async (a) => {
+      direction = "asking";
+      Object.assign(a, { step: "writing its questions for you", lastMove: Date.now() });
+      draw();
+      let qs = [];
+      try {
+        const fs = require("fs");
+        const spec = fs.existsSync(specFile()) ? fs.readFileSync(specFile(), "utf8").slice(0, 14000) : "";
+        const out = await Promise.race([
+          X.oneShot({ model: a.model || state.model, system: DIRECTION_SYSTEM, signal: state.abort?.signal, messages: [{ role: "user", content: `The request: ${task}\n\n${spec ? `The researcher's findings (TEAM_SPEC.md):\n${spec}` : "(No research was done for this one.)"}` }] }),
+          new Promise((r) => setTimeout(() => r(""), 120000)),
+        ]);
+        qs = (JSON.parse((/\{[\s\S]*\}/.exec(out || "") || ["{}"])[0]).questions || [])
+          .map((q) => ({ q: String(q?.q || "").trim(), why: String(q?.why || "").trim(), options: (Array.isArray(q?.options) ? q.options : []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4) }))
+          .filter((q) => q.q && q.options.length >= 2)
+          .slice(0, 15);
+      } catch {}
+      if (qs.length && !state.interrupted && !state.abort?.signal.aborted) {
+        while (asking) await new Promise((r) => setTimeout(r, 300)); // an agent's question is up
+        asking = true;
+        a.step = `asking you ${qs.length} questions`;
+        say("architect", `has ${qs.length} questions for you about the direction`, "acc");
+        draw();
+        drawn = 0;
+        for (let k = 0; k < qs.length; k++) {
+          if (state.abort?.signal.aborted) break;
+          const q = qs[k];
+          const i = await choose({ title: `The architect asks (${k + 1} of ${qs.length}): ${q.q}`, detail: [q.why, "Esc skips the rest: the team decides them."].filter(Boolean).join("  · "), options: [...q.options, "You decide"] });
+          if (i < 0) break;
+          teamDirection.push(`${q.q} → ${i < q.options.length ? q.options[i] : "(left to the team)"}`);
+        }
+        asking = false;
+        try {
+          if (teamDirection.length) require("fs").writeFileSync(path.join(path.dirname(specFile()), "TEAM_DIRECTION.md"), `# The user's direction\n\nAnswers to the architect's questions, before the design.\n\n${teamDirection.map((n) => `- ${n}`).join("\n")}\n`);
+        } catch {}
+        const picked = teamDirection.filter((n) => !n.endsWith("(left to the team)")).length;
+        say("architect", `got your answers · ${picked} chosen, ${teamDirection.length - picked} left to the team`, "acc");
+      }
+      direction = "done";
+      a.step = "starting";
+      wake();
+    };
     const next = () => {
       for (const n of PHASES()) {
         // the builders start from the architect's contract
@@ -2065,6 +2124,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         const waiting = phase(n).filter((a) => a.state === "waiting");
         if (!waiting.length || !agents.filter((a) => (a.phase || 1) < n).every(ended)) continue;
         for (const a of waiting) {
+          if (a.role === "architect" && direction !== "done" && !state.interrupted) { if (!direction) askDirection(a); continue; }
           a.started = Date.now();
           if (state.interrupted) Object.assign(a, { state: "stopped", ended: Date.now() });
           else if (a.role === "integration" && integrationNotNeeded(a)) Object.assign(a, { state: "skipped", ended: Date.now() });

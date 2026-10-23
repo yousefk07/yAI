@@ -55,6 +55,7 @@ function whoOf(b) {
   if (/You are taking over this job/.test(first)) return "takeover";
   // /team
   if (/You supervise a team of AI coding agents/.test(sys)) return "team-watcher";
+  if (/You are the architect of a team of AI agents about to build/.test(sys)) return "direction";
   if (/You turn a software team's check reports/.test(sys)) return "todo";
   if (/You are one of \d+ builder agents/.test(first)) return "builder";
   if (/You are the main builder of this project/.test(first)) return "crew-main";
