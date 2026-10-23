@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "1.0.214",
+      "date": "2026-10-23",
+      "title": "A quieter, more accurate watcher",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Page checks no longer look like a loop",
+          "text": "The watcher used to treat every page_eval and check_page as “the same step” because they have no file path, so any 3 page checks in 12 steps set it off. Each step is now keyed by what it actually checked."
+        },
+        {
+          "area": "Crew",
+          "title": "Instructions don’t linger",
+          "text": "A watcher instruction shows loudly once, then becomes one quiet line in the history, and “Following the watcher: …” is dropped from the model’s own replies. In one run, 4 instructions had turned into about 100 replies in a row that opened with stale advice (“I’ll stop re-pressing Singleplayer…”)."
+        },
+        {
+          "area": "Crew",
+          "title": "Repeated reasoning caught in /crew",
+          "text": "The check for the same reasoning written again now runs on /crew’s main chat too, not only /team agents."
+        }
+      ]
+    },
+    {
       "version": "1.0.213",
       "date": "2026-10-23",
       "title": "Loops caught sooner, and they stop coming back",

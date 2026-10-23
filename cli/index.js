@@ -2122,10 +2122,13 @@ async function runAgent(content) {
       if ((TEAM_AGENT || state.crewActive) && awaitingAck) {
         awaitingAck = false;
         if (!/^\W*following the watcher/i.test(text.trim())) ui.event({ type: "directive-ignored" });
+        // the instruction is read: in the history it becomes one quiet line, so it doesn't steer every later step
+        if (directive?.banner) for (const m of state.messages) if (typeof m.content === "string" && m.content.includes(directive.banner)) m.content = m.content.replace(directive.banner, `(yAI's watcher said, earlier: ${directive.text})`);
       }
       // The same reasoning written again (2026-10-22: a takeover agent wrote "the atlas is 256×256… this is correct"
-      // paragraph after paragraph): what it says before its tool call, compared with its last few replies.
-      if (TEAM_AGENT) {
+      // paragraph after paragraph): what it says before its tool call, compared with its last few replies. /crew's
+      // chat too (2026-10-23: "I'll stop inspecting counts and instead check the one thing that explains…" 10 times).
+      if (TEAM_AGENT || state.crewActive) {
         const prose = text.slice(0, Math.max(0, text.search(/<tool[\s>]|<｜|<\|/) === -1 ? text.length : text.search(/<tool[\s>]|<｜|<\|/))).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
         const grams = new Set(prose.split(" ").map((w, i, all) => all.slice(i, i + 3).join(" ")).filter((g) => g.split(" ").length === 3));
         const same = grams.size >= 25 && recentProse.some((p) => { let n = 0; for (const g of grams) if (p.has(g)) n++; return n / Math.min(grams.size, p.size) >= 0.6; });
@@ -2133,7 +2136,10 @@ async function runAgent(content) {
         if (grams.size >= 25) { recentProse.push(grams); if (recentProse.length > 4) recentProse.shift(); }
         repeatTextNow = same;
       }
-      state.messages.push({ role: "assistant", content: call && call.raw ? call.raw : text });
+      // "Following the watcher: …" is dropped from the history: a model copies its own earlier replies, and in /crew
+      // (2026-10-23) 4 instructions became ~100 replies in a row opening "Following the watcher: I'll stop re-pressing
+      // Singleplayer…", still steering by advice long out of date
+      state.messages.push({ role: "assistant", content: String(call && call.raw ? call.raw : text).replace(/^\W*following the watcher:[^\n]*\n*/i, "") || "(working)" });
       if (!call && state.crewActive && ctx.crew?.open.size && crewHolds < 2 && !state.interrupted) {
         crewHolds++;
         pushUser(`Your background agents are still working (${[...ctx.crew.open].join(", ")}). Call crew_wait for them, fit in their work, and then finish.`);
@@ -2345,7 +2351,9 @@ async function runAgent(content) {
         if ((crewOwnSteps === 3 || crewOwnSteps === 12) && !CREW.commissioned()) result.output += `\n(You're in /crew and haven't commissioned any background agents yet. Hand the separate parts of this project to them now with the commission tool (2 to ${state.crewMax || 4} agents, each with its interface and the files it owns), then go on with the core yourself.)`;
       }
       // /crew: the watcher sees the main chat's steps
-      if (state.crewActive) { (state.crewSteps ||= []).push(`- ${call.name} ${String((call.args || {}).path || (call.args || {}).command || (call.args || {}).pattern || "").replace(/\s+/g, " ").slice(0, 100)} → ${String(result.output).split("\n")[0].slice(0, 90)}`); if (state.crewSteps.length > 60) state.crewSteps.splice(0, 30); }
+      // (each step keyed by what it did: page_eval and check_page have no path, so every page check looked like "the
+      // same step" and 3 of them in 12 steps set the watcher off, 2026-10-23)
+      if (state.crewActive) { (state.crewSteps ||= []).push(`- ${call.name} ${String((call.args || {}).path || (call.args || {}).command || (call.args || {}).pattern || (call.args || {}).code || (call.args || {}).look_for || (call.args || {}).keys || (call.args || {}).url || "").replace(/\s+/g, " ").slice(0, 160)} →${String(result.output).split("\n")[0].slice(0, 90)}`); if (state.crewSteps.length > 60) state.crewSteps.splice(0, 30); }
       if ((TEAM_AGENT || state.crewActive) && !String(result.output).startsWith("Error")) {
         const arg = call.args || {};
         if (["edit_file", "write_file"].includes(call.name)) logAttempt(`${call.name === "write_file" ? (arg.append ? "appended to" : "wrote") : "edited"} ${String(arg.path || "").trim()}${ctx.flip ? ` · BACK TO AN EARLIER VERSION (${ctx.flip.n}×)` : ""}${arg.old ? `: "${String(arg.old).replace(/\s+/g, " ").trim().slice(0, 50)}" → "${String(arg.new ?? "").replace(/\s+/g, " ").trim().slice(0, 50)}"` : ""}`);
@@ -2371,15 +2379,15 @@ async function runAgent(content) {
         directive = { text: ds.map((x) => x.text).join(" "), block: [...new Set(ds.flatMap((x) => x.block))], left: last.steps };
         awaitingAck = true;
         const blocks = directive.block.map((b) => (b === "edits-only" ? "only edits until you've made your change (no reading, searching or checking)" : b.startsWith("read:") ? `no reading ${b.slice(5)} until you change it` : `no ${b}`));
-        pushUser([
-          "",
+        directive.banner = [
           "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
           "⚠ INSTRUCTION FROM yAI'S WATCHER. It sees every step you take. Do this before anything else:",
           directive.text,
           ...(blocks.length ? [`Blocked for your next ${directive.left} steps: ${blocks.join("; ")}.`] : []),
-          'Start your next reply with one line: "Following the watcher: <what you will do differently>". Then do it.',
+          'Start your next reply (only that one) with one line: "Following the watcher: <what you will do differently>". Then do it.',
           "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        ].join("\n"));
+        ].join("\n");
+        pushUser("\n" + directive.banner);
         ui.event({ type: "note-read", count: ds.length });
       }
       if (state.notes?.length) {
