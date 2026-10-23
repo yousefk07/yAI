@@ -59,6 +59,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       "- how it is usually built: the techniques and algorithms people use for it, and the mistakes that commonly go wrong;",
       "- what a great version needs: what users or players expect, and what makes amateur versions feel unfinished.",
       'Then write RESEARCH.md in three short parts: "## The topic" (key facts and numbers), "## How it\'s built" (the approach and the pitfalls), and "## Checklist" (15 to 40 numbered requirements, most important first, each one line with how to check it). Write only RESEARCH.md; no code. If a source refuses you (403), move on to another; don\'t retry it. If web search itself fails or finds nothing twice, stop searching and write RESEARCH.md from what you already know, saying at the top that it is from memory.',
+      "If the task isn't a topic to look up (it's a job on this project's own files or data, such as running a script or fixing something), or it's too vague to name a topic even after a quick look at the project's files, don't write a template or guess: write no RESEARCH.md and end at once with one or two lines saying there was nothing to research and why. Nobody can answer questions from you; decide yourself.",
       "End with a short report: the 5 facts and the 5 requirements that matter most.",
     ],
     builder: (a) => [
@@ -127,7 +128,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   function spawnAgent(a, firstPrompt) {
     const child = spawn(process.execPath, [path.join(__dirname, "index.js"), "--stdio"], {
       cwd: root, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, YAI_TEAM_AGENT: "1", YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_COLUMNS: "1000", YAI_MAX_STEPS: "100000", YAI_TRIM_TOKENS: a.role === "builder" ? "48000" : "80000",
+      env: { ...process.env, YAI_TEAM_AGENT: "1", YAI_CREW_AGENT: "1", YAI_MCP_READONLY: "1", YAI_THEME: "dark", YAI_COLUMNS: "1000", YAI_MAX_STEPS: "100000", YAI_TRIM_TOKENS: a.role === "builder" ? "48000" : "80000",
         ...(a.role === "builder" && a.files.length && { YAI_OWN_FILES: JSON.stringify(a.files) }), ...(a.role !== "builder" && { YAI_SAFE_CHECKS: "1" }) },
     });
     a.child = child;
@@ -353,6 +354,93 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     try { ui.screen?.render?.(); } catch {}
   }
 
+  // ---------- /debate and /hunt: fixed crews that run in rounds (2026-10-23) ----------
+  // when an agent is no longer working (or the chat was stopped)
+  const finished = (a) => new Promise((done) => {
+    if (!a) return done();
+    const iv = setInterval(() => { if (!state.crewActive || state.interrupted || !["starting", "working"].includes(a.state)) { clearInterval(iv); done(); } }, 500);
+  });
+  const named = (n) => agents.find((x) => x.name === n);
+  const said = (a) => (a?.text.join("\n").trim() || "(it gave no answer)").slice(-6000);
+  // its report was for this crew, not for the chat: taken out of the chat's inbox
+  const unreport = (...names) => { if (ctx.crew) ctx.crew.reports = ctx.crew.reports.filter((r) => !names.includes(r.name)); };
+  // a second round for an agent: its own conversation if it's still open, else a fresh one with the earlier answer
+  async function again(a, prompt, spec) {
+    if (!reawaken(a, prompt)) { agents.splice(agents.indexOf(a), 1); commission({ ...spec, extra: `${spec.extra || ""}\n\nYour first answer was:\n${said(a)}\n\n${prompt}`.trim() }); a = named(spec.name); }
+    else say("main", a.name, "round 2");
+    await finished(a);
+    return a;
+  }
+  const stopped = () => !state.crewActive || state.interrupted;
+
+  // two sides answer on their own (Ultra and Ultra Flash), read each other's and reply, then a judge on Ultra decides
+  async function debate(question, progress = () => {}) {
+    state.crewTask = question;
+    const ro = { mode: "plan" }; // read-only: they look at the code, they don't change it
+    const specA = { name: "side A", role: "proposer", model: "pro", task: question, ...ro };
+    const specB = { name: "side B", role: "challenger", model: "flash", task: question, ...ro };
+    progress("both sides are working out their answers");
+    commission(specA); commission(specB);
+    await Promise.all([finished(named("side A")), finished(named("side B"))]);
+    if (stopped()) return null;
+    const first = { A: said(named("side A")), B: said(named("side B")) };
+    const reply = (other) => `The other side argued:\n\n${other}\n\nReply to it: where it's wrong (with evidence from the code where you can), what it gets right, and whether that changes your answer. End with your final position in at most 300 words, starting with one line: POSITION: <your answer in a sentence>.`;
+    progress("each side is replying to the other");
+    const [a2, b2] = await Promise.all([again(named("side A"), reply(first.B), specA), again(named("side B"), reply(first.A), specB)]);
+    if (stopped()) return null;
+    const final = { A: said(a2), B: said(b2) };
+    progress("the judge is deciding");
+    const record = `## Side A, first answer\n${first.A}\n\n## Side B, first answer\n${first.B}\n\n## Side A, reply\n${final.A}\n\n## Side B, reply\n${final.B}`;
+    commission({ name: "judge", role: "judge", model: "pro", task: question, extra: record, ...ro });
+    await finished(named("judge"));
+    unreport("side A", "side B", "judge");
+    if (stopped()) return null;
+    const decision = said(named("judge"));
+    try { require("fs").writeFileSync(path.join(root, "DEBATE.md"), `# ${question}\n\n${decision}\n\n---\n\n# The debate\n\n${record}\n`); } catch {}
+    return { decision, sideA: final.A, sideB: final.B };
+  }
+
+  // reproduce (a failing test) → find the cause → fix it; yAI runs the reproduction itself before it counts as fixed
+  async function hunt(bug, progress = () => {}) {
+    state.crewTask = bug;
+    progress("reproducing the bug with a failing test");
+    commission({ name: "reproducer", role: "reproducer", model: "flash", task: bug });
+    await finished(named("reproducer"));
+    if (stopped()) return null;
+    const repro = said(named("reproducer"));
+    const cmd = ((/^\s*REPRO:\s*`?(.+?)`?\s*$/m.exec(repro) || [])[1] || "").trim();
+    const run = () => {
+      if (!cmd) return null;
+      const r = require("child_process").spawnSync(cmd, { cwd: root, shell: true, encoding: "utf8", timeout: 120000, windowsHide: true });
+      return { ok: r.status === 0, out: `${r.stdout || ""}${r.stderr || ""}`.trim().slice(-2500) };
+    };
+    const before = run();
+    say("main", "all", cmd ? `reproduction: ${cmd} → ${before?.ok ? "passes (the bug didn't show)" : "fails, as it should"}` : "no reproduction command was given", cmd && !before?.ok ? "" : "warn");
+    progress("tracing the root cause");
+    commission({ name: "tracer", role: "tracer", model: "pro", task: bug, mode: "plan", extra: `The reproduction:\n${repro}${cmd ? `\n\nRunning ${cmd} now gives:\n${before?.out || ""}` : ""}` });
+    await finished(named("tracer"));
+    if (stopped()) return null;
+    const cause = said(named("tracer"));
+    progress("fixing it");
+    const fixSpec = { name: "fixer", role: "fixer", model: "pro", task: bug, extra: `The reproduction:\n${repro}\n\nThe root cause, as the tracer found it:\n${cause}` };
+    commission(fixSpec);
+    let fixer = named("fixer");
+    await finished(fixer);
+    if (stopped()) return null;
+    let after = run();
+    // the fix counts once the reproduction passes: one more go if it doesn't
+    if (after && !after.ok) {
+      say("main", "fixer", "the reproduction still fails", "bad");
+      progress("the reproduction still fails · the fixer has another go");
+      fixer = await again(fixer, `yAI ran the reproduction (${cmd}) after your fix and it still fails:\n${after.out}\n\nFind out why and fix it properly. End with a short report as before.`, fixSpec);
+      if (stopped()) return null;
+      after = run();
+    }
+    unreport("reproducer", "tracer", "fixer");
+    if (after) say("main", "all", `reproduction after the fix: ${after.ok ? "passes" : "still fails"}`, after.ok ? "" : "bad");
+    return { cmd, fixed: after ? after.ok : null, repro, cause, fix: said(fixer), after: after?.out || "" };
+  }
+
   // ---------- saved with the conversation, for /resume and yai -c (2026-10-23) ----------
   // The crew log, and each agent's job, state and report. On resume, finished agents show as before, and the ones
   // that were still working start again with their job and a note that their files may be partly done.
@@ -384,5 +472,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return again;
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, snapshot, restore };
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, snapshot, restore, debate, hunt };
 };

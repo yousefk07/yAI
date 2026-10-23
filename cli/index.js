@@ -742,7 +742,10 @@ const TEAM_SKIP = new Set(["ask_user"]);
 const TEAM_ONLY = new Set(["team_say"]); // tools only a /team agent has (the team chat)
 // /crew's main builder (YAI_CREW_LEAD) also commissions helpers and waits for them
 const CREW_LEAD = !!process.env.YAI_CREW_LEAD, CREW_ONLY = new Set(["commission", "crew_wait"]);
-const toolAllowed = (name) => (CREW_ONLY.has(name) ? CREW_LEAD || !!state.crewActive : TEAM_AGENT ? !TEAM_SKIP.has(name) : !TEAM_ONLY.has(name));
+// a /crew background agent (YAI_CREW_AGENT) has no team chat: nobody reads it there (2026-10-23: a researcher asked it
+// for the topic three times and waited for an answer that couldn't come)
+const CREW_AGENT = !!process.env.YAI_CREW_AGENT;
+const toolAllowed = (name) => (CREW_ONLY.has(name) ? CREW_LEAD || !!state.crewActive : TEAM_AGENT ? !TEAM_SKIP.has(name) && !(CREW_AGENT && TEAM_ONLY.has(name)) : !TEAM_ONLY.has(name));
 // A /team agent's progress, sent to the board after each reply (2026-10-22): its plan and how far it is, what it has
 // cost, the tokens it has processed, and how many replies came from the fallback model.
 function teamProgress() {
@@ -3065,7 +3068,7 @@ async function command(line) {
       try { await CREW.research(); } finally { spinner.stop(); state.busy = false; state.abort = null; }
       if (state.interrupted || !state.crewActive) return print(c.dim("   Stopped."));
       ui.note(`${c.accent("◆")} ${c.ink("/crew: this chat works on it, and hands separate jobs to background agents")} ${c.dim("· they show under the plan · /crew off ends it")}`);
-      return runAgent(`${task}\n\n(The researcher's notes are in RESEARCH.md, with the topic's facts, how it's usually built and a checklist: read them before you build.)`);
+      return runAgent(fs.existsSync(path.join(root, "RESEARCH.md")) ? `${task}\n\n(The researcher's notes are in RESEARCH.md, with the topic's facts, how it's usually built and a checklist: read them before you build.)` : task);
     }
     case "/connections":
       return CONN.connections();

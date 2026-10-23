@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.203",
+      "date": "2026-10-23",
+      "title": "A researcher that knows when to stop",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Nothing to research, said plainly",
+          "text": "When the /crew task is a job on your own project rather than a topic (\"run the enrichment second pass\"), the researcher now says there's nothing to research and stops, instead of writing a template RESEARCH.md. Background agents no longer have the /team chat, which nobody reads in /crew (a researcher asked it for the topic three times and waited), and the chat is only pointed at RESEARCH.md when there is one."
+        }
+      ]
+    },
+    {
       "version": "1.0.202",
       "date": "2026-10-23",
       "title": "/crew uses its crew",
