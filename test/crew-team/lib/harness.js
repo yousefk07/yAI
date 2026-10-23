@@ -49,6 +49,7 @@ const homeEnv = () => ({ YAI_DIR: path.join(home(), ".yai") });
 function whoOf(b) {
   const sys = String(b.system || "");
   const first = JSON.stringify((b.messages || []).find((m) => m.role === "user")?.content || "");
+  if (/You turn a user's request into a strong, complete brief/.test(sys)) return "sharpen";
   if (/You supervise a coding session/.test(sys)) return "watcher";
   if (/You are the lead of a small coding team between rounds/.test(sys)) return "round-lead";
   if (/You are the lead of a small coding team/.test(sys)) return "lead";
@@ -146,7 +147,7 @@ async function fakeServer(handler, { models = MODELS, defaultModel = "deepseek-v
 function startYai({ cwd, url, env = {}, args = [] }) {
   const child = spawn(process.execPath, [INDEX, "--stdio", ...args], {
     cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, YAI_URL: url, YAI_NO_MCP: "1", ...homeEnv(), ...env },
+    env: { ...process.env, YAI_URL: url, YAI_NO_MCP: "1", YAI_SHARPEN: "0", ...homeEnv(), ...env },
   });
   const events = [];
   const waiters = [];

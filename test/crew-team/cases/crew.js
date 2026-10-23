@@ -9,7 +9,35 @@ const research = (r) => (r.turn === 0 ? T("write_file", { path: "RESEARCH.md", c
 const notesOf = (y) => y.notes();
 const helperTask = "Write js/levels.js defining window.LEVELS as an array of 3 levels, each { name, grid } with 5 rows.";
 
+// the brief /crew and /team start from (index.js sharpenTask): the harness turns it off, these cases turn it on
+const BRIEF = "What it is: a tiny level viewer.\nFeatures:\n- three levels shown as grids\n- arrow keys switch level\nDone when:\n- index.html opens with no console errors\n- the arrow keys switch between the 3 levels\nNot in scope: editing levels.";
+const briefRun = async (ctl, choice) => {
+  const { y, srv } = await session(ctl, (r) => (r.who === "sharpen" ? BRIEF.repeat(2) : r.who === "researcher" ? research(r) : r.who === "main" ? "<plan>\n1. Do it\n</plan>\nDone." : "Done."), { env: { YAI_SHARPEN: "1" } });
+  const answered = y.waitFor((e) => e.type === "ask" && /start from this brief/.test(e.title || ""), 30000, "the brief question").then((q) => { y.send({ type: "answer", id: q.id, choice }); return q; });
+  await command(y, "/crew level viewer", { mode: "acceptEdits" });
+  return { y, srv, q: await answered };
+};
+
 suite(__filename, [
+  { name: "the brief: written from a short message, shown, and used by the researcher and the chat", ms: 60000, fn: async (ctl) => {
+    const { srv, q } = await briefRun(ctl, 0);
+    assert.ok(srv.log.findIndex((r) => r.who === "sharpen") < srv.log.findIndex((r) => r.who === "researcher"), "the brief comes first");
+    assert.match(srv.of("sharpen")[0].text, /The user's message \(for \/crew\):\nlevel viewer/);
+    assert.match(q.detail, /arrow keys switch level/);
+    assert.match(srv.of("researcher")[0].text, /arrow keys switch level/);
+    assert.match(srv.of("main")[0].text, /arrow keys switch level[\s\S]*The user's own words: level viewer/);
+  } },
+  { name: "the brief: 'use my message' keeps your own words only", ms: 60000, fn: async (ctl) => {
+    const { srv } = await briefRun(ctl, 1);
+    assert.doesNotMatch(srv.of("main")[0].text, /arrow keys switch level/);
+    assert.match(srv.of("main")[0].text, /level viewer/);
+  } },
+  { name: "the brief: cancel starts nothing", ms: 60000, fn: async (ctl) => {
+    const { y, srv } = await briefRun(ctl, 2);
+    await sleep(500);
+    assert.deepStrictEqual(srv.log.map((r) => r.who), ["sharpen"]);
+    assert.ok(y.events.some((e) => /Cancelled/.test(strip(e.text || ""))));
+  } },
   { name: "the full flow: researcher first, a helper, crew_wait, its report reaches the chat", ms: 90000, fn: async (ctl) => {
     const main = [
       "<plan>\n1. Hand out levels\n2. Page\n3. Finish\n</plan>\n" + T("commission", { name: "levels", model: "lite", task: helperTask, files: "js/levels.js" }),

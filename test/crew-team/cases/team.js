@@ -98,6 +98,15 @@ suite(__filename, [
     await runTeam(y, { on: ["qa", "fixer"] });
     assert.strictEqual(srv.of("team-fixer").length, 0);
   } },
+  { name: "/team starts from the brief: the lead splits the brief, and '/team 3 …' keeps its count", ms: 120000, fn: async (ctl) => {
+    const BRIEF = "What it is: math helpers.\nFeatures:\n- add(a, b) and sub(a, b) in math.js\n- cli.js prints add(2, 3) as a sentence\nDone when:\n- node cli.js prints 'The sum is 5'\nNot in scope: a GUI.";
+    const { y, srv } = await session(ctl, (r) => (r.who === "sharpen" ? BRIEF.repeat(2) : r.who === "lead" ? PLAN : r.who === "builder" ? BUILD[builderOf(r)]?.[r.turn] ?? "Done." : "Done."), { env: { YAI_SHARPEN: "1" } });
+    y.waitFor((e) => e.type === "ask" && /\/team: start from this brief/.test(e.title || ""), 30000, "the brief question").then((q) => y.send({ type: "answer", id: q.id, choice: 0 })).catch(() => {});
+    await runTeam(y, {}, "/team 3 math stuff");
+    assert.match(srv.of("sharpen")[0].text, /\(for \/team\):\nmath stuff/);
+    assert.match(srv.of("lead")[0].text, /prints add\(2, 3\) as a sentence/);
+    assert.match(srv.of("lead")[0].text, /up to 3|3 agents|at most 3/i);
+  } },
   { name: "the architect asks you about the direction first; your answers reach it and the builders", ms: 150000, fn: async (ctl) => {
     const QS = JSON.stringify({ questions: [
       { q: "Should the CLI print just the number or a sentence?", why: "Changes the output.", options: ["Just the number", "A full sentence"] },

@@ -388,6 +388,59 @@ function nestedRepos() {
 }
 
 
+// ---------- the brief /crew and /team start from ----------
+// (2026-10-23, Yousef: "a first stage before crew and team that makes my message into a strong prompt cuz my results r
+// always garbage"). The real runs that came out well started from a full brief: the tech, every feature, the controls,
+// how to open it. A short message leaves all of that to the agents' guesses. One call to the strongest model writes the
+// brief; you see it and pick it, your own message, or cancel. Off with "sharpen": false in ~/.yai/config.json (or
+// YAI_SHARPEN=0); a message that's already long (1,500+ characters) is used as it is.
+const SHARPEN_SYSTEM = [
+  "You turn a user's request into a strong, complete brief for a team of AI coding agents that will build it without asking anything more.",
+  "Keep everything the user asked for and what they meant; fill the gaps the way a good product designer would. Don't turn it into a different product, and don't add accounts, servers, backends, multiplayer or payments unless they asked.",
+  "Write, with short headings:",
+  "- What it is: one or two sentences.",
+  "- Tech: what they named; if nothing, for anything that runs in a browser, plain HTML, CSS and JavaScript that opens from index.html with no build step (a library from a CDN is fine).",
+  "- Features: a concrete list, each item specific and checkable (numbers, names, screens, controls). The core of the request done well, plus what it needs to feel finished (a start screen, feedback, saving where it makes sense); no wish-list extras.",
+  "- Controls / how it's used.",
+  "- Look and feel: a line or two.",
+  "- Done when: 5 to 10 checks a tester can run (it opens with no console errors, this works, that responds…).",
+  "- Not in scope: what to leave out so it stays buildable.",
+  "If the folder already has a project in it, the brief is about changing that project, not starting a new one.",
+  "Plain text, about 200 to 400 words. Write only the brief.",
+].join("\n");
+async function sharpenTask(task, kind) {
+  if (process.env.YAI_SHARPEN === "0" || api.cfg.sharpen === false || task.length >= 1500) return task;
+  const model = ["deepseek-v4-pro", "deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
+  let files = [];
+  try { files = fs.readdirSync(root).filter((f) => !/^(\.|node_modules$|yai-media$)/.test(f)).slice(0, 40); } catch {}
+  state.busy = true;
+  state.abort = new AbortController();
+  spinner.start("turning your message into a full brief");
+  let out = "";
+  try {
+    out = await X.oneShot({ model, system: SHARPEN_SYSTEM, signal: state.abort.signal, messages: [{ role: "user", content: `The project folder ${files.length ? `has: ${files.join(", ")}` : "is empty: this is a new project"}.\n\nThe user's message (for /${kind}):\n${task}` }] });
+  } catch {}
+  const stopped = state.abort.signal.aborted || state.interrupted;
+  spinner.stop();
+  state.busy = false;
+  state.abort = null;
+  if (stopped) return null;
+  const brief = String(out || "").replace(/^\s*```\w*\n?|\n?```\s*$/g, "").trim();
+  if (brief.length < Math.min(200, task.length)) return task; // nothing useful came back: your own words
+  print("");
+  print(c.bold(c.ink("   The brief for the agents")) + c.dim("  · written from your message"));
+  const write = ui.markdownWriter();
+  for (const line of brief.split("\n")) write(line);
+  print("");
+  const options = ["Use this brief", "Use my message as it is", "Cancel"];
+  const i = state.askHook
+    ? await state.askHook({ title: `/${kind}: start from this brief?`, detail: brief, options })
+    : await select({ title: `/${kind}: start from this brief?`, options });
+  if (i === 2 || i < 0) return null;
+  if (i === 1) return task;
+  return `${brief}\n\n(The user's own words: ${task})`;
+}
+
 // ---------- choice boxes (the 2026-10-20 design): ↑↓ or a number to choose, enter to confirm, esc to cancel ----------
 // Draws ui.selectLines and redraws it in place. Resolves to the chosen index, or -1 for esc / Ctrl+C.
 // While it's open the typed keys don't reach readline's line (output is muted and the line is cleared after).
@@ -3215,15 +3268,24 @@ async function command(line) {
       return X.showcase(arg);
     case "/duo":
       return X.toggleDuo(arg);
-    case "/team":
-      return TEAM.team(arg);
+    case "/team": {
+      // the brief first (see sharpenTask), then the team; "/team 6 …" keeps its count and "/team log" has no task
+      const m = /^([2-8])\s+([\s\S]+)$/.exec(arg.trim());
+      const t = (m ? m[2] : arg).trim();
+      if (!t || /^log\b/i.test(t) || state.mode === "plan" || state.tutor) return TEAM.team(arg);
+      const brief = await sharpenTask(t, "team");
+      if (brief == null) return print(c.dim("   Cancelled."));
+      return TEAM.team(m ? `${m[1]} ${brief}` : brief);
+    }
     case "/crew": {
       // /crew <task>: this chat, with background agents it commissions; /crew off ends it (2026-10-23)
       if (/^\s*off\s*$/i.test(arg)) { CREW.stop(); return print(c.dim("   /crew is off: this is a plain chat again.")); }
       const m = /^([1-8])\s+([\s\S]+)$/.exec(arg.trim());
       state.crewMax = m ? Number(m[1]) : 4;
-      const task = (m ? m[2] : arg).trim();
+      let task = (m ? m[2] : arg).trim();
       if (!task) return print(c.yellow("   Usage: /crew <task>   (or /crew 6 <task> for up to 6 background agents at once). /crew off ends it."));
+      task = await sharpenTask(task, "crew");
+      if (task == null) return print(c.dim("   Cancelled."));
       state.crewTask = task;
       state.crewQuiet = false; // after /debate or /hunt, the crew is a full /crew again
       // a stop from an earlier request mustn't end this one (2026-10-23: /crew said "Stopped." at once and its

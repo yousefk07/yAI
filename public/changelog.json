@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.222",
+      "date": "2026-10-23",
+      "title": "/crew and /team start from a full brief",
+      "items": [
+        {
+          "area": "Crew & Team",
+          "title": "Your message becomes a full brief",
+          "text": "Before /crew or /team starts, yAI Ultra turns your message into a brief like the ones behind the builds that came out well. It covers what it is, the tech (plain HTML/JS that opens from index.html if you named none), a concrete feature list, controls, look and feel, a “Done when” checklist and what’s not in scope. You see it and pick: use the brief, use your message as it is, or cancel. Your own words stay attached to the brief. A message of 1,500+ characters is used as it is; turn it off with \"sharpen\": false in ~/.yai/config.json."
+        },
+        {
+          "area": "Tests",
+          "title": "167 cases",
+          "text": "test/crew-team covers the brief for /crew and /team (use it, keep your message, cancel, “/team 3 …” keeps its count)."
+        }
+      ]
+    },
+    {
       "version": "1.0.221",
       "date": "2026-10-23",
       "title": "The architect asks you first",
