@@ -605,6 +605,21 @@ async function startBackground(ctx, command) {
 // Shows an edit's diff and writes it to disk.
 function applyEdit(ctx, plan) {
   ctx.lastEditAt = Date.now(); // check_page: a new check needs a change of the agent's own
+  // A file put back to a version it already had (change, revert, change again: 2026-10-22, a main builder did it for
+  // minutes) is a flip-flop: ctx.flip says so, and the agent and the board are told.
+  const hash = (t) => require("crypto").createHash("sha1").update(String(t ?? "")).digest("hex");
+  ctx.versions = ctx.versions || new Map();
+  const seen = ctx.versions.get(plan.abs) || [hash(plan.before)];
+  const h = hash(plan.after);
+  ctx.flip = null;
+  if (seen.slice(0, -1).includes(h)) {
+    ctx.flips = ctx.flips || new Map();
+    const n = (ctx.flips.get(plan.abs) || 0) + 1;
+    ctx.flips.set(plan.abs, n);
+    ctx.flip = { path: rel(ctx, plan.abs), n };
+  }
+  seen.push(h);
+  ctx.versions.set(plan.abs, seen.slice(-30));
   fs.mkdirSync(path.dirname(plan.abs), { recursive: true });
   fs.writeFileSync(plan.abs, plan.after);
   ctx.readFiles.add(plan.abs);

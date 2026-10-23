@@ -2109,6 +2109,12 @@ async function runAgent(content) {
         if (planAt !== state.plan.done) { planAt = state.plan.done; planSteps = 0; }
         if (++planSteps % 6 === 0) result.output += `\n(Your plan's step ${state.plan.done + 1} is "${state.plan.steps[state.plan.done]}". If it's finished, start your next reply with <done>${state.plan.done + 1}</done>, or a higher number if later steps are finished too.)`;
       }
+      // a flip-flop: this edit put a file back to a version it already had
+      if (ctx.flip) {
+        const f = ctx.flip; ctx.flip = null;
+        result.output += `\nThis puts ${f.path} back to a version it already had (${f.n === 1 ? "the first time" : `${f.n} times now`}): you're going back and forth. Stop and decide: say what you expect to happen and why this version is right, then commit to it. If you don't know which is right, check one specific thing (check_page with <look_for>) instead of changing it again.`;
+        ui.event({ type: "flip", path: f.path, count: f.n });
+      }
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result

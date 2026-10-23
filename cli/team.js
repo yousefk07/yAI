@@ -738,6 +738,40 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
     }
   }
 
+  // The watcher's takeover: an agent that didn't listen is stopped, and its job goes to a fresh agent on the strongest
+  // model, which keeps its name (helpers and the board still find it) and starts from a hand-over: what's done, what the
+  // loop was, what to do instead. The stopped one is renamed "… (taken over)".
+  const TOP_MODEL = () => ["deepseek-v4-pro", "deepseek-v4.1-flash"].find((id) => state.models.some((m) => m.id === id)) || state.model;
+  function takeover(a, all, task, why) {
+    if (a.takenOver || a.state !== "working") return;
+    a.takenOver = true; a.watchStopped = true; a.flag = "taken over by the watcher";
+    const steps = a.log.filter((x) => ["step", "result", "diff", "note", "you"].includes(x.k)).slice(-25).map((x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 120)}` : x.k === "result" ? `    → ${clip(row1(x.text), 100)}` : x.k === "diff" ? `- changed ${x.path}` : `- (${clip(row1(x.text || ""), 140)})`);
+    const next = {
+      name: a.name, task: a.task, files: a.files, role: a.role, crewLead: a.crewLead, helperOf: a.helperOf, crewName: a.crewName, round: a.round, phase: a.phase,
+      readOnly: a.readOnly, hasVerdict: a.hasVerdict, fixRound: a.fixRound, model: TOP_MODEL(), state: "waiting", step: "taking over", started: Date.now(),
+      changed: new Set(a.changed), created: new Set(a.created), text: [], cost: 0, asks: [],
+      handover: [
+        "You are taking over this job from an agent that got stuck, so yAI's watcher stopped it. Its work so far is in the files (it changed: " + (a.changed.size ? [...a.changed].join(", ") : "nothing yet") + ").",
+        `Why it was stopped: ${why}`,
+        "Its last steps were:", ...steps,
+        "Don't repeat its loop. Read the current state of the files you need, decide what's actually wrong, say what you expect each change to do before you make it, and finish the job.",
+      ].join("\n"),
+    };
+    a.name = clip(`${a.name} (taken over)`, 32);
+    a.takeoverNext = next;
+    all.splice(all.indexOf(a) + 1, 0, next);
+    say("watcher", `took over from ${next.name} · a fresh agent on ${modelShort(next.model)}`, "warn", why);
+    a.log.push({ k: "you", text: `(the watcher took over) ${why}` });
+    a.send?.({ type: "stop" });
+    // if it doesn't end on its own soon, the replacement starts anyway
+    setTimeout(() => { if (a.takeoverNext) { const n = a.takeoverNext; a.takeoverNext = null; const old = a.child; a.child = null; try { old?.stdin.end(); old?.kill(); } catch {} Object.assign(a, { state: "stopped", ended: Date.now() }); startTakeover(n, all, task); } }, 20000);
+    d.wake();
+  }
+  function startTakeover(n, all, task) {
+    if (state.interrupted) { Object.assign(n, { state: "stopped", ended: Date.now() }); return d.wake(); }
+    startAgent(n, task, all);
+  }
+
   // A first fixer kept open for fixer 2 is closed when it isn't needed (the re-check passed, or the team ends).
   function letGoKept(all, round) {
     for (const x of all) if (x.kept && (round == null || rnd(x) === round)) { try { x.kept.child.stdin.end(); } catch {} x.kept = null; }
@@ -885,7 +919,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         a.send({ type: "mode", mode: a.readOnly ? "plan" : state.mode === "yolo" ? "yolo" : "acceptEdits" });
         const want = a.model || state.model; // the model picked for this agent
         if (e.model !== want) a.send({ type: "model", id: want });
-        a.send({ type: "prompt", text: a.crewLead ? crewBrief(task, a, all) : a.helperOf ? helperBrief(task, a) : a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all) });
+        a.send({ type: "prompt", text: (a.handover ? a.handover + "\n\n---\n\n" : "") + (a.crewLead ? crewBrief(task, a, all) : a.helperOf ? helperBrief(task, a) : a.role === "fixer" ? fixerBrief(task, all, a) : a.role ? roleBrief(a, task, all) : brief(task, a, all)) });
       } else if (e.type === "busy") { a.state = "working"; a.step = "thinking"; a.lastMove = Date.now(); }
       else if (e.type === "status" && e.text) { a.step = String(e.text); a.lastMove = Date.now(); }
       // its plan, cost and tokens after each reply (the board's progress bar, cost and steps)
@@ -894,6 +928,13 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "progress") { if (e.usage) a.usage = e.usage; a.plan = e.plan ? { ...e.plan, done: Math.max(e.plan.done || 0, a.planSeen || 0) } : a.plan; a.cost = e.cost != null ? (a.costPrev || 0) + e.cost : a.cost; a.tokens = e.tokens || a.tokens; a.fallbacks = e.fallbacks || 0; a.lastMove = Date.now(); }
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "commission" && a.crewLead) commissionHelper(a, e, task, all);
+      else if (e.type === "flip") {
+        a.flips = (a.flips || 0) + 1;
+        log({ k: "note", text: `went back to an earlier version of ${e.path} (${e.count}×)` });
+        say(a.name, `flip-flopping on ${e.path} (${e.count}×)`, "warn");
+        // four flip-flops after a note from the watcher: it's not listening, so the job is handed over now
+        if (a.flips >= 4 && a.watchNotes && !a.takenOver && !state.interrupted) takeover(a, all, task, `It kept changing ${e.path} back and forth (${a.flips} times) after being told to stop.`);
+      }
       else if (e.type === "step") { const k = effKind(e.verb); if (a.eff) a.eff[k]++; a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.stuckSaid = false; log({ k: "step", verb: e.verb, arg: e.arg }); }
       else if (e.type === "step-result") log({ k: "result", text: e.summary || e.text || "", tone: e.tone });
       else if (e.type === "diff" && e.path) { a.lastMove = Date.now(); a.changed.add(e.path); if (e.created) a.created.add(e.path); log({ k: "diff", ...e }); }
@@ -942,6 +983,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         }
         a.state = state.interrupted || a.watchStopped ? "stopped" : a.error ? "failed" : "done";
         a.verdict = verdictOf(a.text.join("\n"));
+        if (a.takeoverNext) { const n = a.takeoverNext; a.takeoverNext = null; setTimeout(() => startTakeover(n, all, task), 0); }
         a.ended = Date.now();
         // the first fixer stays open, idle, until yAI's re-check: if it still fails, fixer 2 carries on in this same
         // conversation instead of starting over (2026-10-22, Yousef: "fixer 2 should pick up right where fixer 1 ended")
@@ -1996,7 +2038,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       "Catch an agent wasting time or going wrong: re-reading the same files, running near-identical commands or test harnesses without editing anything, calling check_page over and over after small edits (each takes 10-25 s), drifting from its job, editing files another agent owns, redoing work that is done, or chasing a problem that doesn't matter for the task. Tell it plainly what to do instead.",
       "Leave alone an agent that is making progress (reading what it needs, then editing; testing what it just changed). Most of the time the right answer is no action.",
       "Also say, for each agent that has a numbered plan, how many of its plan steps are finished judging by what it actually did (files read, changed, checked), not by what it said.",
-      "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"stop\" ends it: only when it already had a note from you and is still looping, or its job is clearly done and it's only checking again. An empty actions list is fine.",
+      "Be firm with loops: an agent that changes something and changes it back, or checks the page again and again without a real change in between, gets a blunt note the first time you see it, not after it's 'clearly stuck'.",
+      "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\" or \"takeover\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"takeover\" stops it and hands its job to a fresh, stronger agent with your message as the hand-over: use it when it already had a note from you and is still looping or going nowhere. \"stop\" ends it without a replacement: only when its job is clearly done and it's only checking again. An empty actions list is fine.",
     ].join("\n");
     let watching = false;
     const watch = async () => {
@@ -2012,7 +2055,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       try {
         const show = (x) => x.k === "step" ? `- ${x.verb} ${clip(String(x.arg || ""), 140)}` : x.k === "result" ? `    → ${clip(row1(x.text), 110)}` : x.k === "diff" ? `- changed ${x.path}` : x.k === "you" ? `- (a note it got: ${clip(row1(x.text), 140)})` : `- (${x.k}: ${clip(row1(x.text || x.line), 120)})`;
         const lines = fresh.map((a) => [
-          `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}`,
+          `## ${a.name}${a.role ? ` (${a.role})` : ""}: working for ${secs(Date.now() - a.started)}, ${a.changed.size} file(s) changed${a.watchNotes ? `, ${a.watchNotes} note(s) from you already` : ""}${a.flips ? `, went back to an earlier version of a file ${a.flips} time(s)` : ""}`,
           `Its job: ${clip(row1(a.task), 300)}`,
           ...(a.plan?.steps?.length ? ["Its plan:", ...a.plan.steps.map((l, i) => `${i + 1}. ${clip(row1(l), 120)}`), `(it has marked ${a.plan.done} finished)`] : []),
           "Recent steps:",
@@ -2034,7 +2077,9 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
           if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
-          if (act.do === "stop" && a.watchNotes) {
+          if (act.do === "takeover" && a.watchNotes && !a.takenOver) {
+            takeover(a, agents, task, msg);
+          } else if (act.do === "stop" && a.watchNotes) {
             a.flag = "stopped by the watcher"; a.watchStopped = true;
             a.log.push({ k: "you", text: `(the watcher stopped it) ${msg}` });
             say("watcher", `stopped ${a.name}`, "warn", msg);

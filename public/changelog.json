@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.179",
+      "date": "2026-10-22",
+      "title": "No more flip-flopping",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Flip-flops caught",
+          "text": "An edit that puts a file back to a version it already had is called out at once, with what to do instead; the board shows it."
+        },
+        {
+          "area": "Team",
+          "title": "The watcher can take over",
+          "text": "An agent that keeps looping after a note from the watcher (or flip-flops 4 times after one) is stopped and its job handed to a fresh agent on Ultra with a hand-over: what is done, what the loop was, what to do instead. The watcher is also firmer: a loop gets a note the first time it is seen."
+        }
+      ]
+    },
+    {
       "version": "1.0.178",
       "date": "2026-10-22",
       "title": "More helpers",
