@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.192",
+      "date": "2026-10-23",
+      "title": "A failed tool is just an error",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Tool failures no longer end the run",
+          "text": "A tool that fails (a web search refused by every engine, say) now comes back to the agent as an error to work around, instead of ending its whole run; only a stop ends it."
+        }
+      ]
+    },
+    {
       "version": "1.0.191",
       "date": "2026-10-23",
       "title": "Research without search",

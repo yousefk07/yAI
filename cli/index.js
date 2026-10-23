@@ -1850,7 +1850,9 @@ async function execTool(call) {
     return { output: await T.execRun(ctx, call.args, state.abort.signal) };
   } catch (err) {
     spinner.stop();
-    if (!(err instanceof T.ToolError) && !err.code) throw err;
+    // Any tool failure is an error the agent reads and works around; only a stop ends the run (2026-10-23: a web
+    // search that failed with "DuckDuckGo: HTTP 403…" was thrown on, and ended a /crew researcher after 7 s).
+    if (err.name === "AbortError" || state.interrupted) throw err;
     const shown = { read_file: "Read", list_files: "List", find_files: "Find", search: "Search", edit_file: "Update", write_file: "Write", run: "Bash" };
     ui.toolHeader(shown[call.name] || call.name, call.args.path || call.args.pattern || call.args.command || "(nothing given)");
     ui.toolResult(err.message, { color: c.red, quiet: true });
