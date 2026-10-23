@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.220",
+      "date": "2026-10-23",
+      "title": "No more stops in the middle of real work",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Repeats count from the last change",
+          "text": "yAI stops a chat that keeps asking for steps it already took, after six. That count used to run over the whole task, so a /crew voxel build that was editing, checking and fixing (re-sending one page check after each fix) was stopped mid-progress. The count now starts again after every real file change, so only a chat that repeats itself without changing anything is stopped."
+        },
+        {
+          "area": "Tests",
+          "title": "162 cases",
+          "text": "test/crew-team covers this too."
+        }
+      ]
+    },
+    {
       "version": "1.0.219",
       "date": "2026-10-23",
       "title": "No stand-in notes in your files",

@@ -207,6 +207,14 @@ suite(__filename, [
     assert.strictEqual(srv.log[4].temperature, 1);
     assert.ok(y.notes().some((n) => /kept repeating steps/.test(n)));
   } },
+  { name: "repeats with real edits between them don't add up to the stop", ms: 60000, fn: async (ctl) => {
+    // write b.txt, read a.txt, the same read again (refused): 8 times over, so 8 refusals, each after a real change
+    const { y, srv } = await session(ctl, (r) => (r.n >= 24 ? "Done." : r.n % 3 === 0 ? T("write_file", { path: "b.txt", content: `v${r.n}` }) : T("read_file", { path: "a.txt" })), { files: { "a.txt": "abc" } });
+    await ask(y, "go", { mode: "acceptEdits" });
+    assert.ok(srv.log.length >= 25, `only ${srv.log.length} requests`);
+    assert.ok(srv.log.filter((r) => /You already did this exact step/.test(r.text)).length >= 6);
+    assert.ok(!y.notes().some((n) => /kept repeating steps/.test(n)));
+  } },
   { name: "a write whose content is yAI's own stand-in note isn't written over the file", fn: async (ctl) => {
     const { y, srv, file } = await session(ctl, [T("read_file", { path: "js/mesher.js" }), T("write_file", { path: "js/mesher.js", content: "[157 lines, now in js/mesher.js: read it if you need them]" }), T("edit_file", { path: "js/mesher.js", old: "const a = 1;", new: "[40 lines, now in the file]" }), "Done."], { files: { "js/mesher.js": "const a = 1;\nconst b = 2;\n" } });
     await ask(y, "go", { mode: "acceptEdits" });

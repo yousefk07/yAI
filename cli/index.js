@@ -2326,6 +2326,9 @@ async function runAgent(content) {
         } else {
           refusedInRow = 0;
           result = await execTool(call);
+          // a real change: the repeats count again from 0 (2026-10-23: a /crew voxel build editing, checking and fixing
+          // re-sent one page_eval after each fix, and was stopped at "6 repeats" spread over 30 productive steps)
+          if (["edit_file", "write_file"].includes(call.name) && !String(result.output).startsWith("Error")) repeats = 0;
           if (directive) {
             directive.left--;
             if (["edit_file", "write_file"].includes(call.name) && !String(result.output).startsWith("Error")) { directive.edited = true; const p = String(call.args?.path || "").split("\\").join("/"); for (const b of directive.block) if (b.startsWith("read:") && p.includes(b.slice(5))) (directive.editedPaths ||= new Set()).add(b.slice(5)); }
