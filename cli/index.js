@@ -162,6 +162,8 @@ const BENCH = require("./bench")({ state, api, ui, syncMute: () => syncMute(), f
 // MCP servers: their tools join yAI's own (cli/mcp.js).
 const MCP = require("./mcp")({ root, api, T, version: VERSION });
 
+// a page that refused a plain fetch (403) is read through the site's Tavily Extract
+ctx.extractPage = (u) => api.extract(u);
 // web_search goes through the site (which may have a search API key), or straight to DuckDuckGo if that fails.
 ctx.webSearch = async (q) => {
   try {
@@ -2037,6 +2039,7 @@ async function runAgent(content) {
   let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
   let planAsked = false; // /crew and /team: reminded once to write a plan it skipped
   let crewOwnSteps = 0; // /crew: this chat's own steps, for the reminder to use its background agents
+  let webLookups = 0; // web_search and web_fetch in this request
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
   let lastUndo = state.undo.length, idle = 0; // /team agents: steps since their last change
@@ -2288,6 +2291,13 @@ async function runAgent(content) {
       if (!state.plan && !planAsked && (state.crewActive || TEAM_AGENT) && state.mode !== "plan") {
         planAsked = true;
         result.output += "\n(You haven't written your plan. Start your next reply with a short plan of 3 to 5 steps between <plan> and </plan>, one numbered step per line, then go on.)";
+      }
+      // research that never ends (2026-10-23: 113 web lookups for one request, most of them pages that refused it):
+      // after 15 and 30 lookups it's told to build with what it has
+      if (call.name === "web_search" || call.name === "web_fetch") {
+        webLookups++;
+        if (webLookups === 15) result.output += "\n(That's 15 web lookups for this request. You know enough to start: build with what you have, and only look something up again when a specific fact is missing.)";
+        else if (webLookups === 30) result.output += "\n(30 web lookups now. Stop researching and build: what you haven't found, write from what you know.)";
       }
       // /crew: a main chat that does everything itself is reminded to hand parts out, after 3 and 12 of its steps
       // (2026-10-23, Yousef: "crew doesnt use background agents at all like it needs to use it more")

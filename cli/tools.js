@@ -579,12 +579,33 @@ const tools = {
       const url = String(a.url || "").trim();
       if (!url) throw new ToolError("<url> is required.");
       toolHeader("Fetch", url);
+      const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+      let host = "";
+      try { host = new URL(full).hostname.replace(/^www\./, ""); } catch {}
+      // a site that refused twice (even through the site's reader) isn't tried again this session (2026-10-23: 12
+      // fetches in a row to minecraft.wiki, all 403)
+      ctx.refusedSites = ctx.refusedSites || new Map();
+      if ((ctx.refusedSites.get(host) || 0) >= 2) {
+        toolResult(`skipped · ${host} refuses yAI`, { color: c.yellow });
+        throw new ToolError(`${host} has refused yAI ${ctx.refusedSites.get(host)} times (it blocks automated readers), so it wasn't tried again. Don't try other pages on ${host}: use another source (Wikipedia, the project's docs, a web_search for a different site) or what you already know.`);
+      }
       spinner.start("reading");
       let page;
       try {
-        page = await fetchPage(/^https?:\/\//i.test(url) ? url : `https://${url}`, { maxChars: Math.min(ctx.budget || 20000, 24000), allowPrivate: true });
+        page = await fetchPage(full, { maxChars: Math.min(ctx.budget || 20000, 24000), allowPrivate: true });
       } catch (err) {
-        throw new ToolError(`Couldn't read ${url}: ${err.message}`);
+        // refused (403 and the like): read through the site instead, which fetches it with Tavily
+        if (/HTTP (401|403|406|429|451|503)\b/.test(err.message) && ctx.extractPage) {
+          spinner.text("the page refused · reading it through the site");
+          try { const got = await ctx.extractPage(full); page = { url: got.url || full, title: "", text: String(got.text || "") }; } catch (err2) {
+            ctx.refusedSites.set(host, (ctx.refusedSites.get(host) || 0) + 1);
+            spinner.stop();
+            throw new ToolError(`Couldn't read ${url}: ${err.message}, and the site's reader couldn't either (${err2.message}).${ctx.refusedSites.get(host) >= 2 ? ` ${host} has now refused twice: don't try it again.` : ""}`);
+          }
+        } else {
+          spinner.stop();
+          throw new ToolError(`Couldn't read ${url}: ${err.message}`);
+        }
       } finally {
         spinner.stop();
       }

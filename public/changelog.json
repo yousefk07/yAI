@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.209",
+      "date": "2026-10-23",
+      "title": "Pages that refuse, and research that never ends",
+      "items": [
+        {
+          "area": "Web",
+          "title": "Refused pages read another way",
+          "text": "A page that refuses yAI Code (403, as minecraft.wiki does to every automated reader) is now read through the site with Tavily's page reader instead. A site that still refuses twice isn't tried again that session: yAI says so and points the model to another source, instead of the model trying a dozen more pages on it."
+        },
+        {
+          "area": "Agent",
+          "title": "Enough research",
+          "text": "After 15 web lookups for one request the model is told it knows enough to start building, and after 30 to stop researching (one request had done 113)."
+        }
+      ]
+    },
+    {
       "version": "1.0.208",
       "date": "2026-10-23",
       "title": "/crew, steadier",

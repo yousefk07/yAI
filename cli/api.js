@@ -218,6 +218,11 @@ async function search(q) {
   return json(`/api/hub?op=search&q=${encodeURIComponent(q)}`);
 }
 
+// a page that refused a plain fetch, read through the site (Tavily Extract)
+async function extract(url) {
+  return json(`/api/hub?op=extract&url=${encodeURIComponent(url)}`);
+}
+
 // ---------- /share: publish a session at an unlisted link ----------
 async function share(session) {
   return json("/api/share", { method: "POST", body: session });
@@ -228,4 +233,4 @@ async function hub(op, { method = "GET", body, signal } = {}) {
   return json(`/api/hub?op=${op}`, { method, body, signal });
 }
 
-module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search };
+module.exports = { hub, cfg, save, baseUrl, DIR, me, login, logout, models, warmup, chat, startMedia, pollMedia, cancelMedia, downloadVideo, share, search, extract };
