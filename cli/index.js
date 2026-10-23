@@ -1937,6 +1937,19 @@ async function runAgent(content) {
   };
   let reads = 0; // /team agents: reads and searches before their first change
   let refusedInRow = 0; // steps refused as repeats, one after another
+  // the watcher's directive in force: { text, block: ["check_page", "read:<path>", "edits-only"], left: steps, ack: false }
+  let directive = null, awaitingAck = false;
+  // is this step blocked by it? A read block ends when the file is edited, "edits-only" with the first edit.
+  const blockedBy = (call) => {
+    if (!directive || directive.left <= 0) return "";
+    const arg = call.args || {}, target = String(arg.path || arg.pattern || arg.command || "").replace(/\\/g, "/");
+    for (const b of directive.block) {
+      if (b === "edits-only" && !directive.edited && LOOK_STEPS.has(call.name) || b === "edits-only" && !directive.edited && ["check_page", "page_eval"].includes(call.name)) return "edits only: make your change now, no more looking first";
+      if (b.startsWith("read:") && !directive.editedPaths?.has(b.slice(5)) && ["read_file", "search"].includes(call.name) && target.includes(b.slice(5))) return `no reading ${b.slice(5)} again until you change it`;
+      if (!b.includes(":") && b !== "edits-only" && call.name === b) return `no ${b} for now`;
+    }
+    return "";
+  };
   const recentProse = []; let textRepeats = 0, repeatTextNow = false; // the same reasoning written again
   const sameRuns = new Map(); // a command's first 60 characters -> { n: times run, undo: changes made by then }
   let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
@@ -1990,6 +2003,10 @@ async function runAgent(content) {
       }
       emptyRetried = false; // a reply came: the next empty one gets its own quiet retry
       const call = parseToolCall(text);
+      if (TEAM_AGENT && awaitingAck) {
+        awaitingAck = false;
+        if (!/^\W*following the watcher/i.test(text.trim())) ui.event({ type: "directive-ignored" });
+      }
       // The same reasoning written again (2026-10-22: a takeover agent wrote "the atlas is 256×256… this is correct"
       // paragraph after paragraph): what it says before its tool call, compared with its last few replies.
       if (TEAM_AGENT) {
@@ -2065,8 +2082,15 @@ async function runAgent(content) {
         const runKey = call.name === "run" ? String(call.args?.command || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
         const like = runKey.length >= 30 ? sameRuns.get(runKey) : null;
         const samey = !TEAM_AGENT && !!like && like.undo === state.undo.length && like.n >= 4;
-        if ((before && !lost) || again || everything || inside || samey) {
+        const blocked = TEAM_AGENT ? blockedBy(call) : "";
+        if (blocked) {
+          directive.defied = (directive.defied || 0) + 1;
+          ui.event({ type: "directive-defied", count: directive.defied, what: blocked });
+          ui.note(c.yellow("· blocked by the watcher: " + blocked));
+          result = { output: "Blocked by yAI's watcher (" + blocked + "; " + directive.left + " more steps). Its instruction: " + directive.text };
+        } else if ((before && !lost) || again || everything || inside || samey) {
           repeats++;
+          if (directive) directive.left--;
           result = {
             output: (samey
               ? `You have run commands starting "${runKey}" ${like.n} times without changing any file, so this one wasn't run. More variations won't tell you more: change the code now (edit_file), use check_page for a web page, or finish with your report.`
@@ -2086,6 +2110,11 @@ async function runAgent(content) {
         } else {
           refusedInRow = 0;
           result = await execTool(call);
+          if (directive) {
+            directive.left--;
+            if (["edit_file", "write_file"].includes(call.name) && !String(result.output).startsWith("Error")) { directive.edited = true; const p = String(call.args?.path || "").split("\\").join("/"); for (const b of directive.block) if (b.startsWith("read:") && p.includes(b.slice(5))) (directive.editedPaths ||= new Set()).add(b.slice(5)); }
+            if (directive.left <= 0) directive = null;
+          }
           if (runKey.length >= 30) sameRuns.set(runKey, like && like.undo === state.undo.length ? { n: like.n + 1, undo: like.undo } : { n: 1, undo: state.undo.length });
           // a /team agent's command still runs (the watcher decides when it's gone on too long); it's told, though
           if (TEAM_AGENT && like && like.undo === state.undo.length && like.n >= 4) result.output += `\nYou have now run commands starting "${runKey}" ${like.n + 1} times without changing a file. More variations rarely tell you more: change the code, use check_page, or finish.`;
@@ -2155,6 +2184,22 @@ async function runAgent(content) {
       if (ctx.screenNotes?.length) pushUser(ctx.screenNotes.splice(0).join("\n\n"));
       if (ctx.crew?.reports.length) pushUser(ctx.crew.reports.splice(0).map((x) => `Your helper "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + (ctx.crew.open.size ? `\nStill working: ${[...ctx.crew.open].join(", ")}.` : "\nNo helper is working now."));
       if (state.chat?.length) pushUser(`Team chat, from the other agents:\n${state.chat.splice(0).map((m) => `- ${m}`).join("\n")}\nReply with team_say only if it needs an answer from you.`);
+      if (state.directives?.length) {
+        const ds = state.directives.splice(0), last = ds[ds.length - 1];
+        directive = { text: ds.map((x) => x.text).join(" "), block: [...new Set(ds.flatMap((x) => x.block))], left: last.steps };
+        awaitingAck = true;
+        const blocks = directive.block.map((b) => (b === "edits-only" ? "only edits until you've made your change (no reading, searching or checking)" : b.startsWith("read:") ? `no reading ${b.slice(5)} until you change it` : `no ${b}`));
+        pushUser([
+          "",
+          "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+          "⚠ INSTRUCTION FROM yAI'S WATCHER. It sees every step you take. Do this before anything else:",
+          directive.text,
+          ...(blocks.length ? [`Blocked for your next ${directive.left} steps: ${blocks.join("; ")}.`] : []),
+          'Start your next reply with one line: "Following the watcher: <what you will do differently>". Then do it.',
+          "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ].join("\n"));
+        ui.event({ type: "note-read", count: ds.length });
+      }
       if (state.notes?.length) {
         const n = state.notes.length;
         pushUser(state.notes.splice(0).map((x) => `A note from the user, sent while you work: ${x}`).join("\n"));
@@ -3317,6 +3362,8 @@ async function stdioMode() {
     else if (msg.type === "new") { command("/clear").then(() => send({ type: "done", stats: "", ...info() })); }
     // from the /team board: a note read with the agent's next step result, and pause / resume between steps
     else if (msg.type === "note" && String(msg.text || "").trim()) (state.notes ||= []).push(String(msg.text).slice(0, 2000));
+    // a directive from the watcher: an instruction, maybe with blocks, to acknowledge (see the step loop)
+    else if (msg.type === "directive" && String(msg.text || "").trim()) (state.directives ||= []).push({ text: String(msg.text).slice(0, 1500), block: (Array.isArray(msg.block) ? msg.block : []).map(String).slice(0, 6), steps: Math.min(Math.max(Number(msg.steps) || 8, 2), 30) });
     // a message on the team chat from another agent (the board passes it on)
     else if (msg.type === "crew" && msg.name) { ctx.crew = ctx.crew || { open: new Set(), reports: [] }; ctx.crew.open.delete(String(msg.name)); ctx.crew.reports.push({ name: String(msg.name), report: String(msg.report || "(no report)").slice(0, 4000) }); }
     else if (msg.type === "chat" && String(msg.text || "").trim()) (state.chat ||= []).push(`${String(msg.from || "an agent").slice(0, 40)}${msg.to ? " (to you)" : ""}: ${String(msg.text).slice(0, 600)}`);

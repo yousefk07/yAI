@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.184",
+      "date": "2026-10-22",
+      "title": "The watcher is obeyed",
+      "items": [
+        {
+          "area": "Team",
+          "title": "Directives",
+          "text": "The watcher's instructions arrive as their own labelled message, can block what the agent keeps doing (check_page, a file it keeps re-reading, or everything but edits) for 8 steps, and must be acknowledged. Ignoring one twice hands the job over."
+        }
+      ]
+    },
+    {
       "version": "1.0.183",
       "date": "2026-10-22",
       "title": "Helpers come back",

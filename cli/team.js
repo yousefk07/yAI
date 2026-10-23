@@ -972,13 +972,19 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       else if (e.type === "chat" && String(e.text || "").trim()) relayChat(a, all, String(e.text), String(e.to || ""));
       else if (e.type === "commission" && a.crewLead) commissionHelper(a, e, task, all);
       // the same reasoning written again and again: a loop like any other
+      else if (e.type === "directive-ignored" || e.type === "directive-defied") {
+        a.defied = (a.defied || 0) + 1;
+        log({ k: "note", text: e.type === "directive-defied" ? `tried a step the watcher blocked (${e.what})` : "didn't acknowledge the watcher's instruction" });
+        say(a.name, e.type === "directive-defied" ? `ignored the watcher · tried ${e.what}` : "didn't acknowledge the watcher", "warn");
+        if (a.defied >= 2 && !a.takenOver && !state.interrupted) takeover(a, all, task, `It ignored the watcher's instructions (${a.defied} times): ${e.type === "directive-defied" ? `it tried a blocked step (${e.what})` : "it didn't acknowledge them"}.`);
+      }
       else if (e.type === "repeat-text") {
         a.textLoops = Number(e.count) || (a.textLoops || 0) + 1;
         log({ k: "note", text: `wrote the same reasoning again (${a.textLoops}×)` });
         if (a.textLoops === 2 && !state.interrupted) {
           const msg = "You're repeating the same reasoning without acting. Stop analysing: measure one fact with page_eval, or ask check_page a specific question with look_for, or make one change and check it.";
           a.watchNotes = (a.watchNotes || 0) + 1; a.watchTotal = (a.watchTotal || 0) + 1;
-          a.send?.({ type: "note", text: `From the team's watcher: ${msg}` });
+          a.send?.({ type: "directive", text: msg, block: [], steps: 6 });
           a.log.push({ k: "you", text: `(the watcher) ${msg}` });
           say("watcher", `→ ${a.name}`, "acc", msg);
         } else if (a.textLoops >= 4 && a.watchNotes && !a.takenOver && !state.interrupted) takeover(a, all, task, `It kept writing the same reasoning (${a.textLoops} times) without getting new evidence or changing anything.`);
@@ -2098,7 +2104,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       "Leave alone an agent that is making progress (reading what it needs, then editing; testing what it just changed). Most of the time the right answer is no action.",
       "Also say, for each agent that has a numbered plan, how many of its plan steps are finished judging by what it actually did (files read, changed, checked), not by what it said.",
       "Be firm with loops: an agent that changes something and changes it back, or checks the page again and again without a real change in between, gets a blunt note the first time you see it, not after it's 'clearly stuck'.",
-      "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\" or \"takeover\",\"message\":\"<one or two plain sentences>\"}]}. \"note\" redirects it. \"takeover\" stops it and hands its job to a fresh, stronger agent with your message as the hand-over: use it when it already had a note from you and is still looping or going nowhere. \"stop\" ends it without a replacement: only when its job is clearly done and it's only checking again. An empty actions list is fine.",
+      "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\" or \"takeover\",\"message\":\"<one or two plain sentences>\",\"block\":[optional: \"check_page\", \"page_eval\", \"run\", \"read:<path>\" (no reading that file until it edits it) or \"edits-only\" (no looking until it makes a change)],\"steps\":<how many steps the block lasts, default 8>}]}. \"note\" redirects it; add a block to stop the exact thing it keeps doing. \"takeover\" stops it and hands its job to a fresh, stronger agent with your message as the hand-over: use it when it already had a note from you and is still looping or going nowhere. \"stop\" ends it without a replacement: only when its job is clearly done and it's only checking again. An empty actions list is fine.",
     ].join("\n");
     let watching = false;
     const watch = async () => {
@@ -2145,9 +2151,10 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
             a.send({ type: "stop" });
           } else {
             a.watchNotes = (a.watchNotes || 0) + 1; a.watchTotal = (a.watchTotal || 0) + 1;
-            a.send({ type: "note", text: `From the team's watcher, who sees what every agent is doing: ${msg}` });
-            a.log.push({ k: "you", text: `(the watcher) ${msg}` });
-            say("watcher", `→ ${a.name}`, "acc", msg);
+            const block = (Array.isArray(act.block) ? act.block : []).map(String).filter((b) => /^(check_page|page_eval|run|search|read_file|edits-only|read:.+)$/.test(b)).slice(0, 4);
+            a.send({ type: "directive", text: msg, block, steps: Number(act.steps) || 8 });
+            a.log.push({ k: "you", text: `(the watcher${block.length ? `, blocking ${block.join(", ")}` : ""}) ${msg}` });
+            say("watcher", `→ ${a.name}${block.length ? ` · blocks ${block.join(", ")}` : ""}`, "acc", msg);
           }
         }
       } catch {} finally { watching = false; }
