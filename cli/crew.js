@@ -11,7 +11,7 @@ const { spawn } = require("child_process");
 module.exports = function createCrew({ state, root, ui, X, ctx }) {
   const { c } = ui;
   const agents = []; // { name, task, files, role, model, state, step, started, ended, cost, child, send, text, log, kept, ... }
-  let watchTimer = null, watching = false;
+  let watchTimer = null, tickTimer = null, watching = false;
   const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + "…" : String(s));
   const row1 = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
   const secs = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, "0")}s`);
@@ -28,14 +28,15 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     state.crewActive = true;
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
     clearInterval(watchTimer);
-    watchTimer = setInterval(() => { tick(); watch(); }, 20000);
+    watchTimer = setInterval(watch, 20000);
+    clearInterval(tickTimer); tickTimer = setInterval(tick, 1000); // the times in the panel move
     try { ui.screen?.onClick?.((text) => { clickRow(text); }); } catch {}
   }
   function stop() {
     state.crewActive = false;
     if (viewing) close();
     try { ui.screen?.onClick?.(null); } catch {}
-    clearInterval(watchTimer); watchTimer = null;
+    clearInterval(watchTimer); watchTimer = null; clearInterval(tickTimer); tickTimer = null;
     for (const a of agents) { try { a.child?.stdin.end(); } catch {} try { a.kept?.child.stdin.end(); } catch {} }
     agents.length = 0;
     if (ctx.crew) { ctx.crew.open.clear(); ctx.crew.reports.length = 0; }
@@ -112,6 +113,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       else if (e.type === "note" && /not run|not read again/.test(String(e.text || ""))) a.refused = (a.refused || 0) + 1;
       else if ((e.type === "directive-ignored" || e.type === "directive-defied") && ++a.defied >= 2) takeover(a, "It ignored the watcher's instructions.");
       if (a.log.length > 200) a.log.splice(0, 100);
+      redraw(); // the panel shows the change now, not at your next keypress
       if (e.type === "done" && a.state === "working") {
         if (a.replacing) return; // stopped for a takeover: the new agent reports instead
         a.cost = (a.costPrev || 0) + (e.cost?.session || 0);
@@ -261,7 +263,10 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     } catch {} finally { watching = false; }
   }
   // the panel shows times that move
-  function tick() { if (working().length) try { ui.screen?.draw?.(); } catch {} }
+  // (the screen redraws itself only for this chat's own output: 2026-10-23, the panel sat still until a click)
+  function tick() { if (working().length) try { ui.screen?.render?.(); } catch {} }
+  let drawSoon = null;
+  function redraw() { if (drawSoon) return; drawSoon = setTimeout(() => { drawSoon = null; try { ui.screen?.render?.(); } catch {} }, 200); }
 
   // the researcher /crew starts with: it shows in the panel, and the main chat starts once it's done (10 min at most)
   function research() {

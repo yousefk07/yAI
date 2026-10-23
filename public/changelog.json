@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.189",
+      "date": "2026-10-23",
+      "title": "A live panel",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Background agents update live",
+          "text": "The Background agents list redraws as soon as an agent does something, and its times move every second; before, it only changed when you clicked or typed."
+        }
+      ]
+    },
+    {
       "version": "1.0.188",
       "date": "2026-10-23",
       "title": "Watch a background agent",
