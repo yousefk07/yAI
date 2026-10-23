@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.212",
+      "date": "2026-10-23",
+      "title": "Long builds stay light",
+      "items": [
+        {
+          "area": "Agent",
+          "title": "Written files leave the conversation",
+          "text": "Files the model wrote more than a few steps back are now a one-line note in the conversation (\"200 lines, now in js/world.js: read it if you need them\"), since their text is on disk; the last few steps stay whole. Every step used to re-send every file written so far: a /crew build of seven big files sat at 66% memory. In a test of eight 200-line files, what each step sends levelled off at 38,000 characters instead of growing to 100,000, and each step costs less."
+        }
+      ]
+    },
+    {
       "version": "1.0.211",
       "date": "2026-10-23",
       "title": "Background agents follow your mode",

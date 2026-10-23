@@ -1328,7 +1328,27 @@ async function loadModels() {
 // in one go, down to about 60% of it (never the last 8 steps). Cutting rewrites the start of the conversation, which the model's prompt cache
 // then has to pay for once more, so it is done rarely and in one big step rather than a little every turn.
 const TRIM_TOKENS = Number(process.env.YAI_TRIM_TOKENS) || 0;
+// Files the model wrote a few steps back: their text is on disk, so in the conversation each becomes a one-line note
+// (2026-10-23: a /crew main chat that wrote seven 20,000-33,000 character files sat at 66% memory, and every step
+// re-sent them all). The last 6 messages stay whole, so it can still see what it just wrote; small writes stay too.
+function compactWrites() {
+  for (let i = 0; i < state.messages.length - 6; i++) {
+    const m = state.messages[i];
+    if (m.role !== "assistant" || typeof m.content !== "string" || m.content.length < 3000) continue; // (no flag on the message: it goes to the model's API as it is)
+    const call = /<tool name="(write_file|edit_file)">/.exec(m.content);
+    if (!call) continue;
+    const file = (/<path>\s*([^<\n]+?)\s*<\/path>/.exec(m.content) || [])[1] || "the file";
+    const tag = call[1] === "write_file" ? "content" : "new";
+    m.content = m.content.replace(new RegExp(String.raw`<${tag}>\n?[\s\S]*?(\n</${tag}>|$)`), (all) => {
+      const n = all.split("\n").length - 2;
+      return n < 40 ? all : `<${tag}>\n[${n} lines, now in ${file}: read it if you need them]\n</${tag}>`;
+    });
+    if (call[1] === "edit_file") m.content = m.content.replace(/<old>\n?([\s\S]*?)(\n<\/old>)/, (all, body) => (body.split("\n").length < 40 ? all : `<old>\n[${body.split("\n").length} lines replaced]\n</old>`));
+  }
+}
+
 function trimContext() {
+  compactWrites();
   const limit = TRIM_TOKENS ? Math.min(contextChars() * TRIM_AT, TRIM_TOKENS * 3.6) : contextChars() * TRIM_AT;
   if (usedChars() < limit) return;
   const goal = TRIM_TOKENS ? limit * 0.6 : contextChars() * 0.6;
