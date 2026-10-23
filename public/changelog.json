@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "1.0.186",
+      "date": "2026-10-23",
+      "title": "A calmer watcher",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "The watcher steps in less",
+          "text": "It only looks at an agent yAI's own counters show looping (the same step 3 times in its last 12, a file changed back and forth, the same reasoning again, refused repeats), waits 3 minutes between instructions to the same agent, and blocks only after an instruction was ignored. /team's watcher waits 3 minutes too."
+        },
+        {
+          "area": "Models",
+          "title": "Cut-off tool calls",
+          "text": "A tool call cut off by the reply's length limit used to arrive with no arguments (write_file with no path, again and again); it now keeps what it can and reads as cut off, so the agent is told to write the file in parts."
+        }
+      ]
+    },
+    {
       "version": "1.0.185",
       "date": "2026-10-23",
       "title": "/crew, rebuilt",

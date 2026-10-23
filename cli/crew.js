@@ -95,8 +95,9 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       else if (e.type === "text") a.text.push(e.line);
       else if (e.type === "progress") { if (e.cost != null) a.cost = (a.costPrev || 0) + e.cost; }
       else if (e.type === "error") a.error = e.message;
-      else if (e.type === "repeat-text" && Number(e.count) >= 4) takeover(a, `It kept writing the same reasoning (${e.count} times) without acting.`);
-      else if (e.type === "flip" && Number(e.count) >= 3) takeover(a, `It kept changing ${e.path} back and forth.`);
+      else if (e.type === "repeat-text") { a.repeats = Number(e.count) || (a.repeats || 0) + 1; if (a.repeats >= 4) takeover(a, `It kept writing the same reasoning (${a.repeats} times) without acting.`); }
+      else if (e.type === "flip") { a.flips = (a.flips || 0) + 1; if (a.flips >= 3) takeover(a, `It kept changing ${e.path} back and forth.`); }
+      else if (e.type === "note" && /not run|not read again/.test(String(e.text || ""))) a.refused = (a.refused || 0) + 1;
       else if ((e.type === "directive-ignored" || e.type === "directive-defied") && ++a.defied >= 2) takeover(a, "It ignored the watcher's instructions.");
       if (a.log.length > 200) a.log.splice(0, 100);
       if (e.type === "done" && a.state === "working") {
@@ -162,20 +163,34 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   // ---------- the watcher ----------
   const WATCH_SYSTEM = [
     "You supervise a coding session: a main agent working with the user, and background agents it commissioned. Every 20 seconds you see each one's recent steps, newest last.",
-    "Catch one wasting time or going wrong: re-reading the same files, near-identical commands or checks with nothing changed in between, changing something and changing it back, writing the same reasoning again, drifting from its job. Be firm the first time you see a loop.",
-    "Leave alone anyone making progress. Most of the time the right answer is no action.",
+    "You are only shown agents that yAI's own counters flagged (the same step again and again, a file changed back and forth, the same reasoning written again), with the evidence. Step in only if the steps show a loop that is really wasting time; if the agent has since moved on, or the repeats are reasonable (checking after real changes), take no action.",
+    "Be brief and specific: one or two sentences on what to do instead. Most of the time the right answer is no action.",
     "Reply with JSON only: {\"actions\":[{\"agent\":\"main\" or \"<background agent name>\",\"message\":\"<one or two plain sentences: what to do instead>\",\"block\":[optional: \"check_page\", \"page_eval\", \"run\", \"read:<path>\" or \"edits-only\"],\"steps\":<how long the block lasts, default 8>}]}. An empty list is fine.",
   ].join("\n");
+  // what yAI's own counters show: the same step 3 or more times in the last 12, flip-flops, repeated reasoning, refusals
+  const sameSteps = (lines) => { const n = {}; for (const l of lines.slice(-12)) { const k = l.replace(/\s*→.*$/, "").trim(); if (k.startsWith("-")) n[k] = (n[k] || 0) + 1; } return Math.max(0, ...Object.values(n)); };
+  const evidence = (x) => {
+    const parts = [];
+    const same = sameSteps(x.lines);
+    if (same >= 3) parts.push(`the same step ${same} times in its last 12`);
+    if ((x.flips || 0) >= 2) parts.push(`changed a file back and forth ${x.flips} times`);
+    if ((x.repeats || 0) >= 2) parts.push(`wrote the same reasoning ${x.repeats} times`);
+    if ((x.refused || 0) >= 3) parts.push(`${x.refused} steps refused as repeats`);
+    return parts;
+  };
+  const COOLDOWN = 180000; // between two instructions to the same agent
   async function watch() {
     if (watching || !state.crewActive || state.interrupted) return;
-    const main = state.busy && state.crewSteps?.length ? state.crewSteps.slice(-20) : [];
-    const busy = working().filter((a) => a.log.length >= (a.watchedAt || 0) + 2);
+    const mainLines = state.busy && state.crewSteps?.length ? state.crewSteps.slice(-20) : [];
+    const mainEvidence = mainLines.length && Date.now() - (state.crewMainNoted || 0) > COOLDOWN ? evidence({ lines: mainLines, flips: ctx.flips ? [...ctx.flips.values()].reduce((s, n) => s + n, 0) : 0 }) : [];
+    const main = mainEvidence.length ? mainLines : [];
+    const busy = working().filter((a) => a.log.length >= (a.watchedAt || 0) + 2 && Date.now() - (a.notedAt || 0) > COOLDOWN && evidence({ lines: a.log, flips: a.flips, repeats: a.repeats, refused: a.refused }).length);
     if (!main.length && !busy.length) return;
     watching = true;
     try {
       const parts = [
-        ...(main.length ? [`## main (the session itself)\nIts plan: ${state.plan ? state.plan.steps.map((s, i) => `${i + 1}. ${clip(s, 80)}`).join(" ") : "(none)"}\nRecent steps:\n${main.join("\n")}`] : []),
-        ...busy.map((a) => `## ${a.name} (${a.role}), working for ${secs(Date.now() - a.started)}\nIts job: ${clip(row1(a.task), 300)}\nRecent steps:\n${a.log.slice(-20).join("\n")}`),
+        ...(main.length ? [`## main (the session itself)\nFlagged: ${mainEvidence.join("; ")}\nIts plan: ${state.plan ? state.plan.steps.map((s, i) => `${i + 1}. ${clip(s, 80)}`).join(" ") : "(none)"}\nRecent steps:\n${main.join("\n")}`] : []),
+        ...busy.map((a) => `## ${a.name} (${a.role}), working for ${secs(Date.now() - a.started)}\nFlagged: ${evidence({ lines: a.log, flips: a.flips, repeats: a.repeats, refused: a.refused }).join("; ")}\nIts job: ${clip(row1(a.task), 300)}\nRecent steps:\n${a.log.slice(-20).join("\n")}`),
       ];
       const out = await X.oneShot({ model: FLASH(), system: WATCH_SYSTEM, messages: [{ role: "user", content: `The task: ${clip(state.crewTask || "", 800)}\n\n${parts.join("\n\n")}` }] });
       for (const a of busy) a.watchedAt = a.log.length;
@@ -186,13 +201,16 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
         const block = (Array.isArray(act.block) ? act.block : []).map(String).filter((b) => /^(check_page|page_eval|run|search|read_file|edits-only|read:.+)$/.test(b)).slice(0, 4);
         const steps = Number(act.steps) || 8;
         if (String(act.agent).toLowerCase() === "main") {
-          if (!state.busy) continue;
-          (state.directives ||= []).push({ text: msg, block, steps });
+          if (!state.busy || !main.length) continue;
+          state.crewMainNoted = Date.now();
+          state.crewMainNotes = (state.crewMainNotes || 0) + 1;
+          (state.directives ||= []).push({ text: msg, block: state.crewMainNotes > 1 ? block : [], steps });
           ui.note(`${c.accent("◆")} ${c.ink("The watcher:")} ${c.dim(msg)}`);
         } else {
           const a = busy.find((x) => x.name === act.agent);
           if (!a) continue;
-          a.send({ type: "directive", text: msg, block, steps });
+          a.notedAt = Date.now(); a.notes = (a.notes || 0) + 1;
+          a.send({ type: "directive", text: msg, block: a.notes > 1 ? block : [], steps });
         }
       }
     } catch {} finally { watching = false; }

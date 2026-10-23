@@ -2103,7 +2103,7 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
       "Catch an agent wasting time or going wrong: re-reading the same files, running near-identical commands or test harnesses without editing anything, calling check_page over and over after small edits (each takes 10-25 s), drifting from its job, editing files another agent owns, redoing work that is done, or chasing a problem that doesn't matter for the task. Tell it plainly what to do instead.",
       "Leave alone an agent that is making progress (reading what it needs, then editing; testing what it just changed). Most of the time the right answer is no action.",
       "Also say, for each agent that has a numbered plan, how many of its plan steps are finished judging by what it actually did (files read, changed, checked), not by what it said.",
-      "Be firm with loops: an agent that changes something and changes it back, or checks the page again and again without a real change in between, gets a blunt note the first time you see it, not after it's 'clearly stuck'.",
+      "Step in only when the steps show a loop that is really wasting time (changing something and back, the same check again and again with nothing changed in between); an agent that repeats a check after a real change is working, not looping.",
       "Reply with JSON only: {\"progress\":[{\"agent\":\"<exact name>\",\"done\":<number of finished plan steps>}],\"actions\":[{\"agent\":\"<exact name>\",\"do\":\"note\" or \"stop\" or \"takeover\",\"message\":\"<one or two plain sentences>\",\"block\":[optional: \"check_page\", \"page_eval\", \"run\", \"read:<path>\" (no reading that file until it edits it) or \"edits-only\" (no looking until it makes a change)],\"steps\":<how many steps the block lasts, default 8>}]}. \"note\" redirects it; add a block to stop the exact thing it keeps doing. \"takeover\" stops it and hands its job to a fresh, stronger agent with your message as the hand-over: use it when it already had a note from you and is still looping or going nowhere. \"stop\" ends it without a replacement: only when its job is clearly done and it's only checking again. An empty actions list is fine.",
     ].join("\n");
     let watching = false;
@@ -2142,6 +2142,8 @@ The page's "${pressed}" button was pressed just before this screenshot, so its s
         for (const act of acts.slice(0, 4)) {
           const a = busy.find((x) => x.name === act.agent), msg = row1(act.message);
           if (!a || !msg || a.state !== "working" || a.started > askedAt) continue;
+          if (Date.now() - (a.notedAt || 0) < 180000 && act.do !== "takeover") continue; // 3 min between two instructions to one agent
+          a.notedAt = Date.now();
           if (act.do === "takeover" && a.watchNotes && !a.takenOver) {
             takeover(a, agents, task, msg);
           } else if (act.do === "stop" && a.watchNotes) {
