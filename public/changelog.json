@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.188",
+      "date": "2026-10-23",
+      "title": "Watch a background agent",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Click into a background agent",
+          "text": "In /crew, click an agent under Background agents to watch it live in the conversation's place: what it writes, each step and its result, the files it changes, command output and errors. Esc goes back to the chat."
+        }
+      ]
+    },
+    {
       "version": "1.0.187",
       "date": "2026-10-23",
       "title": "Research first",

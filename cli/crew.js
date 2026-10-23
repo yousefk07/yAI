@@ -29,9 +29,12 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     ctx.crew = ctx.crew || { open: new Set(), reports: [] };
     clearInterval(watchTimer);
     watchTimer = setInterval(() => { tick(); watch(); }, 20000);
+    try { ui.screen?.onClick?.((text) => { clickRow(text); }); } catch {}
   }
   function stop() {
     state.crewActive = false;
+    if (viewing) close();
+    try { ui.screen?.onClick?.(null); } catch {}
     clearInterval(watchTimer); watchTimer = null;
     for (const a of agents) { try { a.child?.stdin.end(); } catch {} try { a.kept?.child.stdin.end(); } catch {} }
     agents.length = 0;
@@ -96,13 +99,14 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       let e; try { e = JSON.parse(line); } catch { return; }
       if (e.type === "ready") { a.send({ type: "mode", mode: "acceptEdits" }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
       else if (e.type === "busy") { a.state = "working"; a.lastMove = Date.now(); }
-      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.log.push(`- ${e.verb} ${clip(String(e.arg || ""), 120)}`); }
-      else if (e.type === "step-result") a.log.push(`    → ${clip(row1(e.summary || e.text), 100)}`);
-      else if (e.type === "diff" && e.path) a.changed.add(e.path);
+      else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.log.push(`- ${e.verb} ${clip(String(e.arg || ""), 120)}`); seen(a, "", `${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(String(e.arg || ""))}`); }
+      else if (e.type === "step-result") { a.log.push(`    → ${clip(row1(e.summary || e.text), 100)}`); seen(a, `   ${c.faint("└")} ${c.dim(clip(row1(e.summary || e.text), 160))}`); }
+      else if (e.type === "diff" && e.path) { a.changed.add(e.path); seen(a, `   ${c.green("✎")} ${c.ink(e.path)}`); }
       else if (e.type === "text-start") a.text = [];
-      else if (e.type === "text") a.text.push(e.line);
+      else if (e.type === "text") { a.text.push(e.line); seen(a, `   ${c.ink(e.line)}`); }
+      else if (e.type === "out" && String(e.text || "").trim()) for (const l of String(e.text).replace(/\n$/, "").split("\n").slice(-6)) seen(a, `     ${c.faint(clip(l, 160))}`);
       else if (e.type === "progress") { if (e.cost != null) a.cost = (a.costPrev || 0) + e.cost; }
-      else if (e.type === "error") a.error = e.message;
+      else if (e.type === "error") { a.error = e.message; seen(a, `   ${c.red("✕")} ${c.ink(row1(e.message))}`); }
       else if (e.type === "repeat-text") { a.repeats = Number(e.count) || (a.repeats || 0) + 1; if (a.repeats >= 4) takeover(a, `It kept writing the same reasoning (${a.repeats} times) without acting.`); }
       else if (e.type === "flip") { a.flips = (a.flips || 0) + 1; if (a.flips >= 3) takeover(a, `It kept changing ${e.path} back and forth.`); }
       else if (e.type === "note" && /not run|not read again/.test(String(e.text || ""))) a.refused = (a.refused || 0) + 1;
@@ -154,10 +158,42 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     spawnAgent(a, handover + brief(a));
   }
 
+  // ---------- watching one: its transcript in the conversation's place ----------
+  let viewing = null, prevHook = null;
+  function seen(a, ...lines) {
+    (a.view ||= []).push(...lines);
+    if (a.view.length > 1500) a.view.splice(0, 500);
+    if (viewing === a) try { ui.screen?.render?.(); } catch {}
+  }
+  function open(a) {
+    if (!a) return;
+    if (!viewing) { prevHook = state.keyHook; state.keyHook = (s, key) => { if (key?.name === "escape") { close(); return true; } return prevHook ? prevHook(s, key) : false; }; }
+    viewing = a;
+    try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
+  }
+  function close() {
+    viewing = null;
+    state.keyHook = prevHook; prevHook = null;
+    try { ui.screen?.toBottom?.(); ui.screen?.render?.(); } catch {}
+  }
+  function viewLines(w) {
+    if (!viewing) return null;
+    const a = viewing;
+    const head = `${c.bold(c.ink(a.name))}${a.role !== "builder" ? c.faint(` · ${a.role}`) : ""} ${c.faint(`· ${label(a.model)} · ${a.state} · ${secs((a.ended || Date.now()) - a.started)}${a.cost ? ` · ${money(a.cost)}` : ""}`)}`;
+    return [head, c.faint(clip(`Its job: ${row1(a.task)}`, w * 2)), c.faint("Esc to go back to the chat"), c.line("─".repeat(Math.max(10, w - 2))), ...(a.view?.length ? a.view : [c.dim("   Starting…")])];
+  }
+  // a click on a row of the panel: the background agent whose name is on it
+  function clickRow(text) {
+    const side = String(text).split("│").pop();
+    const a = [...agents].sort((x, y) => y.name.length - x.name.length).find((x) => side.includes(x.name));
+    if (a) open(a);
+    return !!a;
+  }
+
   // ---------- the panel: the background agents under the plan ----------
   function panelLines(w) {
     if (!agents.length) return [];
-    const out = ["", c.bold(c.ink("Background agents")), c.line("━".repeat(w))];
+    const out = ["", c.bold(c.ink("Background agents")) + c.faint("  click one to watch it"), c.line("━".repeat(w))];
     for (const a of agents) {
       const icon = a.state === "done" ? c.green("✓") : a.state === "failed" || a.stuck ? c.red("✕") : a.state === "stopped" ? c.yellow("■") : c.accent("◐");
       const meta = [label(a.model), secs((a.ended || Date.now()) - a.started), money(a.cost)].filter(Boolean).join(" · ");
@@ -241,5 +277,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     });
   }
 
-  return { start, stop, commission, research, panelLines, count, working: () => working().length };
+  return { start, stop, commission, research, panelLines, viewLines, clickRow, close, count, working: () => working().length };
 };

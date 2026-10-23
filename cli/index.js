@@ -931,6 +931,7 @@ SCREEN.parts.header = (cols) => {
   else if (state.busy) [st, label] = ["working", state.plan && state.plan.steps.length ? `Working · step ${Math.min(state.plan.done + 1, state.plan.steps.length)} of ${state.plan.steps.length}` : "Working"];
   return LOOK.headerRow(cols, { project: state.focus ? `${state.focus.title} · ${path.basename(root)}` : path.basename(root), branch: liveBranch(), st, label });
 };
+SCREEN.parts.view = (w) => (state.crewActive ? CREW.viewLines(w) : null);
 SCREEN.parts.panel = () => (panelOpen() ? (w) => [...(state.busy && state.plan?.steps.length && state.task && !state.task.over ? LOOK.panelLines(state.plan, state.task, w) : []), ...(state.crewActive ? CREW.panelLines(w) : [])] : null);
 SCREEN.parts.input = () => {
   const text = rl ? rl.line : "";

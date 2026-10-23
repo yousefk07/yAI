@@ -30,7 +30,8 @@ module.exports = function create({ ui }) {
   let toast = null, toastTimer = null;
   let clickHandler = null; // a click (no drag) on a row: /team opens the agent on that row
   let rowInfo = []; // per screen row: { soft: it continues the row above (a wrapped line), pane: [firstCol, lastCol] }
-  const parts = { header: () => "", panel: () => null, input: () => ({ text: "", cursor: 0 }), keys: () => "" };
+  // view(width): lines to show in the conversation's place (a /crew background agent being watched), or null
+  const parts = { header: () => "", panel: () => null, input: () => ({ text: "", cursor: 0 }), keys: () => "", view: () => null };
 
   // ---------- ANSI-aware wrapping ----------
   const ESC = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/y;
@@ -108,8 +109,12 @@ module.exports = function create({ ui }) {
     const tw = cols - (panel ? pw + 3 : 0) - 2;
     const all = [], soft = [];
     const push = (rs) => rs.forEach((r, k) => { all.push(r); soft.push(k > 0); });
-    lines.forEach((e) => push(rowsOf(e, tw)));
-    [...extra, ...live].forEach((t) => push(wrap(t, tw)));
+    const over = parts.view(tw);
+    if (over) over.forEach((t) => push(wrap(t, tw)));
+    else {
+      lines.forEach((e) => push(rowsOf(e, tw)));
+      [...extra, ...live].forEach((t) => push(wrap(t, tw)));
+    }
     scroll = Math.max(0, Math.min(scroll, Math.max(0, all.length - midH)));
     let view = all.slice(Math.max(0, all.length - midH - scroll), all.length - scroll);
     let viewSoft = soft.slice(Math.max(0, all.length - midH - scroll), all.length - scroll);
