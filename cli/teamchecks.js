@@ -26,7 +26,7 @@ async function pastMenus(b, lines) {
     if (!m) return;
     if (m === "key") { await within(b.send("Input.dispatchKeyEvent", { type: "keyDown", code: "Enter", key: "Enter", windowsVirtualKeyCode: 13 }), 4000); await within(b.send("Input.dispatchKeyEvent", { type: "keyUp", code: "Enter", key: "Enter", windowsVirtualKeyCode: 13 }), 4000); lines.push("A menu was showing: pressed Enter."); }
     else lines.push(`A menu was showing: chose "${m.slice(6)}".`);
-    await sleep(1000);
+    await settle(b, 300, 1000);
   }
 }
 // does the page still answer? A page whose script never yields (an endless loop) doesn't, and waiting on it would
@@ -230,6 +230,47 @@ async function playtest({ root, entry, task, X, signal }) {
 // presses its start button, holds any keys asked for, and reports errors, a frozen page, the frame rate, what the page
 // says and (with `describe`, a model that can see) what's on screen. No model of its own, so it's cheap and can't loop.
 // keys: "KeyW:1500,Space,ArrowLeft:500" (a key code, held for the ms after the colon, default 150)
+// (2) One browser kept open for pageCheck (an agent checks its page again and again): the page is opened again in it,
+// with the site's saved data cleared, so each check still starts like a first visit. Anything odd (a frozen page, a
+// time-out, a closed browser) and it's closed, and the next check starts a fresh one.
+let kept = null; // { dir, server, b, errors, close }
+async function keptPage(entry) {
+  const dir = path.dirname(entry);
+  if (kept && kept.dir !== dir) { kept.close(); kept = null; }
+  if (!kept) {
+    const server = await B.serveFolder(dir);
+    let b;
+    try { b = await B.launch({ width: 1280, height: 720 }); } catch (err) { server.close(); throw err; }
+    // never the old copy of a file an agent just changed
+    try { await within(b.send("Network.enable"), 4000); await within(b.send("Network.setCacheDisabled", { cacheDisabled: true }), 4000); } catch {}
+    const errors = [];
+    const headlessOnly = (t) => /pointer ?lock|WrongDocumentError/i.test(t);
+    b.on("Runtime.exceptionThrown", (p) => { const t = (p.exceptionDetails.exception?.description || p.exceptionDetails.text || "").split("\n")[0]; if (!headlessOnly(t)) errors.push(`Uncaught: ${t}`); });
+    b.on("Runtime.consoleAPICalled", (p) => { if (p.type !== "error") return; const t = p.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 200); if (!headlessOnly(t)) errors.push(`console.error: ${t}`); });
+    kept = { dir, server, b, errors, url: server.url, close() { try { b.close(); } catch {} server.close(); } };
+    process.once("exit", () => kept?.close());
+  }
+  const k = kept;
+  k.errors.length = 0;
+  try {
+    await within(k.b.send("Storage.clearDataForOrigin", { origin: k.url, storageTypes: "all" }), 4000);
+    await B.open(k.b, `${k.url}/${encodeURIComponent(path.basename(entry))}?yai=${Date.now()}`);
+  } catch (err) { k.close(); if (kept === k) kept = null; throw err; }
+  return { b: k.b, errors: k.errors, url: k.url, close: () => {}, drop: () => { k.close(); if (kept === k) kept = null; } };
+}
+// (3) Ready, without a fixed wait: the document has loaded, frames are being drawn, and no new file has been fetched for
+// 400 ms; at least `min` ms, at most `max`.
+async function settle(b, min, max) {
+  const t0 = Date.now();
+  let last = -1, stableSince = Date.now();
+  while (Date.now() - t0 < max) {
+    const s = await within(B.evaluate(b, `new Promise((r) => requestAnimationFrame(() => r({ ready: document.readyState === "complete", files: performance.getEntriesByType("resource").length })))`), 1500, null);
+    if (!s) return; // not drawing frames: the freeze check after this says so
+    if (s.files !== last) { last = s.files; stableSince = Date.now(); }
+    if (s.ready && Date.now() - stableSince >= 400 && Date.now() - t0 >= min) return;
+    await sleep(120);
+  }
+}
 // Every step has a time limit, and the whole check one of 100 s (2026-10-22: a builder's check_page sat on "opening it
 // in a browser" for minutes: a key press, a read or the screenshot waits forever on a page that hangs mid-check).
 async function pageCheck(o) {
@@ -239,19 +280,22 @@ async function pageCheck(o) {
   // the steps go on after a time-out until the browser is closed under them; their error then is expected
   const run = pageCheckSteps(o, lines, at, p);
   run.catch(() => {});
-  try { return await Promise.race([run, cap]); }
-  finally { clearTimeout(timer); p.close?.(); }
+  try {
+    const r = await Promise.race([run, cap]);
+    if (r.frozen) p.drop?.(); // a page that hung may have taken the kept browser with it
+    return r;
+  } finally { clearTimeout(timer); p.close?.(); }
 }
 const within = (pr, ms, fallback) => Promise.race([Promise.resolve(pr).catch(() => fallback), sleep(ms).then(() => fallback)]);
-async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo, seenBefore }, lines, at, out) {
-  const p = await openPage(entry);
-  out.close = p.close;
+async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, describe, lookFor = "", saveTo, seenBefore, later = false }, lines, at, out) {
+  const p = await keptPage(entry);
+  out.close = p.close; out.drop = p.drop;
   {
     at.step = "starting the page";
-    await sleep(1200);
+    await settle(p.b, 300, 1500);
     const pressed = start ? await Promise.race([B.evaluate(p.b, START), sleep(6000).then(() => "")]).catch(() => "") : "";
     if (start) lines.push(pressed ? `Pressed "${pressed}".` : "No start button to press.");
-    await sleep(Math.min(Math.max(Number(wait) || 2500, 500), 15000));
+    await settle(p.b, pressed ? 600 : 200, Math.min(Math.max(Number(wait) || 2500, 500), 15000));
     if (start) { at.step = "getting past the menus"; await pastMenus(p.b, lines); }
     if (!(await alive(p.b)) && !(await alive(p.b))) {
       lines.push(`FROZEN: the page stopped answering${pressed ? ` after "${pressed}"` : ""} for over 10 s: a loop that never ends (a Set or array growing while it is walked, a while loop that never exits).`);
@@ -266,7 +310,7 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
       if ((await within(p.b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key: code === "Space" ? " " : key }).then(() => true), 6000, false)) === false) { lines.push(`FROZEN: the page stopped answering after ${code}.`); return { frozen: true, lines }; }
     }
     if (keys) { lines.push(`Held: ${keys}.`); if (!(await alive(p.b))) { lines.push("FROZEN after the keys."); return { frozen: true, lines }; } }
-    const fps = await Promise.race([B.evaluate(p.b, `new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else r(n); }; requestAnimationFrame(f); })`), sleep(4000).then(() => 0)]);
+    const fps = await Promise.race([B.evaluate(p.b, `new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 500) requestAnimationFrame(f); else r(Math.round(n / ((performance.now() - t0) / 1000))); }; requestAnimationFrame(f); })`), sleep(3000).then(() => 0)]);
     at.step = "reading the page";
     const info = await within(B.evaluate(p.b, `(() => ({ title: document.title, text: document.body.innerText.replace(/\\s+/g, " ").trim().slice(0, 300), buttons: [...document.querySelectorAll("button, [role=button]")].filter((b) => b.offsetParent).map((b) => b.textContent.trim()).filter(Boolean).slice(0, 10), canvas: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).slice(0, 3) }))()`), 8000, null);
     lines.push(`Frame rate: about ${fps} fps (a headless browser without a graphics card, so a real one is faster).`);
@@ -285,8 +329,8 @@ async function pageCheckSteps({ entry, start = true, keys = "", wait = 2500, des
     if (same) lines.push(same);
     at.step = "describing the screenshot";
     // 25 s: when the image model is down it fails slowly, and a check an agent runs often must stay quick
-    if (describe && !blank && !same) { const seen = await within(describe(img, lookFor), 25000, ""); lines.push(seen ? `On screen (described by a model that can see it):\n${seen}` : "(No description of the screen this time: the image model didn't answer. Judge by the errors, frame rate and text above.)"); }
-    return { frozen: false, blank, lines, img };
+    if (describe && !blank && !same && !later) { const seen = await within(describe(img, lookFor), 25000, ""); lines.push(seen ? `On screen (described by a model that can see it):\n${seen}` : "(No description of the screen this time: the image model didn't answer. Judge by the errors, frame rate and text above.)"); }
+    return { frozen: false, blank, same: !!same, lines, img };
   }
 }
 

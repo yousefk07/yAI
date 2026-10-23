@@ -471,7 +471,14 @@ const tools = {
       try {
         const hashOf = (img) => require("crypto").createHash("sha1").update(img).digest("hex").slice(0, 12);
         const seenBefore = (img) => (ctx.pageChecks.hash && hashOf(img) === ctx.pageChecks.hash ? "SAME SCREEN: the screenshot is exactly the same as at your last check_page, pixel for pixel: your changes since then don't show on screen yet (or the page didn't get past a menu)." : "");
-        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe, seenBefore });
+        const later = !!describe && !String(a.look_for || "").trim();
+        r = await require("./teamchecks").pageCheck({ entry: abs, keys: a.keys || "", lookFor: String(a.look_for || ""), describe, seenBefore, later });
+        // (1) the screen description is fetched while the agent works on; it's read with a later step's result
+        if (later && r.img && !r.blank && !r.same && !r.frozen) {
+          const n = (ctx.pageChecks.n || 0);
+          r.lines.push("(The screen description comes with one of your next steps: carry on meanwhile. Give <look_for> when you need to see the screen before going on.)");
+          Promise.resolve(describe(r.img, "")).then((seen) => { if (String(seen || "").trim()) (ctx.screenNotes ||= []).push(`From your check_page #${n}, what's on screen (described by a model that can see it): ${String(seen).trim()}`); }).catch(() => {});
+        }
         // stored once per picture: the file is named after its content (2026-10-22: one screen was saved 13 times)
         if (r.img) {
           const h = hashOf(r.img), file = path.join(ctx.root, "yai-media", `check-page-${h}.jpg`);

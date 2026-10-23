@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.176",
+      "date": "2026-10-22",
+      "title": "check_page in 3-4 s",
+      "items": [
+        {
+          "area": "Team",
+          "title": "Faster page checks",
+          "text": "check_page keeps one browser open per agent (data cleared and the cache off, so each check is a fresh visit), waits for the page instead of fixed times, measures the frame rate in half a second, and fetches the screen description in the background: it arrives with a later step unless look_for asks to see the screen first. An agent now waits about 3-4 s per check instead of 8-13 s."
+        }
+      ]
+    },
+    {
       "version": "1.0.175",
       "date": "2026-10-22",
       "title": "Fastest eyes first",

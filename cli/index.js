@@ -2112,6 +2112,7 @@ async function runAgent(content) {
       pushUser(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`);
       if (resultOf) resultOf.msg = state.messages[state.messages.length - 1];
       // notes the user sent from the /team board while this agent worked, read with this step's result
+      if (ctx.screenNotes?.length) pushUser(ctx.screenNotes.splice(0).join("\n\n"));
       if (ctx.crew?.reports.length) pushUser(ctx.crew.reports.splice(0).map((x) => `Your helper "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + (ctx.crew.open.size ? `\nStill working: ${[...ctx.crew.open].join(", ")}.` : "\nNo helper is working now."));
       if (state.chat?.length) pushUser(`Team chat, from the other agents:\n${state.chat.splice(0).map((m) => `- ${m}`).join("\n")}\nReply with team_say only if it needs an answer from you.`);
       if (state.notes?.length) {
