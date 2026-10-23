@@ -1913,7 +1913,7 @@ function announcesStep(text) {
 const CREW_PROMPT = () => `
 
 # Your crew (/crew)
-You can hand separate pieces of work to background agents with the commission tool, when you like: a self-contained module or data behind an interface you specify, sound, sprites or textures, research, a QA pass (role qa: it reviews the project like a user or player and reports problems) or tests (role tester). Give each one everything it needs in <task> and the files it owns; pick model lite for a simple, mechanical job and flash for one that needs thought. At most ${state.crewMax || 4} work at once. They work while you go on; their reports reach you after your steps, or call crew_wait. Keep the core yourself, don't commission what takes you a few steps, and before you finish call crew_wait and fit in their work. A watcher looks over you and them: follow its instructions. Your first reply still starts with your <plan> (it shows in the side panel above your background agents).`;
+You lead a crew: the point of /crew is that background agents build parts of the project in parallel while you build the core, so use them. Right after your plan, before you write much code yourself, commission 2 to ${state.crewMax || 4} agents with the commission tool for the separate parts: self-contained modules or data behind an interface you specify (world generation, a level set, the UI, physics), sound, sprites or textures, and later a QA pass (role qa: it reviews the project like a user or player and reports problems) or tests (role tester). Give each one everything it needs in <task> (the interface, names and formats it must use) and the files it owns; pick model lite for a simple, mechanical job and flash for one that needs thought. At most ${state.crewMax || 4} work at once. They work while you go on; their reports reach you after your steps, or call crew_wait. Keep the core (the main loop, how the parts fit together) yourself, and before you finish call crew_wait, fit in their work and commission a qa pass. Only a task too small to split (a few steps in all) is done without them. A watcher looks over you and them: follow its instructions. Your first reply still starts with your <plan> (it shows in the side panel above your background agents).`;
 async function runAgent(content) {
   // /crew: reports from background agents that finished while this chat was idle open its next turn
   if (ctx.crew?.reports.length) content = ctx.crew.reports.splice(0).map((x) => `Your background agent "${x.name}" has finished. Its report:\n${x.report}`).join("\n\n") + "\n\n" + content;
@@ -2002,6 +2002,7 @@ async function runAgent(content) {
   const sameRuns = new Map(); // a command's first 60 characters -> { n: times run, undo: changes made by then }
   let planAt = -1, planSteps = 0; // the plan step being worked on, and tool calls made on it
   let planAsked = false; // /crew and /team: reminded once to write a plan it skipped
+  let crewOwnSteps = 0; // /crew: this chat's own steps, for the reminder to use its background agents
   let repeats = 0; // look-only steps asked for again with nothing changed
   let resultOf = null; // this step's doneSteps entry, to remember which message holds its result
   let lastUndo = state.undo.length, idle = 0; // /team agents: steps since their last change
@@ -2241,6 +2242,12 @@ async function runAgent(content) {
       if (!state.plan && !planAsked && (state.crewActive || TEAM_AGENT) && state.mode !== "plan") {
         planAsked = true;
         result.output += "\n(You haven't written your plan. Start your next reply with a short plan of 3 to 5 steps between <plan> and </plan>, one numbered step per line, then go on.)";
+      }
+      // /crew: a main chat that does everything itself is reminded to hand parts out, after 3 and 12 of its steps
+      // (2026-10-23, Yousef: "crew doesnt use background agents at all like it needs to use it more")
+      if (state.crewActive && !TEAM_AGENT) {
+        crewOwnSteps++;
+        if ((crewOwnSteps === 3 || crewOwnSteps === 12) && !CREW.commissioned()) result.output += `\n(You're in /crew and haven't commissioned any background agents yet. Hand the separate parts of this project to them now with the commission tool (2 to ${state.crewMax || 4} agents, each with its interface and the files it owns), then go on with the core yourself.)`;
       }
       // /crew: the watcher sees the main chat's steps
       if (state.crewActive) { (state.crewSteps ||= []).push(`- ${call.name} ${String((call.args || {}).path || (call.args || {}).command || (call.args || {}).pattern || "").replace(/\s+/g, " ").slice(0, 100)} → ${String(result.output).split("\n")[0].slice(0, 90)}`); if (state.crewSteps.length > 60) state.crewSteps.splice(0, 30); }

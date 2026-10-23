@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "1.0.202",
+      "date": "2026-10-23",
+      "title": "/crew uses its crew",
+      "items": [
+        {
+          "area": "Crew",
+          "title": "Parts go to background agents",
+          "text": "The main chat in /crew often built everything itself. Its instructions now have it hand the separate parts (modules behind an interface it sets, data, sound, textures) to 2 to 4 background agents right after its plan while it builds the core, and end with a QA pass. If it still hasn't commissioned anyone after 3 of its steps, and again after 12, it's reminded."
+        }
+      ]
+    },
+    {
       "version": "1.0.201",
       "date": "2026-10-23",
       "title": "No more empty replies on long files",

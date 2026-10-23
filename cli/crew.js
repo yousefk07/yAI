@@ -19,6 +19,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
   const has = (id) => state.models.some((m) => m.id === id);
   const FLASH = () => ["deepseek-v4.1-flash", "deepseek-v4-pro"].find(has) || state.model;
   const LITE = () => (has("glm-4.7-flash") ? "glm-4.7-flash" : FLASH());
+  const PRO = () => ["deepseek-v4-pro", "deepseek-v4.1-flash"].find(has) || state.model;
   const label = (id) => (state.models.find((m) => m.id === id)?.label || id || "").replace(/^yAI\s+/, "");
   // the crew log: { at, from, to, text, tone }
   const feed = [];
@@ -76,8 +77,36 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
       "Write tests only in test files (tests/, test/, *.test.*), with the project's runner or the language's built-in one (node --test), without installing anything, and run them. If a test fails because of a bug in the app, don't fix the app: report it.",
       "End with a short report: the command you ran, what passed, and every failure with its file and line.",
     ],
+    // /debate: two sides answer the question on their own, then answer each other; a judge decides
+    proposer: () => [
+      "Your job: you are one side of a debate. The question is the task above. Read the project's relevant code if there is any (you can't change anything), then give the answer you think is best and argue for it: what to do, why, what it costs, and what could go wrong with it.",
+      "Be concrete (names, files, numbers) and honest about weaknesses. Don't hedge between options: pick one.",
+      "End with your position in at most 300 words, starting with one line: POSITION: <your answer in a sentence>.",
+    ],
+    challenger: () => [
+      "Your job: you are one side of a debate. The question is the task above. Read the project's relevant code if there is any (you can't change anything). Another agent is arguing for the answer most people would reach first; find the strongest DIFFERENT answer, one a careful expert might prefer, and argue for it: what to do, why, what it costs, and what could go wrong with it.",
+      "Be concrete (names, files, numbers) and honest about weaknesses. If, after looking, the obvious answer really is right, argue for the best version of it and say what it must not get wrong.",
+      "End with your position in at most 300 words, starting with one line: POSITION: <your answer in a sentence>.",
+    ],
+    judge: () => [
+      "Your job: you are the judge of a debate. The question is the task above; both sides' arguments and replies are below. Check their claims against the project's code where you can (you can't change anything). Decide which answer is better, or a combination if that's clearly best.",
+      "End with your decision in this shape: a first line DECISION: <the answer in a sentence>, then ## Why (the arguments that decided it), ## What the other side got right, ## Risks to watch, ## Next steps (numbered, concrete).",
+    ],
+    // /hunt: reproduce the bug with a failing test, find its cause, fix it; the fix counts once the test passes
+    reproducer: () => [
+      "Your job: reproduce the bug described in the task above, before anyone fixes it. Read the relevant code, then write the smallest test or script that fails because of this bug and passes once it's fixed: a test file (tests/, test/ or *.test.*) with the project's test runner or node --test, or a small script that exits with an error code while the bug is there. Run it and confirm it fails for the right reason. Don't fix the bug.",
+      "End with a short report: what triggers the bug, the failing output, and on its own line exactly: REPRO: <the command that runs your test>.",
+    ],
+    tracer: () => [
+      "Your job: find the root cause of the bug in the task above. A reproduction is given below. Read the code along the path it takes, run the reproduction, and use read-only git commands (git log -p, git blame, git diff) to see when and how the faulty code came in. Don't change any files.",
+      "End with a short report: the root cause (file, line, what's wrong and why it produces the bug), the fix you'd make, and anything else that has the same mistake.",
+    ],
+    fixer: () => [
+      "Your job: fix the bug in the task above. The reproduction and the root cause are below. Make the smallest change that fixes the cause (not just the symptom), don't change the reproduction test to make it pass, run the reproduction until it passes, then run the project's other tests if it has any and make sure nothing else broke.",
+      "End with a short report: what you changed and why, the reproduction's result, and the other tests' result.",
+    ],
   };
-  const brief = (a) => [`You are a background agent working for the main agent in a yAI Code session. The overall task is: ${clip(state.crewTask || "", 1500)}`, "", ...ROLE[a.role](a), "", RULES].join("\n");
+  const brief = (a) => [`You are a background agent working for the main agent in a yAI Code session. The overall task is: ${clip(state.crewTask || "", 1500)}`, "", ...ROLE[a.role](a), ...(a.extra ? ["", a.extra] : []), "", RULES].join("\n");
 
   // ---------- commissioning ----------
   // spec: { name, task, files, model: "lite" | "flash", role: "builder" | "qa" | "tester" }
@@ -88,9 +117,9 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     const earlier = agents.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.kept);
     if (earlier && reawaken(earlier, spec.task)) return say("main", earlier.name, `follow-up: ${spec.task}`);
     if (working().length >= (state.crewMax || 4)) return report(name, `(not started: ${state.crewMax || 4} background agents are already working; do it yourself, or wait for one with crew_wait)`);
-    const role = ["qa", "tester", "researcher"].includes(spec.role) ? spec.role : "builder";
-    const model = spec.model === "lite" ? LITE() : FLASH();
-    const a = { name, task: String(spec.task || "").trim(), files: (spec.files || []).map(String).filter((p) => p && !p.includes("..")), role, model, state: "starting", step: "starting", started: Date.now(), cost: 0, text: [], log: [], changed: new Set(), defied: 0 };
+    const role = ROLE[spec.role] ? spec.role : "builder";
+    const model = spec.model === "lite" ? LITE() : spec.model === "pro" ? PRO() : FLASH();
+    const a = { name, task: String(spec.task || "").trim(), files: (spec.files || []).map(String).filter((p) => p && !p.includes("..")), role, model, mode: spec.mode, extra: spec.extra || "", state: "starting", step: "starting", started: Date.now(), cost: 0, text: [], log: [], changed: new Set(), defied: 0 };
     agents.push(a);
     say("main", a.name, `${a.role !== "builder" ? `(${a.role}) ` : ""}${a.task}`);
     spawnAgent(a, brief(a));
@@ -106,7 +135,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       if (a.child !== child) return;
       let e; try { e = JSON.parse(line); } catch { return; }
-      if (e.type === "ready") { a.send({ type: "mode", mode: "acceptEdits" }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
+      if (e.type === "ready") { a.send({ type: "mode", mode: a.mode || "acceptEdits" }); if (e.model !== a.model) a.send({ type: "model", id: a.model }); a.send({ type: "prompt", text: firstPrompt }); }
       else if (e.type === "busy") { a.state = "working"; a.lastMove = Date.now(); }
       else if (e.type === "step") { a.step = `${e.verb} ${e.arg}`.trim(); a.lastMove = Date.now(); a.log.push(`- ${e.verb} ${clip(String(e.arg || ""), 120)}`); seen(a, "", `${c.accent("•")} ${c.bold(c.ink(e.verb))} ${c.dim(String(e.arg || ""))}`); }
       else if (e.type === "step-result") { a.log.push(`    → ${clip(row1(e.summary || e.text), 100)}`); seen(a, `   ${c.faint("└")} ${c.dim(clip(row1(e.summary || e.text), 160))}`); }
@@ -238,6 +267,7 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return [plain.slice(0, cut), "  " + clip(plain.slice(cut).trim(), w - 2)].map((l, i) => (i ? c.dim(l) : l));
   }
   const count = () => agents.length;
+  const commissioned = () => agents.filter((a) => !['researcher', 'proposer', 'challenger', 'judge'].includes(a.role)).length; // by the chat itself
 
   // ---------- the watcher ----------
   const WATCH_SYSTEM = [
@@ -354,5 +384,5 @@ module.exports = function createCrew({ state, root, ui, X, ctx }) {
     return again;
   }
 
-  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, working: () => working().length, snapshot, restore };
+  return { start, stop, stopAll, commission, research, panelLines, viewLines, clickRow, close, viewing: () => !!viewing, count, commissioned, working: () => working().length, snapshot, restore };
 };
