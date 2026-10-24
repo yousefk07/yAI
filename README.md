@@ -3,6 +3,7 @@
 A ChatGPT-style web app and terminal coding agent. Three hosted frontier models answer instantly and are billed per
 token against a daily allowance per person; a coding model, an image generator and a video generator run on serverless
 cloud GPUs that only exist while someone is using them; and two small models run on my laptop's GPU.
+To Redeploy.
 
 ![yAI chat interface](docs/screenshot.png)
 
